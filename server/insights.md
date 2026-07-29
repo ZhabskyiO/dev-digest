@@ -29,7 +29,15 @@ _None yet._
 
 Conventions and architectural decisions specific to this repo.
 
-_None yet._
+- 2026-07-29 — Cost pricing is two-layered and the layers use **different model-id
+  namespaces**. `PriceBook` (`platform/price-book.ts:54`) caches live OpenRouter
+  prices keyed by `m.id` — OpenRouter slugs like `z-ai/glm-4.7-flash`. The static
+  fallback (`adapters/llm/pricing.ts`) is keyed by bare ids like `gpt-4.1` and
+  `claude-haiku-4-5`. So injecting `PriceBook` into the OpenAI/Anthropic adapters
+  does **not** give them live pricing — their ids never match the live map and
+  every lookup falls through to the static table. ALWAYS add a static entry when
+  a non-OpenRouter model prices as `null`; wiring the PriceBook alone will not
+  fix it.
 
 ## Tool & Library Notes
 

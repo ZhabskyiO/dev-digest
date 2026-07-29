@@ -23,7 +23,19 @@ _None yet._
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
-_None yet._
+- 2026-07-29 — NEVER treat a local `./scripts/e2e.sh` failure as a regression
+  until CI disagrees. Local runs flake: three runs of the same commit gave 5/7,
+  6/7 and 7/7, each failing a *different* flow (once `07-settings`, a page the
+  change never touched), while CI ran 7/7 on that same commit. The cause is
+  structural: `scripts/e2e.sh:148` serves the web app with `next dev`, which
+  cold-compiles each route on first visit, whereas `e2e-web.yml:100-101` uses
+  `pnpm build` + `pnpm start` with nothing left to compile. On a machine also
+  running Docker, Postgres, the API and a browser, a cold compile can exceed the
+  60s step timeout (`E2E_STEP_TIMEOUT`) and the step fails with a bare
+  `Command failed: agent-browser wait --text …` plus a screenshot that may show
+  a plain 404 — which looks exactly like a real routing bug.
+  To confirm a suspected regression, re-run and check *which* flow fails: a real
+  break fails the same flow every time.
 
 ## Codebase Patterns
 
