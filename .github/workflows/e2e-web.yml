@@ -73,11 +73,10 @@ jobs:
       # The API imports @devdigest/reviewer-core's RAW source at runtime (tsx
       # resolves the tsconfig alias to ../reviewer-core/src), and that source
       # imports `openai`/`zod`. Without reviewer-core's deps the API crashes at
-      # boot with ERR_MODULE_NOT_FOUND and never becomes healthy. reviewer-core
-      # uses npm (see reviewer-core.yml).
+      # boot with ERR_MODULE_NOT_FOUND and never becomes healthy.
       - name: Install reviewer-core deps
         working-directory: reviewer-core
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Start API (:3001)
         working-directory: server
@@ -116,8 +115,8 @@ jobs:
       - name: Run e2e flows
         working-directory: e2e
         run: |
-          npm ci
-          npm test
+          pnpm install --frozen-lockfile
+          pnpm test
 
       - name: Upload failure artifacts
         if: failure()

@@ -52,10 +52,10 @@ jobs:
 
       # Integration tests load server src, which imports @devdigest/reviewer-core
       # (../reviewer-core/src) → which imports `openai`/`zod`. Install reviewer-core's
-      # deps so those resolve at module load. reviewer-core uses npm (see reviewer-core.yml).
+      # deps so those resolve at module load.
       - name: Install reviewer-core deps
         working-directory: reviewer-core
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # Inlined rather than `pnpm test:integration`: server/package.json is
       # skip-worktree, so we don't rely on the committed file carrying the split
