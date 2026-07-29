@@ -79,8 +79,11 @@ integration tests self-skip and prove nothing. -->
 - [ ] No secrets in the diff — API keys live in `~/.devdigest/secrets.json`,
       never in `.env`, the database, or a test fixture
 - [ ] Nothing from `server/clones/**` or `client/.next/**` is in the diff
-- [ ] Commit subject is imperative and unprefixed ("Add cost badge", not
-      `feat: add cost badge` — this repo does not use Conventional Commits)
+- [ ] **PR title follows Conventional Commits** — `<type>(<scope>): <imperative
+      summary>`, e.g. `feat(client): show run cost on the PR list`. PRs are
+      squash-merged, so this title becomes the permanent commit subject on `main`
+- [ ] Branch commit subjects are imperative and unprefixed ("Add cost badge") —
+      the squash discards them, so only the PR title carries the prefix
 
 ### I changed dependencies
 
