@@ -61,7 +61,7 @@ No `chat`, no model key.
 ```sh
 # per package
 cd client        && pnpm test           # + pnpm typecheck
-cd reviewer-core && npm test
+cd reviewer-core && pnpm test
 
 # server — the unit/integration split (see note below)
 cd server && pnpm exec vitest run --exclude '**/*.it.test.ts'   # unit, no Docker
@@ -71,7 +71,7 @@ cd server && pnpm test                                          # both
 # browser e2e (needs the full stack + agent-browser CLI)
 ./scripts/dev.sh
 npm i -g agent-browser && agent-browser install
-cd e2e && npm install && npm test
+cd e2e && pnpm install && pnpm test
 ```
 
 ## Conventions

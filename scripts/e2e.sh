@@ -15,7 +15,7 @@
 # the API/web child processes AND removes the isolated Postgres container.
 #
 # NOTE: this is a LOCAL convenience. CI brings up its own stack and calls the
-# pure runner (`cd e2e && npm test`) directly — this script is not used in CI.
+# pure runner (`cd e2e && pnpm test`) directly — this script is not used in CI.
 
 set -euo pipefail
 
@@ -113,8 +113,8 @@ install_if_needed() {
 install_if_needed server
 install_if_needed client
 # reviewer-core's RAW source is imported by the API at runtime (tsconfig alias);
-# without its deps the API crashes at boot with ERR_MODULE_NOT_FOUND. It uses npm.
-[ -d reviewer-core/node_modules ] || { log "installing deps in reviewer-core"; (cd reviewer-core && npm ci); }
+# without its deps the API crashes at boot with ERR_MODULE_NOT_FOUND.
+[ -d reviewer-core/node_modules ] || { log "installing deps in reviewer-core"; (cd reviewer-core && pnpm install); }
 
 # --- migrate + seed the ISOLATED db ------------------------------------------
 # Hard guard: never let migrate/seed run against anything but the isolated port.
@@ -160,7 +160,7 @@ log "web up"
 # --- run the flows; propagate the exit code through the trap -----------------
 log "running e2e flows against $E2E_BASE_URL"
 set +e
-(cd e2e && npm test)
+(cd e2e && pnpm test)
 E2E_CODE=$?
 set -e
 exit "$E2E_CODE"

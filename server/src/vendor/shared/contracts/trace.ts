@@ -64,6 +64,13 @@ export const RunStats = z.object({
   tokens_out: z.number().int(),
   findings: z.number().int(),
   grounding: z.string(),
+  /**
+   * Run cost in USD. Nullish, not nullable: traces persisted before cost
+   * tracking existed have no such key, and `getRunTrace` casts the stored jsonb
+   * rather than parsing it — so `undefined` is a real runtime value here.
+   * Null/undefined renders as `—`, never `$0.00`.
+   */
+  cost_usd: z.number().nullish(),
 });
 export type RunStats = z.infer<typeof RunStats>;
 
@@ -110,5 +117,7 @@ export const RunSummary = z.object({
   // findings that trip the agent's gate. Null on failed/cancelled runs.
   score: z.number().int().nullable(),
   blockers: z.number().int().nullable(),
+  // Run cost in USD; null when the model has no known price or the run failed.
+  cost_usd: z.number().nullable(),
 });
 export type RunSummary = z.infer<typeof RunSummary>;

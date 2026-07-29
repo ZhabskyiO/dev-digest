@@ -80,6 +80,9 @@ export class ReviewRunExecutor {
             durationMs: 0,
             tokensIn: 0,
             tokensOut: 0,
+            // Explicitly null, not 0 — a run that never reached the model has no
+            // cost, and the UI must render `—` rather than a misleading `$0.00`.
+            costUsd: null,
             findingsCount: 0,
             grounding: '0/0 passed',
             error: msg,
@@ -210,7 +213,9 @@ export class ReviewRunExecutor {
           if (this.container.runBus.isCancelled(runId)) throw new RunCancelledError();
         },
       });
-      const { tokensIn, tokensOut, grounding } = outcome;
+      // `costUsd` is the REAL billed cost when the provider reports one
+      // (OpenRouter's `usage.cost`), else priced from tokens, else null.
+      const { tokensIn, tokensOut, costUsd, grounding } = outcome;
 
       const keptFindings = outcome.review.findings;
 
@@ -245,6 +250,7 @@ export class ReviewRunExecutor {
         durationMs,
         tokensIn,
         tokensOut,
+        costUsd,
         findingsCount: findingRows.length,
         grounding,
         score: outcome.review.score,
@@ -265,6 +271,7 @@ export class ReviewRunExecutor {
           duration_ms: durationMs,
           tokens_in: tokensIn,
           tokens_out: tokensOut,
+          cost_usd: costUsd,
           findings: findingRows.length,
           grounding,
         },
@@ -300,6 +307,9 @@ export class ReviewRunExecutor {
           durationMs: Date.now() - start,
           tokensIn: 0,
           tokensOut: 0,
+          // Explicitly null, not 0 — a failed/cancelled run may still have burned
+          // tokens, but we have no trustworthy cost for it. `—`, not `$0.00`.
+          costUsd: null,
           findingsCount: 0,
           grounding: '0/0 passed',
           error: msg,
@@ -421,7 +431,16 @@ export class ReviewRunExecutor {
         pr: pull.number,
         source: 'local',
       },
-      stats: { duration_ms: durationMs, tokens_in: 0, tokens_out: 0, findings: 0, grounding },
+      // cost_usd null (not 0): this trace is built for runs that never produced
+      // a priced outcome, so the drawer must show `—`.
+      stats: {
+        duration_ms: durationMs,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: null,
+        findings: 0,
+        grounding,
+      },
       prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
       tool_calls: [],
       raw_output: '',

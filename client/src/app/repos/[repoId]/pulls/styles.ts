@@ -45,6 +45,12 @@ export const s = {
     color: "var(--text-muted)",
     textAlign: "right",
   } satisfies CSSProperties,
+  /** Total review cost for the PR. Right-aligned so digits line up down the column. */
+  costCell: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+    textAlign: "right",
+  } satisfies CSSProperties,
   muted: { color: "var(--text-muted)" } satisfies CSSProperties,
   filterBar: {
     display: "flex",

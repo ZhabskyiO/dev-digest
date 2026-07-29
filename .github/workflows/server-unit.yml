@@ -58,10 +58,10 @@ jobs:
       # @devdigest/reviewer-core → ../reviewer-core/src, and platform/structured.ts
       # re-exports from it. That source imports `openai`/`zod`, so without
       # reviewer-core's deps installed, tsc fails with TS2307 → cascading
-      # unknown→T errors. reviewer-core uses npm (see reviewer-core.yml).
+      # unknown→T errors.
       - name: Install reviewer-core deps
         working-directory: reviewer-core
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - run: pnpm typecheck
 
@@ -88,10 +88,10 @@ jobs:
 
       # The unit tests load server src, which imports @devdigest/reviewer-core
       # (../reviewer-core/src) → which imports `openai`/`zod`. Install reviewer-core's
-      # deps so those resolve at module load. reviewer-core uses npm (see reviewer-core.yml).
+      # deps so those resolve at module load.
       - name: Install reviewer-core deps
         working-directory: reviewer-core
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # Inlined rather than `pnpm test:unit`: server/package.json is
       # skip-worktree (a local variant), so the committed package.json may
