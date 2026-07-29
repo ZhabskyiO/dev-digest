@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sum } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
@@ -129,6 +129,25 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // TOTAL cost per PR for the list's COST column — the sum of EVERY run on
+    // that PR ("what did this PR cost me"), not just the latest one. SQL SUM
+    // skips NULL costs and yields NULL when a PR has none, which is exactly the
+    // `—` semantics the UI wants; a PR with only *some* priced runs shows the
+    // known subtotal. Drizzle returns SUM as a string (numeric), so parse it.
+    const costByPr = new Map<string, number>();
+    if (prIds.length > 0) {
+      const costRows = await container.db
+        .select({ prId: t.agentRuns.prId, total: sum(t.agentRuns.costUsd) })
+        .from(t.agentRuns)
+        .where(and(eq(t.agentRuns.workspaceId, workspaceId), inArray(t.agentRuns.prId, prIds)))
+        .groupBy(t.agentRuns.prId);
+      for (const c of costRows) {
+        if (!c.prId || c.total == null) continue;
+        const n = Number(c.total);
+        if (Number.isFinite(n)) costByPr.set(c.prId, n);
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
@@ -153,6 +172,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         opened_at: r.openedAt?.toISOString() ?? null,
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
+        cost_usd: costByPr.get(r.id) ?? null,
       };
     });
   });

@@ -24,6 +24,10 @@ const PRICING: Record<string, Price> = {
   'claude-3-5-sonnet-latest': { in: 3.0, out: 15.0 },
   'claude-3-5-haiku-latest': { in: 0.8, out: 4.0 },
   'claude-3-opus-latest': { in: 15.0, out: 75.0 },
+  // The ids `model-router.ts` names. Without these, an agent on either model
+  // priced to null forever and the cost badge showed `—` with no explanation.
+  'claude-haiku-4-5': { in: 1.0, out: 5.0 },
+  'claude-sonnet-4-6': { in: 3.0, out: 15.0 },
   // OpenRouter (CI runner, cheap models). Slugs + prices are APPROXIMATE and
   // must be confirmed against openrouter.ai/models before relying on cost.
   // Unknown slugs fall through to null cost (explicitly flagged), which is safe.

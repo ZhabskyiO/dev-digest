@@ -4,6 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge, Icon, CircularScore, type IconName } from "@devdigest/ui";
 import type { RunSummary, PrCommit } from "@devdigest/shared";
+import { formatCostUsd, formatTokensCompact } from "@/lib/format";
 
 /**
  * PR timeline — every agent run interleaved with the PR's commits, newest-first
@@ -197,6 +198,16 @@ export function RunHistory({
             </div>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>
               {r.ran_at && <span>{new Date(r.ran_at).toLocaleTimeString()}</span>}
+              {/* Spend for this run. Only for finished runs that actually used
+                  tokens — a failed run has nothing meaningful to report. */}
+              {settled && (r.tokens_in ?? 0) + (r.tokens_out ?? 0) > 0 && (
+                <span className="tnum">
+                  {t("timeline.usage", {
+                    tokens: formatTokensCompact((r.tokens_in ?? 0) + (r.tokens_out ?? 0)),
+                    cost: formatCostUsd(r.cost_usd),
+                  })}
+                </span>
+              )}
             </div>
             <button
               type="button"

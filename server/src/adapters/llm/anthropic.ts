@@ -38,12 +38,20 @@ function splitSystem(messages: ChatMessage[]): {
  *   schema, tool_choice forces it), parse tool_use.input, Zod validate + reprompt.
  * - embed: NOT supported (throws) — use the OpenAI Embedder for vectors.
  */
+export interface AnthropicProviderOptions {
+  /** Injected cost estimator; returns USD or null when the model is unknown. */
+  estimateCost?: (model: string, tokensIn: number, tokensOut: number) => number | null;
+}
+
 export class AnthropicProvider implements LLMProvider {
   readonly id = 'anthropic' as const;
   private client: Anthropic;
+  /** Defaults to the static table, so behaviour is unchanged when not injected. */
+  private estimateCost: NonNullable<AnthropicProviderOptions['estimateCost']>;
 
-  constructor(apiKey: string) {
+  constructor(apiKey: string, opts: AnthropicProviderOptions = {}) {
     this.client = new Anthropic({ apiKey });
+    this.estimateCost = opts.estimateCost ?? estimateCost;
   }
 
   async listModels(): Promise<ModelInfo[]> {
@@ -82,7 +90,7 @@ export class AnthropicProvider implements LLMProvider {
       model: req.model,
       tokensIn,
       tokensOut,
-      costUsd: estimateCost(req.model, tokensIn, tokensOut),
+      costUsd: this.estimateCost(req.model, tokensIn, tokensOut),
     };
   }
 
@@ -132,7 +140,7 @@ export class AnthropicProvider implements LLMProvider {
           model: req.model,
           tokensIn,
           tokensOut,
-          costUsd: estimateCost(req.model, tokensIn, tokensOut),
+          costUsd: this.estimateCost(req.model, tokensIn, tokensOut),
           raw: lastRaw,
           attempts: attempt,
         };

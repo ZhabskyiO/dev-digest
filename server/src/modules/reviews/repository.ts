@@ -163,6 +163,11 @@ export class ReviewRepository {
       blockers?: number | null;
       /** Failure reason (status='failed') / cancellation note. Null clears it. */
       error?: string | null;
+      /**
+       * Run cost in USD. Null when the model has no known price or the run did
+       * not complete — the UI renders `—`, never `$0.00`.
+       */
+      costUsd?: number | null;
     },
   ): Promise<void> {
     return runRepo.completeAgentRun(this.db, runId, values);
