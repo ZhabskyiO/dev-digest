@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(${CLAUDE_PROJECT_DIR}/.claude/skills/engineering-insights/scripts/list-entries.sh:*)",
+      "Bash(.claude/skills/engineering-insights/scripts/list-entries.sh:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/skills/engineering-insights/scripts/list-entries.sh\" 2>/dev/null | jq -Rs '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:(\"Insights already recorded in this repo. Read the relevant module insights.md before working; never re-record anything listed here.\\n\"+.)}}' || true",
+            "timeout": 10,
+            "statusMessage": "Loading recorded insights…"
+          }
+        ]
+      }
+    ]
+  }
+}
