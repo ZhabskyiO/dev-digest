@@ -49,7 +49,13 @@ _None yet._
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
 
-_None yet._
+- 2026-07-30 — `TypeError: diagnostics.tracingChannel is not a function` at
+  `node_modules/fastify/lib/wrap-thenable.js` when running `pnpm test` means the
+  shell is on the default Node 18, not the repo's Node 22. Fastify 5 needs
+  `diagnostics_channel.tracingChannel` (Node ≥ 19.9). It surfaces as a *suite
+  collection* failure ("0 test") with no mention of Node, so it reads like a
+  broken import. Fix: `nvm use` first. Same root cause as the Next.js boot
+  failure in [../insights.md](../insights.md), different symptom entirely.
 
 ## Session Notes
 
