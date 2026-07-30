@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(${CLAUDE_PROJECT_DIR}/.claude/skills/engineering-insights/scripts/list-entries.sh:*)",
-      "Bash(.claude/skills/engineering-insights/scripts/list-entries.sh:*)"
+      "Bash(.claude/skills/engineering-insights/scripts/list-entries.sh:*)",
+      "Bash(git push *)",
+      "Bash(gh pr *)",
+      "Skill(engineering-insights)",
+      "Skill(engineering-insights:*)",
+      "Bash(awk '{print \"  +\"$1\" -\"$2\"  \"$3}')",
+      "Bash(git commit -m ' *)"
     ]
   },
   "hooks": {
