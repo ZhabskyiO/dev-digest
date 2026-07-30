@@ -1,14 +1,20 @@
 import type { CSSProperties } from "react";
 import { POPOVER_WIDTH } from "./constants";
 
-/** Co-located styles for the PR list's FINDINGS cell and its hover card. */
+/** Co-located styles for the severity tally and its hover card. */
 export const s = {
-  cell: {
-    display: "flex",
+  tally: {
+    display: "inline-flex",
     alignItems: "center",
     gap: 8,
-    // Outline only on keyboard focus — the cell is hoverable, not clickable.
+    // Outline only on keyboard focus — the tally is hoverable, not clickable.
     outlineOffset: 2,
+  } satisfies CSSProperties,
+  /** Trailing " · N blockers" next to a tally, on the run surfaces. */
+  blockers: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+    whiteSpace: "nowrap",
   } satisfies CSSProperties,
   /** One severity: the count badge with a mini bar beneath it. */
   sevGroup: {

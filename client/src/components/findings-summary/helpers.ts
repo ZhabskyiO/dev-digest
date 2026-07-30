@@ -1,15 +1,38 @@
+import type { FindingRecord } from "@devdigest/shared";
 import {
   POPOVER_GAP,
   POPOVER_MARGIN,
   POPOVER_WIDTH,
   type SeverityBreakdown,
+  type TallySeverity,
 } from "./constants";
 
-/** All-zero tally — what an unreviewed PR (or an older API) reports. */
+/** All-zero tally — what an unreviewed PR (or a run with no findings) reports. */
 export const EMPTY_BREAKDOWN: SeverityBreakdown = { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
 
 export function totalFindings(counts: SeverityBreakdown): number {
   return counts.CRITICAL + counts.WARNING + counts.SUGGESTION;
+}
+
+function isTallySeverity(s: string): s is TallySeverity {
+  return s === "CRITICAL" || s === "WARNING" || s === "SUGGESTION";
+}
+
+/**
+ * Tally findings the client already holds. The PR list gets its counts from the
+ * server instead (`PrMeta.findings_by_severity`, aggregated in SQL); this is for
+ * the surfaces that already have the findings in memory — the run timeline and
+ * the review-run accordion headers.
+ */
+// Takes `{ severity: string }`, not the narrower contract enum: `findings.severity`
+// is a free-form text column server-side, so a row can carry a value the enum
+// doesn't list. Those are dropped rather than counted into the wrong bucket.
+export function tallySeverities(findings: { severity: string }[]): SeverityBreakdown {
+  const counts = { ...EMPTY_BREAKDOWN };
+  for (const f of findings) {
+    if (isTallySeverity(f.severity)) counts[f.severity] += 1;
+  }
+  return counts;
 }
 
 /** A rectangle in viewport coordinates — the subset of DOMRect we position from. */

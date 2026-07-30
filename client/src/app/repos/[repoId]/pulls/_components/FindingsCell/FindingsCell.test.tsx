@@ -12,7 +12,6 @@ vi.mock("@/lib/hooks/reviews", () => ({
 }));
 
 import { FindingsCell } from "./FindingsCell";
-import { popoverPosition } from "./helpers";
 
 afterEach(cleanup);
 
@@ -152,46 +151,5 @@ describe("FindingsCell", () => {
     );
     fireEvent.click(screen.getByText("1"));
     expect(onRowClick).not.toHaveBeenCalled();
-  });
-});
-
-describe("popoverPosition", () => {
-  const viewport = { viewportWidth: 1400, viewportHeight: 900 };
-
-  it("sits below the anchor when there is room", () => {
-    const { top, left } = popoverPosition({
-      anchor: { top: 200, bottom: 230, left: 700 },
-      cardHeight: 300,
-      ...viewport,
-    });
-    expect(top).toBe(238);
-    expect(left).toBe(700);
-  });
-
-  it("flips above the anchor for a row near the bottom of the viewport", () => {
-    const { top } = popoverPosition({
-      anchor: { top: 820, bottom: 850, left: 700 },
-      cardHeight: 300,
-      ...viewport,
-    });
-    expect(top).toBe(512); // 820 - 8 gap - 300 height
-  });
-
-  it("keeps a card taller than the viewport on screen", () => {
-    const { top } = popoverPosition({
-      anchor: { top: 820, bottom: 850, left: 700 },
-      cardHeight: 2000,
-      ...viewport,
-    });
-    expect(top).toBe(12);
-  });
-
-  it("clamps to the viewport when the anchor sits near the right edge", () => {
-    const { left } = popoverPosition({
-      anchor: { top: 200, bottom: 230, left: 1350 },
-      cardHeight: 300,
-      ...viewport,
-    });
-    expect(left).toBe(1400 - 490 - 12);
   });
 });

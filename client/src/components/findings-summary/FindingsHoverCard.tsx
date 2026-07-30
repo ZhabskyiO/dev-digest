@@ -1,5 +1,8 @@
-/* FindingsPopover — the read-only hover card behind the PR list's FINDINGS
-   cell. Portalled to <body> because the table card clips its overflow. */
+/* FindingsHoverCard — the read-only card behind every severity tally: the PR
+   list's FINDINGS column, the run timeline, and the review-run accordion.
+
+   Portalled to <body> because both the PR list's table card and the accordion
+   set `overflow: hidden`, which would clip an absolutely-positioned panel. */
 "use client";
 
 import React from "react";
@@ -47,19 +50,23 @@ function FindingItem({ f }: { f: FindingRecord }) {
   );
 }
 
-export function FindingsPopover({
+export function FindingsHoverCard({
   anchor,
   findings,
-  loading,
-  error,
+  loading = false,
+  error = false,
+  scope = "pr",
   onMouseEnter,
   onMouseLeave,
 }: {
   anchor: AnchorRect;
   /** Already sorted by severity; empty while loading. */
   findings: FindingRecord[];
-  loading: boolean;
-  error: boolean;
+  /** Only the PR list fetches on hover; the run surfaces already have the data. */
+  loading?: boolean;
+  error?: boolean;
+  /** Picks the header wording: "N findings" vs "N findings in this run". */
+  scope?: "pr" | "run";
   onMouseEnter: () => void;
   onMouseLeave: () => void;
 }) {
@@ -96,16 +103,21 @@ export function FindingsPopover({
     <div
       ref={cardRef}
       role="dialog"
-      aria-label={t("list.columns.findings")}
+      aria-label={t("findingsCard.label")}
       style={s.popover(pos.top, pos.left)}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      // The PR row navigates on click; a click inside the card must not.
+      // A PR row navigates on click and an accordion header toggles on click;
+      // a click inside the card must do neither.
       onClick={(e) => e.stopPropagation()}
     >
       <div style={s.popoverHeader}>
         <Icon.Info size={13} />
-        {loading || error ? t("list.columns.findings") : t("list.findings.title", { count: findings.length })}
+        {loading || error
+          ? t("findingsCard.label")
+          : t(scope === "run" ? "findingsCard.titleInRun" : "findingsCard.title", {
+              count: findings.length,
+            })}
       </div>
 
       {loading && (
@@ -115,9 +127,9 @@ export function FindingsPopover({
           <Skeleton />
         </div>
       )}
-      {!loading && error && <div style={s.popoverState}>{t("list.findings.error")}</div>}
+      {!loading && error && <div style={s.popoverState}>{t("findingsCard.error")}</div>}
       {!loading && !error && findings.length === 0 && (
-        <div style={s.popoverState}>{t("list.findings.empty")}</div>
+        <div style={s.popoverState}>{t("findingsCard.empty")}</div>
       )}
 
       {!loading && !error && findings.length > 0 && (
@@ -128,7 +140,7 @@ export function FindingsPopover({
             ))}
           </div>
           {hidden > 0 && (
-            <div style={s.popoverMore}>{t("list.findings.more", { count: hidden })}</div>
+            <div style={s.popoverMore}>{t("findingsCard.more", { count: hidden })}</div>
           )}
         </>
       )}

@@ -96,19 +96,20 @@
       "cost": "Cost",
       "updated": "Updated"
     },
-    "findings": {
-      "title": "{count, plural, one {# finding} other {# findings}}",
-      "loading": "Loading findings…",
-      "error": "Couldn’t load findings.",
-      "empty": "No findings recorded for this pull request.",
-      "more": "+{count} more"
-    },
     "filesCount": "{count} files",
     "errorTitle": "Couldn’t load pull requests",
     "errorBody": "The engine returned an error.",
     "emptyTitle": "No pull requests",
     "emptyAllBody": "No open PRs found for this repo yet. Refresh to sync from GitHub.",
     "emptyStatusBody": "No PRs with status “{status}”."
+  },
+  "findingsCard": {
+    "label": "Findings",
+    "title": "{count, plural, one {# finding} other {# findings}}",
+    "titleInRun": "{count, plural, one {# finding} other {# findings}} in this run",
+    "error": "Couldn’t load findings.",
+    "empty": "No findings recorded.",
+    "more": "+{count} more"
   },
   "timeline": {
     "goToReview": "Jump to this run’s findings below",
