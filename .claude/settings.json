@@ -5,7 +5,6 @@
       "Bash(.claude/skills/engineering-insights/scripts/list-entries.sh:*)",
       "Bash(git push *)",
       "Bash(gh pr *)",
-      "Read(//private/tmp/**)",
       "Skill(engineering-insights)",
       "Skill(engineering-insights:*)",
       "Bash(awk '{print \"  +\"$1\" -\"$2\"  \"$3}')",
