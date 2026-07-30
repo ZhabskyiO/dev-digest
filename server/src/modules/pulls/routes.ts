@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { and, desc, eq, inArray, sum } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, sum } from 'drizzle-orm';
 import type { PrMeta, PrDetail, GitHubClient, PrReviewComment } from '@devdigest/shared';
 import { PrCommentInput } from '@devdigest/shared';
 import * as t from '../../db/schema.js';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { AppError, NotFoundError } from '../../platform/errors.js';
-import { deriveReviewStatus } from './status.js';
+import {
+  deriveReviewStatus,
+  emptyBreakdown,
+  isKnownSeverity,
+  type SeverityBreakdown,
+} from './status.js';
 
 /**
  * F1 — pulls module. PR import via Octokit (list + per-PR detail).
@@ -113,8 +118,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
 
     // Latest-review SCORE per PR for the list's score ring. Computed on read
     // from reviews (no FK denorm); the list is small, so one IN-query + JS
-    // grouping is cheap. (The per-severity FINDINGS breakdown is intentionally
-    // not surfaced on the list — findings live on the PR detail page.)
+    // grouping is cheap.
     const prIds = rows.map((r) => r.id);
     const latestReviewByPr = new Map<string, { score: number | null }>();
     if (prIds.length > 0) {
@@ -148,6 +152,28 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
       }
     }
 
+    // Per-severity FINDINGS tally per PR for the list's findings column, across
+    // EVERY review on the PR (same "whole PR" span as cost, not just the latest
+    // review) — deliberately no `kind` filter, so this matches exactly what the
+    // client's hover popover shows when it flattens GET /pulls/:id/reviews.
+    // Counted in SQL rather than via rollupSeverities() so we never load every
+    // finding row for every PR just to tally three numbers.
+    const findingsByPr = new Map<string, SeverityBreakdown>();
+    if (prIds.length > 0) {
+      const findingRows = await container.db
+        .select({ prId: t.reviews.prId, severity: t.findings.severity, n: count() })
+        .from(t.findings)
+        .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+        .where(inArray(t.reviews.prId, prIds))
+        .groupBy(t.reviews.prId, t.findings.severity);
+      for (const f of findingRows) {
+        if (!isKnownSeverity(f.severity)) continue; // legacy/unknown severities don't get a column
+        const bucket = findingsByPr.get(f.prId) ?? emptyBreakdown();
+        bucket[f.severity] += f.n;
+        findingsByPr.set(f.prId, bucket);
+      }
+    }
+
     const now = Date.now();
     return rows.map((r) => {
       const review = latestReviewByPr.get(r.id);
@@ -173,6 +199,7 @@ export default async function pullsRoutes(appBase: FastifyInstance) {
         updated_at: r.updatedAt?.toISOString() ?? null,
         score: review ? review.score : null,
         cost_usd: costByPr.get(r.id) ?? null,
+        findings_by_severity: findingsByPr.get(r.id) ?? emptyBreakdown(),
       };
     });
   });

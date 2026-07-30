@@ -19,6 +19,30 @@ export interface SeverityCounts {
   suggestion: number;
 }
 
+/**
+ * The PR list's findings tally, keyed by the contract's `Severity` values.
+ * Distinct from `SeverityCounts` below: this is the wire shape
+ * (`PrMeta.findings_by_severity`), so its keys are the uppercase enum members.
+ */
+export type SeverityBreakdown = Record<'CRITICAL' | 'WARNING' | 'SUGGESTION', number>;
+
+const KNOWN_SEVERITIES = ['CRITICAL', 'WARNING', 'SUGGESTION'] as const;
+
+/** All-zero tally — what a PR with no reviews (or no findings) reports. */
+export function emptyBreakdown(): SeverityBreakdown {
+  return { CRITICAL: 0, WARNING: 0, SUGGESTION: 0 };
+}
+
+/**
+ * `findings.severity` is a free-form text column, so rows written by an older
+ * schema (or a stray agent) can hold values outside the contract enum. Those
+ * have no column to land in and are dropped from the tally rather than widening
+ * the wire shape.
+ */
+export function isKnownSeverity(s: string): s is keyof SeverityBreakdown {
+  return (KNOWN_SEVERITIES as readonly string[]).includes(s);
+}
+
 /** Tally finding severities (CRITICAL / WARNING / SUGGESTION) for one review. */
 export function rollupSeverities(rows: { severity: string }[]): SeverityCounts {
   const c: SeverityCounts = { critical: 0, warning: 0, suggestion: 0 };
