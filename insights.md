@@ -42,7 +42,16 @@ Conventions and architectural decisions specific to this repo.
 
 Quirks of dependencies, tooling, and the local environment.
 
-_None yet._
+- 2026-07-30 — NEVER read an empty `gh pr view --json statusCheckRollup` as "no
+  CI ran". It is also `[]` for the first minute or two after a push, while the
+  runs sit **queued** — GitHub only populates the rollup once a run starts. The
+  open-pull-request skill says an empty rollup means the change hit only
+  path-filtered-out paths; that is one cause of two, and acting on it reports a
+  green PR as unverified (or vice versa). To wait correctly, poll `gh run list`
+  filtered to the head sha instead:
+  `gh run list --branch <b> --json headSha,status,conclusion` and loop until no
+  run for that sha has `status != "completed"`. An until-loop over the rollup
+  exits instantly on the empty array and tells you nothing.
 
 ## Recurring Errors & Fixes
 
