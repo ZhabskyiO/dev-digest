@@ -6,7 +6,13 @@
  * + age, so it gets unit coverage independent of the route's queries.
  */
 import { describe, it, expect } from 'vitest';
-import { deriveReviewStatus, rollupSeverities, STALE_DAYS } from '../src/modules/pulls/status.js';
+import {
+  deriveReviewStatus,
+  emptyBreakdown,
+  isKnownSeverity,
+  rollupSeverities,
+  STALE_DAYS,
+} from '../src/modules/pulls/status.js';
 
 const DAY = 86_400_000;
 const now = Date.UTC(2026, 5, 11);
@@ -64,5 +70,20 @@ describe('rollupSeverities', () => {
 
   it('is all-zero for no findings', () => {
     expect(rollupSeverities([])).toEqual({ critical: 0, warning: 0, suggestion: 0 });
+  });
+});
+
+describe('findings breakdown (PR list wire shape)', () => {
+  it('starts all-zero, keyed by the contract severities', () => {
+    expect(emptyBreakdown()).toEqual({ CRITICAL: 0, WARNING: 0, SUGGESTION: 0 });
+  });
+
+  it('accepts only the three contract severities', () => {
+    expect(isKnownSeverity('CRITICAL')).toBe(true);
+    expect(isKnownSeverity('WARNING')).toBe(true);
+    expect(isKnownSeverity('SUGGESTION')).toBe(true);
+    // `findings.severity` is free-form text, so anything else can turn up.
+    expect(isKnownSeverity('INFO')).toBe(false);
+    expect(isKnownSeverity('critical')).toBe(false);
   });
 });

@@ -91,6 +91,7 @@
       "author": "Author",
       "size": "Size",
       "score": "Score",
+      "findings": "Findings",
       "status": "Status",
       "cost": "Cost",
       "updated": "Updated"
@@ -101,6 +102,14 @@
     "emptyTitle": "No pull requests",
     "emptyAllBody": "No open PRs found for this repo yet. Refresh to sync from GitHub.",
     "emptyStatusBody": "No PRs with status “{status}”."
+  },
+  "findingsCard": {
+    "label": "Findings",
+    "title": "{count, plural, one {# finding} other {# findings}}",
+    "titleInRun": "{count, plural, one {# finding} other {# findings}} in this run",
+    "error": "Couldn’t load findings.",
+    "empty": "No findings recorded.",
+    "more": "+{count} more"
   },
   "timeline": {
     "goToReview": "Jump to this run’s findings below",

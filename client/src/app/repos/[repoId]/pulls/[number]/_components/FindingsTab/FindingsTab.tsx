@@ -71,6 +71,21 @@ export function FindingsTab({
     setTarget((p) => ({ runId, n: (p?.n ?? 0) + 1 }));
   }, []);
 
+  // The timeline shows a per-severity breakdown per run. Reviews already carry
+  // both `run_id` and their findings, so this needs no extra request — a run
+  // whose review was deleted just won't appear here, and its row falls back to
+  // the denormalized count on the run row.
+  const findingsByRun = React.useMemo(() => {
+    const byRun = new Map<string, FindingRecord[]>();
+    for (const review of runs) {
+      if (!review.run_id) continue;
+      const bucket = byRun.get(review.run_id);
+      if (bucket) bucket.push(...review.findings);
+      else byRun.set(review.run_id, [...review.findings]);
+    }
+    return byRun;
+  }, [runs]);
+
   return (
     <section>
       {liveRunIds.length > 0 && (
@@ -131,6 +146,7 @@ export function FindingsTab({
           <RunHistory
             runs={prRuns ?? []}
             commits={prCommits}
+            findingsByRun={findingsByRun}
             onOpenTrace={handleOpenTrace}
             onGoToReview={handleGoToReview}
             onDelete={handleDelete}

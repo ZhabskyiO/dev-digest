@@ -78,6 +78,13 @@
       "when": 1785287909294,
       "tag": "0010_goofy_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785440289797,
+      "tag": "0011_burly_tusk",
+      "breakpoints": true
     }
   ]
 }

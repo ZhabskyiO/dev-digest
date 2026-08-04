@@ -28,7 +28,7 @@ export const SIZE_COLOR: Record<string, string> = {
  * `COLUMN_KEYS` below and the cells in `PRRow` — the three are aligned only by
  * position, not by a shared column definition.
  */
-export const GRID = "1fr 132px 92px 60px 118px 88px 78px";
+export const GRID = "1fr 132px 92px 60px 130px 118px 88px 78px";
 
 /** Line-count thresholds for the S/M/L size bucket. */
 export const SIZE_SMALL_MAX = 100;
@@ -48,6 +48,7 @@ export const COLUMN_KEYS: string[] = [
   "author",
   "size",
   "score",
+  "findings",
   "status",
   "cost",
   "updated",

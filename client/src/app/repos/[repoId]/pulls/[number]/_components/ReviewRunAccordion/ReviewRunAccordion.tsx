@@ -8,6 +8,7 @@
 import React from "react";
 import { Icon, Badge } from "@devdigest/ui";
 import type { ReviewRecord, Verdict } from "@devdigest/shared";
+import { FindingsTally } from "@/components/findings-summary";
 import { FindingsPanel } from "../FindingsPanel";
 import { VerdictBanner } from "../VerdictBanner";
 import { useDeleteReview } from "../../../../../../../lib/hooks/reviews";
@@ -93,10 +94,11 @@ export function ReviewRunAccordion({
             {review.verdict.replace("_", " ")}
           </Badge>
         )}
-        <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>
-          {findings.length} finding{findings.length === 1 ? "" : "s"}
-          {blockers > 0 ? ` · ${blockers} blocker${blockers === 1 ? "" : "s"}` : ""}
-        </span>
+        <FindingsTally
+          findings={findings}
+          blockers={blockers}
+          emptyLabel={`${findings.length} finding${findings.length === 1 ? "" : "s"}`}
+        />
         <span style={{ flex: 1 }} />
         {review.score != null && (
           <Badge mono color="var(--text-secondary)">

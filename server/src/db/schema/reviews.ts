@@ -1,5 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, integer, jsonb, timestamp, doublePrecision } from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  uuid,
+  text,
+  integer,
+  jsonb,
+  timestamp,
+  doublePrecision,
+  index,
+} from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
@@ -25,25 +34,31 @@ export const reviews = pgTable('reviews', {
   createdAt: now(),
 });
 
-export const findings = pgTable('findings', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  reviewId: uuid('review_id')
-    .notNull()
-    .references(() => reviews.id, { onDelete: 'cascade' }),
-  file: text('file').notNull(),
-  startLine: integer('start_line').notNull(),
-  endLine: integer('end_line').notNull(),
-  severity: text('severity').notNull(),
-  category: text('category').notNull(),
-  title: text('title').notNull(),
-  rationale: text('rationale').notNull(),
-  suggestion: text('suggestion'),
-  confidence: doublePrecision('confidence').notNull(),
-  kind: text('kind').notNull().default('finding'),
-  trifectaComponents: jsonb('trifecta_components').$type<string[]>(),
-  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
-  dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
-});
+export const findings = pgTable(
+  'findings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reviewId: uuid('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    file: text('file').notNull(),
+    startLine: integer('start_line').notNull(),
+    endLine: integer('end_line').notNull(),
+    severity: text('severity').notNull(),
+    category: text('category').notNull(),
+    title: text('title').notNull(),
+    rationale: text('rationale').notNull(),
+    suggestion: text('suggestion'),
+    confidence: doublePrecision('confidence').notNull(),
+    kind: text('kind').notNull().default('finding'),
+    trifectaComponents: jsonb('trifecta_components').$type<string[]>(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+  },
+  // The PR list groups findings by (pr, severity) through this FK on every
+  // page load; without the index that join seq-scans the whole table.
+  (t) => ({ reviewIdx: index('findings_review_idx').on(t.reviewId) }),
+);
 
 export const prIntent = pgTable('pr_intent', {
   prId: uuid('pr_id')

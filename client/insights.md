@@ -29,13 +29,27 @@ _None yet._
 
 Conventions and architectural decisions specific to this repo.
 
-_None yet._
+- 2026-07-30 — **ALWAYS portal a popover/hover-card anchored inside a table row
+  to `document.body`** (`createPortal` + `position: fixed` from
+  `getBoundingClientRect()`). The list table cards set `overflow: hidden` to clip
+  their rounded corners (`app/repos/[repoId]/pulls/styles.ts` → `s.tableCard`), so
+  an `position: absolute` panel inside a row is silently cut off at the card
+  edge — worst for the last rows, where most of the panel disappears. Working
+  example: `pulls/_components/FindingsCell/`, with the flip-above-anchor and
+  viewport-clamp maths isolated in its pure `popoverPosition()` helper.
+  `vendor/ui/kit/Dropdown.tsx` is still the right source for the *visual*
+  treatment (`--shadow-modal`, `ddpop` animation), just not the positioning.
 
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
 
-_None yet._
+- 2026-07-30 — `@testing-library/user-event` is **not** a dependency here (only
+  `@testing-library/react` + `jest-dom`). Reaching for `userEvent.setup()` fails
+  at import with `Failed to resolve import "@testing-library/user-event"`. Use
+  `fireEvent` from `@testing-library/react` instead — `fireEvent.mouseEnter` /
+  `.click` cover hover and click paths, and `findBy*` polls long enough to
+  absorb a component's own open/close delay timers without fake timers.
 
 ## Recurring Errors & Fixes
 

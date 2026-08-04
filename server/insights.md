@@ -39,6 +39,15 @@ Conventions and architectural decisions specific to this repo.
   a non-OpenRouter model prices as `null`; wiring the PriceBook alone will not
   fix it.
 
+- 2026-07-30 — `pnpm db:seed` creates a review with **no `run_id` and no
+  `agent_id`**, and inserts **no `agent_runs` rows at all** (`db/seed.ts:136-148`
+  — grep `runId` there returns nothing). So anything that joins reviews ↔ runs on
+  `run_id` renders empty on freshly seeded data while working perfectly on real
+  reviews, which `run-executor.ts` does link. NEVER debug such a feature against
+  the demo PR — run a real review, or check a genuinely imported repo, before
+  concluding the join is broken. (Hit while adding the per-run findings breakdown
+  to the PR timeline: seeded PRs silently fell back to the plain count.)
+
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
@@ -49,7 +58,13 @@ _None yet._
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
 
-_None yet._
+- 2026-07-30 — `TypeError: diagnostics.tracingChannel is not a function` at
+  `node_modules/fastify/lib/wrap-thenable.js` when running `pnpm test` means the
+  shell is on the default Node 18, not the repo's Node 22. Fastify 5 needs
+  `diagnostics_channel.tracingChannel` (Node ≥ 19.9). It surfaces as a *suite
+  collection* failure ("0 test") with no mention of Node, so it reads like a
+  broken import. Fix: `nvm use` first. Same root cause as the Next.js boot
+  failure in [../insights.md](../insights.md), different symptom entirely.
 
 ## Session Notes
 
