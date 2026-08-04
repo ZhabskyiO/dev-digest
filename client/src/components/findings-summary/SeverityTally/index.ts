@@ -1,0 +1,1 @@
+export { SeverityTally } from "./SeverityTally";

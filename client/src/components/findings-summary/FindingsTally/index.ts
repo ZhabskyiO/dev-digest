@@ -1,0 +1,1 @@
+export { FindingsTally } from "./FindingsTally";

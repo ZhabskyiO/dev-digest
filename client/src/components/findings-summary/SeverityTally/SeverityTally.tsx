@@ -4,8 +4,8 @@
 
 import React from "react";
 import { SEV, SeverityBadge } from "@devdigest/ui";
-import { TALLY_SEVERITIES, type SeverityBreakdown } from "./constants";
-import { s } from "./styles";
+import { TALLY_SEVERITIES, type SeverityBreakdown } from "../constants";
+import { s } from "../styles";
 
 /** Three dashes under a count, lit in proportion to how many findings there are. */
 function SeverityMeter({ color, count }: { color: string; count: number }) {
