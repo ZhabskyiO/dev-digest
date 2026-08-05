@@ -11,11 +11,11 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import type { FindingRecord } from "@devdigest/shared";
 import { sortBySeverity } from "@/lib/findings";
-import { FindingsHoverCard } from "./FindingsHoverCard";
-import { SeverityTally } from "./SeverityTally";
-import { tallySeverities, totalFindings } from "./helpers";
-import { useHoverCard } from "./useHoverCard";
-import { s } from "./styles";
+import { FindingsHoverCard } from "../FindingsHoverCard";
+import { SeverityTally } from "../SeverityTally";
+import { tallySeverities, totalFindings } from "../helpers";
+import { useHoverCard } from "../useHoverCard";
+import { s } from "../styles";
 
 export function FindingsTally({
   findings,

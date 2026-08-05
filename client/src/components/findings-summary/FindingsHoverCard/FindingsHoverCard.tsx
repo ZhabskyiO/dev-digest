@@ -18,9 +18,9 @@ import {
   type Severity,
 } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
-import { POPOVER_MAX_FINDINGS } from "./constants";
-import { popoverPosition, type AnchorRect } from "./helpers";
-import { s } from "./styles";
+import { POPOVER_MAX_FINDINGS } from "../constants";
+import { popoverPosition, type AnchorRect } from "../helpers";
+import { s } from "../styles";
 
 /** Line range label ("11" when single-line, else "11-15"). */
 function lineLabel(f: FindingRecord): string {

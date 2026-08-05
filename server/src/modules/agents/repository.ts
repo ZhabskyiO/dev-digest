@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
@@ -233,4 +233,124 @@ export class AgentsRepository {
       .insert(t.agentSkills)
       .values(skillIds.map((skillId, i) => ({ agentId, skillId, order: i })));
   }
+
+  // ---- run stats (AgentCard summary row + editor Stats tab tiles) ---------
+
+  /**
+   * Raw aggregates for one agent's runs, optionally windowed to the last
+   * `days` days. Two queries rather than one: `avg(cost)`/`avg(duration)`
+   * must run over ALL of the agent's runs (including ones with no review —
+   * e.g. still-failed), while accept rate must run over only the runs that
+   * produced a review (an inner join to `reviews`), so a single query would
+   * either drop cost/duration for unreviewed runs or double-count something.
+   */
+  async runStats(agentId: string, days?: number): Promise<AgentRunStatsRaw> {
+    const conditions = [eq(t.agentRuns.agentId, agentId)];
+    if (days !== undefined) {
+      conditions.push(gte(t.agentRuns.ranAt, new Date(Date.now() - days * 86400000)));
+    }
+
+    const [totals] = await this.db
+      .select({
+        runs: sql<number>`count(*)`.mapWith(Number),
+        // avg() over zero/all-null rows returns SQL NULL, not 0 — mapWith
+        // keeps that null through to JS rather than coercing to 0.
+        avgCostUsd: sql<number | null>`avg(${t.agentRuns.costUsd})`.mapWith((v) =>
+          v === null ? null : Number(v),
+        ),
+        avgDurationMs: sql<number | null>`avg(${t.agentRuns.durationMs})`.mapWith((v) =>
+          v === null ? null : Number(v),
+        ),
+      })
+      .from(t.agentRuns)
+      .where(and(...conditions));
+
+    const [accept] = await this.db
+      .select({
+        reviewed: sql<number>`count(*)`.mapWith(Number),
+        approved: sql<number>`count(*) filter (where ${t.reviews.verdict} = 'approve')`.mapWith(
+          Number,
+        ),
+      })
+      .from(t.agentRuns)
+      .innerJoin(t.reviews, eq(t.reviews.runId, t.agentRuns.id))
+      .where(and(...conditions));
+
+    return {
+      runs: totals?.runs ?? 0,
+      avgCostUsd: totals?.avgCostUsd ?? null,
+      avgDurationMs: totals?.avgDurationMs ?? null,
+      reviewedRuns: accept?.reviewed ?? 0,
+      approvedRuns: accept?.approved ?? 0,
+    };
+  }
+
+  /**
+   * Daily run counts, oldest first, over the last `days` days — the TOTAL
+   * RUNS tile's sparkline. Buckets in JS from raw `ran_at` timestamps rather
+   * than a SQL `date_trunc`/`group by`, so there is no driver-specific date
+   * string format to parse and days with zero runs still get an explicit 0
+   * bucket (a SQL group-by would just omit them, breaking the even spacing
+   * `Sparkline` assumes).
+   */
+  async dailyRunCounts(agentId: string, days: number): Promise<number[]> {
+    const now = Date.now();
+    const cutoff = new Date(now - days * 86400000);
+    const rows = await this.db
+      .select({ ranAt: t.agentRuns.ranAt })
+      .from(t.agentRuns)
+      .where(and(eq(t.agentRuns.agentId, agentId), gte(t.agentRuns.ranAt, cutoff)));
+
+    const counts = new Array<number>(days).fill(0);
+    for (const row of rows) {
+      const ageDays = Math.floor((now - row.ranAt.getTime()) / 86400000);
+      const idx = days - 1 - ageDays; // oldest bucket at index 0
+      if (idx >= 0 && idx < days) counts[idx] = (counts[idx] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /**
+   * `avg(cost)` over the last `days` days minus `avg(cost)` over the
+   * immediately preceding window of equal length — the signed delta shown
+   * next to the AVG COST/RUN tile. `null` when either window has no priced
+   * run to average (a fresh agent, or one with too little history yet).
+   */
+  async avgCostDelta(agentId: string, days: number): Promise<number | null> {
+    const now = Date.now();
+    const currentCutoff = new Date(now - days * 86400000);
+    const previousCutoff = new Date(now - days * 2 * 86400000);
+
+    const avgCostWhere = (from: Date, to?: Date) =>
+      this.db
+        .select({
+          avg: sql<number | null>`avg(${t.agentRuns.costUsd})`.mapWith((v) =>
+            v === null ? null : Number(v),
+          ),
+        })
+        .from(t.agentRuns)
+        .where(
+          to
+            ? and(eq(t.agentRuns.agentId, agentId), gte(t.agentRuns.ranAt, from), lt(t.agentRuns.ranAt, to))
+            : and(eq(t.agentRuns.agentId, agentId), gte(t.agentRuns.ranAt, from)),
+        );
+
+    const [[current], [previous]] = await Promise.all([
+      avgCostWhere(currentCutoff),
+      avgCostWhere(previousCutoff, currentCutoff),
+    ]);
+
+    if (current?.avg == null || previous?.avg == null) return null;
+    return current.avg - previous.avg;
+  }
+}
+
+/** Raw shape returned by {@link AgentsRepository.runStats}; the service turns
+ *  this into the public `AgentRunStats` DTO (accept-rate percentage math). */
+export interface AgentRunStatsRaw {
+  runs: number;
+  avgCostUsd: number | null;
+  avgDurationMs: number | null;
+  reviewedRuns: number;
+  approvedRuns: number;
 }

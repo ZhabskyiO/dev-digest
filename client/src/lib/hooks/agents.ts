@@ -3,7 +3,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type { Agent, AgentRunStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
@@ -77,6 +77,22 @@ export function useDeleteAgent() {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.removeQueries({ queryKey: ["agent", id] });
     },
+  });
+}
+
+/**
+ * Aggregate run stats for one agent — feeds the AgentCard summary row
+ * (`days` omitted → all-time) and the editor Stats tab's KPI tiles (`days:
+ * 30` to match their "(30D)" label).
+ */
+export function useAgentStats(id: string | null | undefined, days?: number) {
+  return useQuery({
+    queryKey: ["agent-stats", id, days ?? "all"],
+    queryFn: () => {
+      const qs = days != null ? `?days=${days}` : "";
+      return api.get<AgentRunStats>(`/agents/${id}/stats${qs}`);
+    },
+    enabled: !!id,
   });
 }
 

@@ -89,6 +89,10 @@ export class ReviewRunExecutor {
           })
           .catch(() => undefined);
         await this.repo
+          // No `skillBodies` in scope here on purpose: this is the PRE-WORK
+          // failure path (diff load itself failed) — execution never reached
+          // per-agent processing, so no skill was ever resolved or attached.
+          // `skills: null` in traceFromBuffer's default is accurate, not a gap.
           .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
           .catch(() => undefined);
         this.container.runBus.complete(runId);
@@ -155,6 +159,12 @@ export class ReviewRunExecutor {
 
     runLog.info(`Starting review with agent "${agent.name}" (${agent.provider}/${agent.model})`);
 
+    // Hoisted out of the try block (not `const` inside it) so the catch
+    // block below can still see whatever was resolved before the failure —
+    // in particular, the "Loading skills" step may have already run (and
+    // already written `run_skills`) by the time a LATER step throws.
+    let skillBodies: string[] = [];
+
     try {
       // Resolve the agent's LLM provider. (container.llm throws if the provider
       // key is missing — caught below and persisted as a failed run.)
@@ -186,6 +196,26 @@ export class ReviewRunExecutor {
 
       const task = taskLine(pull) + rankNote;
 
+      // Skills — this agent's linked skills, still in `order`, filtered to
+      // enabled === true. BOTH gates must hold (attached to this agent AND
+      // globally enabled) — that's what makes an unvetted/disabled import
+      // inert without unlinking it. The resolved ordered list is already in
+      // hand here, so the per-run attribution write (`run_skills`) happens in
+      // the same step as a single bulk insert.
+      skillBodies = await runLog.step(
+        'Loading skills',
+        async () => {
+          const linked = await this.container.agentsRepo.linkedSkills(agent.id);
+          const enabled = linked.filter((l) => l.skill.enabled === true);
+          const bodies = enabled.map((l) => l.skill.body);
+          const ids = enabled.map((l) => l.skill.id);
+          await this.container.skillsRepo.recordRunSkills(runId, ids);
+          runLog.info(`skills: ${enabled.length}/${linked.length} linked skill(s) enabled and attached`);
+          return bodies;
+        },
+        { kind: 'tool' },
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -203,6 +233,9 @@ export class ReviewRunExecutor {
         ...(callersDigest ? { callers: callersDigest } : {}),
         // T3 — repo skeleton, same omit-when-empty contract.
         ...(repoMap ? { repoMap } : {}),
+        // L02 — linked, enabled skill bodies (already ordered). Same
+        // omit-when-empty contract as callers/repoMap.
+        ...(skillBodies.length ? { skills: skillBodies } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -316,7 +349,14 @@ export class ReviewRunExecutor {
         })
         .catch(() => undefined);
       await this.repo
-        .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start))
+        .saveRunTrace(
+          runId,
+          // `skillBodies` may already be populated here — the "Loading skills"
+          // step (and its run_skills write) can have completed before a LATER
+          // step (e.g. the LLM call) threw. Thread it through so the trace
+          // reflects what was actually attached, not a blanket null.
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, skillBodies),
+        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
@@ -421,6 +461,10 @@ export class ReviewRunExecutor {
     agent: AgentRow,
     grounding: string,
     durationMs = 0,
+    // Skill bodies already resolved before the failure, if any (empty for the
+    // pre-work failAll path, where no per-agent step ever ran). Joined the
+    // same way assemblePrompt joins them, for consistency in the trace UI.
+    skillBodies: string[] = [],
   ): RunTrace {
     return {
       config: {
@@ -441,7 +485,13 @@ export class ReviewRunExecutor {
         findings: 0,
         grounding,
       },
-      prompt_assembly: { system: agent.systemPrompt, skills: null, memory: null, specs: null, user: '' },
+      prompt_assembly: {
+        system: agent.systemPrompt,
+        skills: skillBodies.length ? skillBodies.join('\n\n') : null,
+        memory: null,
+        specs: null,
+        user: '',
+      },
       tool_calls: [],
       raw_output: '',
       memory_pulled: [],

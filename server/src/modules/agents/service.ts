@@ -1,6 +1,7 @@
 import type { Container } from '../../platform/container.js';
 import type {
   Agent,
+  AgentRunStats,
   AgentSkillLink,
   AgentVersion,
   CiFailOn,
@@ -10,6 +11,7 @@ import type {
 } from '@devdigest/shared';
 import { AgentsRepository } from './repository.js';
 import { toAgentDto, toAgentVersionDto } from './helpers.js';
+import { MAX_TREND_DAYS } from './constants.js';
 
 /**
  * A2 — agents service. Business logic for the Agents tab + Agent Editor.
@@ -169,6 +171,58 @@ export class AgentsService {
     const resolvedOrder = order ?? existing.length;
     await this.repo.linkSkill(agentId, skillId, resolvedOrder);
     return this.skillLinks(agentId);
+  }
+
+  /** Unlink a single skill from an agent. Returns the resulting ordered links,
+   *  or undefined if the agent isn't in this workspace. */
+  async unlinkSkill(
+    workspaceId: string,
+    agentId: string,
+    skillId: string,
+  ): Promise<AgentSkillLink[] | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    await this.repo.unlinkSkill(agentId, skillId);
+    return this.skillLinks(agentId);
+  }
+
+  /**
+   * Aggregate run stats for the AgentCard summary row and the editor Stats
+   * tab's KPI tiles. Workspace-scoped: undefined when the agent isn't in this
+   * workspace (route → 404). `days` windows the aggregation (the Stats tab
+   * passes 30 to match its "(30D)" label); omitted → all-time, which is what
+   * the AgentCard summary row shows.
+   */
+  async runStats(
+    workspaceId: string,
+    agentId: string,
+    days?: number,
+  ): Promise<AgentRunStats | undefined> {
+    const agent = await this.repo.getById(workspaceId, agentId);
+    if (!agent) return undefined;
+    const raw = await this.repo.runStats(agentId, days);
+
+    // Trend/delta are only meaningful within a bounded window — clamp so an
+    // absurd ?days= can't allocate an equally absurd trend array or scan an
+    // unbounded second window for the delta.
+    const trendDays = days !== undefined ? Math.min(days, MAX_TREND_DAYS) : undefined;
+    const [trend, avgCostUsdDelta] =
+      trendDays !== undefined
+        ? await Promise.all([
+            this.repo.dailyRunCounts(agentId, trendDays),
+            this.repo.avgCostDelta(agentId, trendDays),
+          ])
+        : [[], null];
+
+    return {
+      runs: raw.runs,
+      accept_rate:
+        raw.reviewedRuns > 0 ? Math.round((raw.approvedRuns / raw.reviewedRuns) * 100) : null,
+      avg_cost_usd: raw.avgCostUsd,
+      avg_cost_usd_delta: avgCostUsdDelta,
+      avg_duration_ms: raw.avgDurationMs,
+      trend,
+    };
   }
 
   /**

@@ -6,13 +6,43 @@
 import React from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/ui";
+import type { Agent } from "@devdigest/shared";
 import { AppShell } from "../../../components/app-shell";
 import { AgentCard } from "../_components/AgentCard";
 import { AgentEditor } from "./_components/AgentEditor";
-import { useAgents, useAgent, useUpdateAgent } from "../../../lib/hooks/agents";
+import { useAgents, useAgent, useAgentStats, useUpdateAgent } from "../../../lib/hooks/agents";
+import { useAgentSkills } from "../../../lib/hooks/skills";
 import { ApiError } from "../../../lib/api";
 
-const VALID_TABS = ["config"];
+// Wraps AgentCard to fetch its own skill count + run stats (small N of
+// per-id queries, deduped/cached by React Query — an accepted pattern for a
+// sidebar list).
+function AgentListItem({
+  a,
+  active,
+  onClick,
+  onToggle,
+}: {
+  a: Agent;
+  active: boolean;
+  onClick: () => void;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const { data: links } = useAgentSkills(a.id);
+  const { data: stats } = useAgentStats(a.id);
+  return (
+    <AgentCard
+      ag={a}
+      active={active}
+      skillCount={links?.length}
+      stats={stats}
+      onClick={onClick}
+      onToggle={onToggle}
+    />
+  );
+}
+
+const VALID_TABS = ["config", "skills", "stats"];
 
 export default function AgentEditorPage() {
   const params = useParams<{ id: string }>();
@@ -81,9 +111,9 @@ export default function AgentEditorPage() {
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: "0 12px 12px" }}>
             {(agents ?? []).map((a) => (
-              <AgentCard
+              <AgentListItem
                 key={a.id}
-                ag={a}
+                a={a}
                 active={a.id === id}
                 onClick={() => router.push(`/agents/${a.id}?tab=${tab}`)}
                 onToggle={(enabled) => update.mutate({ id: a.id, patch: { enabled } })}

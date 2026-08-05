@@ -7,6 +7,7 @@ import type { Agent, CiFailOn, Provider, ReviewStrategy } from "@devdigest/share
 import { useUpdateAgent, useProviderModels } from "../../../../../../../lib/hooks/agents";
 import { useToast } from "../../../../../../../lib/toast";
 import { toModelOptions } from "../../../../../../../lib/model-label";
+import { approxTokens, DEFAULT_TOKEN_BUDGET } from "../../../../../../../lib/tokens";
 import { CI_FAIL_ON_VALUES, OUTPUT_SCHEMA_VALUE, PROVIDER_OPTIONS, STRATEGY_VALUES } from "./constants";
 import { s } from "./styles";
 
@@ -127,7 +128,18 @@ export function ConfigTab({ agent }: { agent: Agent }) {
           <Toggle on={repoIntel} onChange={setRepoIntel} size={16} />
         </label>
       </FormField>
-      <FormField label={t("config.systemPrompt")} hint={t("config.systemPromptHint")}>
+      <FormField
+        label={t("config.systemPrompt")}
+        hint={t("config.systemPromptHint")}
+        right={
+          <span style={s.tokenCount}>
+            {t("config.systemPromptTokens", {
+              count: approxTokens(systemPrompt).toLocaleString("en-US"),
+              budget: DEFAULT_TOKEN_BUDGET.toLocaleString("en-US"),
+            })}
+          </span>
+        }
+      >
         <Textarea value={systemPrompt} onChange={setSystemPrompt} rows={8} mono />
       </FormField>
       <FormField label={t("config.outputSchema")}>

@@ -6,9 +6,12 @@ import {
   jsonb,
   timestamp,
   doublePrecision,
+  primaryKey,
+  index,
 } from 'drizzle-orm/pg-core';
 import { workspaces } from './core';
 import { agents } from './agents';
+import { skills } from './skills';
 import { pullRequests } from './pulls';
 
 // ============================================================ Observability
@@ -62,3 +65,20 @@ export const multiAgentRuns = pgTable('multi_agent_runs', {
     .references(() => pullRequests.id, { onDelete: 'cascade' }),
   ranAt: timestamp('ran_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const runSkills = pgTable(
+  'run_skills',
+  {
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id')
+      .notNull()
+      .references(() => skills.id, { onDelete: 'cascade' }),
+    order: integer('order').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.runId, t.skillId] }),
+    skillIdx: index('run_skills_skill_id_idx').on(t.skillId),
+  }),
+);
