@@ -6,6 +6,7 @@ import {
   GENERAL_REVIEWER_PROMPT,
   SECURITY_REVIEWER_PROMPT,
   PERFORMANCE_REVIEWER_PROMPT,
+  TEST_QUALITY_REVIEWER_PROMPT,
 } from './seed-prompts.js';
 
 /** Default provider/model for the built-in reviewer agents. */
@@ -18,11 +19,15 @@ const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
  *
  * Seeds: default workspace + system user + membership, default settings,
  * demo repo (acme/payments-api), PR #482 with files/commits, a sample review
- * with a few findings, and the three built-in agents (General + Security +
- * Performance), all on the default openrouter/deepseek-v4-flash provider+model.
+ * with a few findings, three seeded skills (uncovered-branch-gate,
+ * corner-case-checklist, mock-overuse), and the four built-in agents (General +
+ * Security + Performance + Test Quality), all on the default
+ * openrouter/deepseek-v4-flash provider+model. The Test Quality Reviewer is
+ * linked to its three seeded skills, in order; its fourth skill
+ * (flaky-test-patterns) ships via the community catalog instead, not the seed.
  *
- * Course lessons populate the other tables (skills, conventions, memory, eval,
- * …) once their features are built — they start empty here.
+ * Course lessons populate the other tables (conventions, memory, eval, …) once
+ * their features are built — they start empty here.
  */
 
 export const DEFAULT_WORKSPACE_NAME = 'default';
@@ -175,7 +180,178 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
     ]);
   }
 
-  // ---- built-in agents (the three starter presets) ----
+  // ---- built-in skills (L02: Test Quality Reviewer's rubrics) ----
+  // Bodies are directive markdown instructions (skills are read as trusted
+  // instructions once enabled) — see server/insights.md for why these are
+  // inserted directly against `t.skills` rather than via SkillsRepository.insert
+  // (that call also writes a `skill_versions` row; seeded rows deliberately don't
+  // get one, matching how seedAgents bypasses AgentsRepository).
+  //
+  // This is 3 of the 4 skills the Test Quality Reviewer uses. The 4th,
+  // `flaky-test-patterns`, ships via the community catalog
+  // (`modules/skills/community-catalog.ts`) instead of the DB seed, so the
+  // manual walkthrough exercises the import → lands disabled → gets vetted →
+  // enabled path.
+  const seedSkills: Array<typeof t.skills.$inferInsert> = [
+    {
+      workspaceId,
+      name: 'uncovered-branch-gate',
+      description: 'Catches branches and conditionals introduced by a diff with no covering test.',
+      type: 'rubric',
+      source: 'manual',
+      body: `# Uncovered Branch Gate
+
+For every branch, conditional, or early return that this diff adds or changes,
+confirm the diff's tests actually exercise it. A branch nobody tests is a branch
+nobody has verified.
+
+## What to check
+
+- For each \`if\`/\`else\`/\`switch\`/ternary/\`??\`/\`||\` added or modified by the
+  diff, find the test case that takes the OTHER path too. An \`if\` with only its
+  happy-path branch tested is half-covered.
+- For each early return or guard clause, confirm there is a test that actually
+  triggers it — not just a test that happens to satisfy the guard on the way to
+  the main path.
+- For each \`catch\` block or \`.catch()\` handler introduced by the diff, confirm a
+  test drives the error path, not just the success path.
+- For loops with a zero-iteration case (empty array, no matches), confirm that
+  case is exercised, not just the \"has items\" case.
+- When a function gains a new parameter that changes control flow, confirm both
+  the old default behavior and the new behavior are each covered by a test.
+
+## How to decide severity
+
+Weigh how much a bug in the uncovered branch could actually cost — flip the
+branch's condition mentally and ask whether any test in the diff would fail. If
+none would, that branch is uncovered no matter how "obviously correct" it looks.
+Untested branches in low-stakes, low-complexity code are a minor note, not a
+blocker; untested branches that guard risky behavior (data writes, authorization,
+money, error handling that could fail open) deserve your most serious severity.
+
+## What NOT to flag
+
+- Branches that existed before this diff and are unchanged by it.
+- Branches inside code paths that are unreachable given the diff's own guards
+  (don't demand a test for something that cannot happen).
+- Purely defensive branches with no realistic path to exercise them (e.g. a
+  \`should be impossible\` \`throw\` guarding a truly exhaustive \`switch\`).`,
+      enabled: true,
+    },
+    {
+      workspaceId,
+      name: 'corner-case-checklist',
+      description: 'Catches missing empty/null/boundary/error-path test cases.',
+      type: 'rubric',
+      source: 'manual',
+      body: `# Corner Case Checklist
+
+For any new or changed logic in this diff that accepts input, iterates a
+collection, or crosses a boundary, check whether the diff's tests cover the
+corner cases below. Only apply the ones that are actually reachable for the
+code under review — don't demand a null check on a value the type system
+already rules out.
+
+## Empty / absent input
+
+- An empty array, empty string, empty object, or empty result set — not just
+  the "has one or more items" case.
+- \`null\` / \`undefined\` for any parameter, field, or external response that is
+  not statically guaranteed to be present.
+- A missing/optional field in a request body, DB row, or API response that the
+  new code reads.
+
+## Boundary values
+
+- The first and last element of a collection; index 0; the exact edge of a
+  \`limit\`/\`offset\`/pagination window (0 items, exactly the page size, one over).
+- Numeric boundaries: 0, negative numbers where only positive is expected,
+  the maximum allowed value, off-by-one around any \`<\` vs \`<=\` comparison.
+- String boundaries: empty string, whitespace-only, exactly at a length limit.
+
+## Error / failure paths
+
+- A dependency (DB call, external API, filesystem op) that rejects or throws —
+  does a test confirm the new code's error handling actually runs and behaves
+  correctly, not just that the happy path works?
+- Partial failure in a batch or multi-step operation: what happens to the
+  already-completed steps when a later step fails?
+- Invalid/malformed input that should be rejected — confirm a test asserts the
+  rejection, not just that valid input is accepted.
+
+## Severity guidance
+
+A missing corner case that could produce silently wrong output, a crash, or
+data corruption in production deserves your highest severity. A missing corner
+case that would just be an obviously-visible failure (e.g. a 500 on bad input
+in an internal admin tool) is a lower priority — name it, but don't overstate it.`,
+      enabled: true,
+    },
+    {
+      workspaceId,
+      name: 'mock-overuse',
+      description: 'Catches over-mocking, mocking code the PR itself owns, and tests that verify mocks instead of behavior.',
+      type: 'convention',
+      source: 'manual',
+      body: `# Mock Overuse
+
+Mocks exist to remove things outside this codebase's control from a test (a
+network call, the system clock, a third-party SDK). Flag mocking that goes
+beyond that and ends up testing the mock instead of the real behavior.
+
+## Flag when the diff's tests do this
+
+- **Mocking a function or module the PR itself defines or changes.** If the test
+  mocks out the exact logic under test, a passing test proves nothing about
+  whether that logic is correct — only that the mock returns what the test told
+  it to return.
+- **Mocking so much of a collaborator that the test no longer exercises any real
+  integration.** If every dependency of the unit under test is mocked, the test
+  is really asserting "my mocks were called with the arguments I expected,"
+  which passes even if the real collaborators would reject that call.
+- **Asserting on mock call arguments instead of on observable outcomes.**
+  \`expect(mockFn).toHaveBeenCalledWith(x)\` is a weaker claim than asserting the
+  actual result, response, or side effect the caller cares about — prefer the
+  latter, and treat the former as the whole assertion as a smell.
+- **Re-implementing the mocked function's logic inside the mock**, so the mock
+  quietly becomes a second implementation that can drift from the real one
+  without either test noticing.
+- **Mocking at too coarse a boundary** when a narrower one (a single adapter
+  call, one HTTP client) would let more of the PR's own logic run for real.
+
+## What's fine — don't flag this
+
+- Mocking genuinely external systems: LLM providers, GitHub's API, git/ripgrep
+  subprocesses, the system clock, randomness sources. This codebase's own
+  \`adapters/mocks.ts\` fakes exist for exactly this reason.
+- Using a real Postgres via testcontainers instead of mocking the DB layer —
+  that is the stronger choice, not a violation.
+- A thin stub for a slow/expensive dependency in a unit test, as long as the
+  logic under test is not itself what's being stubbed.
+
+## Severity guidance
+
+Mocking the exact code under test so the test cannot fail regardless of a real
+bug is a serious finding — the test suite is giving false confidence. Weaker
+assertions or a coarser-than-ideal mock boundary are worth a lighter-weight note.`,
+      enabled: true,
+    },
+  ];
+  const skillIdByName = new Map<string, string>();
+  for (const s of seedSkills) {
+    const [existing] = await db
+      .select()
+      .from(t.skills)
+      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.name, s.name)));
+    if (existing) {
+      skillIdByName.set(existing.name, existing.id);
+    } else {
+      const [inserted] = await db.insert(t.skills).values(s).returning();
+      skillIdByName.set(inserted!.name, inserted!.id);
+    }
+  }
+
+  // ---- built-in agents (the four starter presets) ----
   // Prompt bodies live in ./seed-prompts.ts (mirrored in docs/agent-prompts/*.md).
   const seedAgents: Array<typeof t.agents.$inferInsert> = [
     {
@@ -211,13 +387,47 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       version: 1,
       createdBy: userId,
     },
+    {
+      workspaceId,
+      name: 'Test Quality Reviewer',
+      description:
+        'Reviews test changes for coverage gaps, missing corner cases, and test smells.',
+      provider: DEFAULT_PROVIDER,
+      model: DEFAULT_MODEL,
+      systemPrompt: TEST_QUALITY_REVIEWER_PROMPT,
+      enabled: true,
+      version: 1,
+      createdBy: userId,
+    },
   ];
+  const agentIdByName = new Map<string, string>();
   for (const a of seedAgents) {
     const [existing] = await db
       .select()
       .from(t.agents)
       .where(and(eq(t.agents.workspaceId, workspaceId), eq(t.agents.name, a.name)));
-    if (!existing) await db.insert(t.agents).values(a);
+    if (existing) {
+      agentIdByName.set(existing.name, existing.id);
+    } else {
+      const [inserted] = await db.insert(t.agents).values(a).returning();
+      agentIdByName.set(inserted!.name, inserted!.id);
+    }
+  }
+
+  // ---- link the Test Quality Reviewer to its 3 seeded skills, in order ----
+  const testQualityAgentId = agentIdByName.get('Test Quality Reviewer');
+  const uncoveredBranchGateId = skillIdByName.get('uncovered-branch-gate');
+  const cornerCaseChecklistId = skillIdByName.get('corner-case-checklist');
+  const mockOveruseId = skillIdByName.get('mock-overuse');
+  if (testQualityAgentId && uncoveredBranchGateId && cornerCaseChecklistId && mockOveruseId) {
+    await db
+      .insert(t.agentSkills)
+      .values([
+        { agentId: testQualityAgentId, skillId: uncoveredBranchGateId, order: 0 },
+        { agentId: testQualityAgentId, skillId: cornerCaseChecklistId, order: 1 },
+        { agentId: testQualityAgentId, skillId: mockOveruseId, order: 2 },
+      ])
+      .onConflictDoNothing();
   }
 
   return { workspaceId, userId };

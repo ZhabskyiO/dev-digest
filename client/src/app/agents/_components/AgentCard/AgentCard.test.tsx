@@ -46,4 +46,34 @@ describe("AgentCard (smoke)", () => {
     renderWithIntl(<AgentCard ag={{ ...AGENT, description: "" }} />);
     expect(screen.getByText("No description")).toBeInTheDocument();
   });
+
+  it("renders the run-stats row when stats with at least one run are given", () => {
+    renderWithIntl(
+      <AgentCard
+        ag={AGENT}
+        stats={{
+          runs: 142,
+          accept_rate: 78,
+          avg_cost_usd: 0.0421,
+          avg_cost_usd_delta: -0.01,
+          avg_duration_ms: 6234,
+          trend: [],
+        }}
+      />,
+    );
+    expect(screen.getByText("142 runs")).toBeInTheDocument();
+    expect(screen.getByText("78% accept")).toBeInTheDocument();
+    expect(screen.getByText("$0.042 avg")).toBeInTheDocument();
+  });
+
+  it("omits the run-stats row entirely for a brand-new agent with zero runs", () => {
+    renderWithIntl(
+      <AgentCard
+        ag={AGENT}
+        stats={{ runs: 0, accept_rate: null, avg_cost_usd: null, avg_cost_usd_delta: null, avg_duration_ms: null, trend: [] }}
+      />,
+    );
+    expect(screen.queryByText(/runs$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/accept$/)).not.toBeInTheDocument();
+  });
 });

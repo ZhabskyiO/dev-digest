@@ -15,4 +15,5 @@ export const s = {
   } satisfies CSSProperties,
   actions: { display: "flex", gap: 10, marginTop: 10 } satisfies CSSProperties,
   savedNote: { alignSelf: "center", fontSize: 13, color: "var(--ok)" } satisfies CSSProperties,
+  tokenCount: { fontSize: 12, color: "var(--text-muted)" } satisfies CSSProperties,
 } as const;

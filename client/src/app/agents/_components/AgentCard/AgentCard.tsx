@@ -5,21 +5,25 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, Toggle } from "@devdigest/ui";
-import type { Agent } from "@devdigest/shared";
+import type { Agent, AgentRunStats } from "@devdigest/shared";
 import { useDeleteAgent } from "../../../../lib/hooks/agents";
-import { modelColor } from "./helpers";
+import { formatCostUsd } from "../../../../lib/format";
+import { acceptRateColor, modelColor } from "./helpers";
 import { s } from "./styles";
 
 export function AgentCard({
   ag,
   active,
   skillCount,
+  stats,
   onClick,
   onToggle,
 }: {
   ag: Agent;
   active?: boolean;
   skillCount?: number;
+  /** Aggregate run stats (all-time) — omitted while loading, so the row is skipped. */
+  stats?: AgentRunStats;
   onClick?: () => void;
   onToggle?: (enabled: boolean) => void;
 }) {
@@ -69,6 +73,17 @@ export function AgentCard({
           </Badge>
         )}
       </div>
+      {stats != null && stats.runs > 0 && (
+        <div style={s.statsRow}>
+          <span>{t("card.runs", { count: stats.runs })}</span>
+          {stats.accept_rate != null && (
+            <span style={{ color: acceptRateColor(stats.accept_rate) }}>
+              {t("card.acceptRate", { pct: stats.accept_rate })}
+            </span>
+          )}
+          <span className="mono">{t("card.avgCost", { amount: formatCostUsd(stats.avg_cost_usd) })}</span>
+        </div>
+      )}
     </div>
   );
 }

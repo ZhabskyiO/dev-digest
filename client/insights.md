@@ -50,6 +50,25 @@ Quirks of dependencies, tooling, and the local environment.
   `fireEvent` from `@testing-library/react` instead — `fireEvent.mouseEnter` /
   `.click` cover hover and click paths, and `findBy*` polls long enough to
   absorb a component's own open/close delay timers without fake timers.
+- 2026-08-04 — In a `*.test.tsx`, a relative import of `messages/en/*.json`
+  needs **one more `../` than the same file's import of `lib/hooks/*`**, because
+  `messages/` sits at the client package root while `lib/` sits inside `src/`.
+  E.g. from `src/app/skills/_components/SkillCard/`, `lib/hooks/skills` resolves
+  with 4×`../` but `messages/en/skills.json` needs 5×`../` — count directory
+  segments from `client/` (the `messages/` parent), not from `src/`. Miscounting
+  by one gives Vite's `Failed to resolve import "…/messages/en/x.json"` with no
+  hint about the off-by-one; the existing `AgentCard.test.tsx` /
+  `AgentEditor.test.tsx` pairs are the ground truth for the right depth at a
+  given nesting level if in doubt.
+- 2026-08-04 — `tsconfig.json` has `noUncheckedIndexedAccess: true`, so any
+  `array[i]` (including `arr[i]` inside a `.forEach`/manual loop, not just
+  `.find()`) types as `T | undefined`, not `T` — assigning it straight into a
+  `T`-typed slot fails `tsc --noEmit` with "Type 'string | undefined' is not
+  assignable to type 'string'" even though the index is provably in range.
+  Guard with an explicit `!== undefined` check (or `?? fallback`) before the
+  assignment; `.at()` has the same `| undefined` return so it doesn't dodge
+  this. Easy to miss because plain array destructuring/`.map()` callbacks
+  don't trigger it — only direct indexed access does.
 
 ## Recurring Errors & Fixes
 

@@ -38,18 +38,32 @@
       "url": "From URL",
       "community": "Community"
     },
-    "importFailed": "Import failed"
+    "importFailed": "Import failed",
+    "comingSoon": "Coming soon — this import method isn't wired up yet."
   },
   "file": {
     "nameLabel": "Skill name",
     "nameHint": "Optional — derived from the first heading if blank.",
     "namePlaceholder": "pr-quality-rubric",
     "bodyLabel": "Skill body (Markdown)",
-    "bodyHint": "Pasted content is wrapped as untrusted data — never executed as instructions.",
+    "bodyHint": "Stored as data and disabled until you read and enable it — not executed as instructions until then.",
     "bodyPlaceholder": "# Rule\nDescribe the rule…",
     "importing": "Importing…",
     "import": "Import skill",
-    "success": "Imported \"{name}\" (stored as untrusted data)."
+    "success": "Imported \"{name}\" (stored as untrusted data).",
+    "orDivider": "or",
+    "uploadLabel": "Or upload a file",
+    "dropHint": "Drag a .md or .zip file here, or",
+    "browseButton": "Choose file",
+    "selectedFile": "{name} selected",
+    "removeFile": "Remove",
+    "previewHeading": "Preview",
+    "previewNameLabel": "Name",
+    "previewDescriptionLabel": "Description",
+    "skipped": "{count} files skipped",
+    "confirm": "Add skill",
+    "confirming": "Adding…",
+    "back": "Start over"
   },
   "url": {
     "label": "Skill URL",
@@ -93,9 +107,15 @@
     "disabled": "Disabled",
     "save": "Save",
     "edit": "Edit",
-    "untrustedNotice": "This skill came from an untrusted source. Its body is stored as data (delimiter-wrapped) and must be vetted before it is enabled for an agent.",
+    "cancel": "Cancel",
+    "untrustedNotice": "This skill came from an untrusted source. It's stored as data and left disabled until you read the body and enable it — enabling is the vetting step.",
     "bodyLabel": "Skill body (Markdown)",
     "bodyHint": "Saving a changed body creates a new immutable version.",
+    "tokenCount": "{count} / {budget} tokens",
     "version": "v{version}"
+  },
+  "edit": {
+    "descriptionLabel": "Description",
+    "descriptionHint": "Write this as an instruction — it's the skill's interface."
   }
 }

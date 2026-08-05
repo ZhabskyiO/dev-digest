@@ -7,16 +7,23 @@ export function MetricCard({
   label,
   value,
   delta,
+  deltaPrefix,
   color,
   trend,
   suffix,
+  badge,
 }: {
   label: string;
   value: React.ReactNode;
   delta?: number;
+  /** Rendered right before the delta magnitude, e.g. "$" for a cost delta ("-$0.01"). */
+  deltaPrefix?: string;
   color?: string;
   trend?: number[];
   suffix?: string;
+  /** Overrides the header-corner slot (normally the trend Sparkline) with
+   *  arbitrary content, e.g. a RingProgress badge. */
+  badge?: React.ReactNode;
 }) {
   const up = (delta ?? 0) > 0;
   const flat = delta === 0;
@@ -43,7 +50,7 @@ export function MetricCard({
         >
           {label}
         </span>
-        {trend && <Sparkline data={trend} color={color || "var(--accent)"} w={56} h={20} />}
+        {badge ?? (trend && <Sparkline data={trend} color={color || "var(--accent)"} w={56} h={20} />)}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 12 }}>
         <span className="tnum" style={{ fontSize: 32, fontWeight: 700, letterSpacing: "-0.02em" }}>
@@ -62,7 +69,10 @@ export function MetricCard({
             }}
           >
             <DeltaIcon size={12} />
-            <span className="tnum">{Math.abs(delta).toFixed(2)}</span>
+            <span className="tnum">
+              {deltaPrefix}
+              {Math.abs(delta).toFixed(2)}
+            </span>
           </span>
         )}
       </div>

@@ -1,0 +1,45 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for SkillsTab. */
+export const s = {
+  wrap: { maxWidth: 760 } satisfies CSSProperties,
+  header: { display: "flex", alignItems: "center", marginBottom: 20 } satisfies CSSProperties,
+  h2: { fontSize: 18, fontWeight: 700 } satisfies CSSProperties,
+  countLabel: { marginLeft: "auto", fontSize: 13, color: "var(--text-secondary)" } satisfies CSSProperties,
+  filterRow: { marginBottom: 14 } satisfies CSSProperties,
+  hint: { fontSize: 12.5, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 } satisfies CSSProperties,
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    margin: "18px 0 8px",
+  } satisfies CSSProperties,
+  list: { display: "flex", flexDirection: "column", gap: 6 } satisfies CSSProperties,
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "9px 10px",
+    borderRadius: 7,
+    border: "1px solid var(--border)",
+    background: "var(--bg-elevated)",
+  } satisfies CSSProperties,
+  dragHandle: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 20,
+    flexShrink: 0,
+    padding: 0,
+    background: "none",
+    border: "none",
+    color: "var(--text-muted)",
+    cursor: "grab",
+    touchAction: "none",
+  } satisfies CSSProperties,
+  dragHandleSpacer: { width: 20, flexShrink: 0 } satisfies CSSProperties,
+  name: { flex: 1, fontSize: 14, color: "var(--text-primary)" } satisfies CSSProperties,
+  empty: { fontSize: 13, color: "var(--text-muted)", padding: "10px 0" } satisfies CSSProperties,
+} as const;

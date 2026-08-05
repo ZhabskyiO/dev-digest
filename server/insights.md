@@ -39,6 +39,20 @@ Conventions and architectural decisions specific to this repo.
   a non-OpenRouter model prices as `null`; wiring the PriceBook alone will not
   fix it.
 
+- 2026-08-04 — ALWAYS pair a server-side "import/fetch this URL the user gave
+  us" feature with an SSRF guard — resolve the hostname via `dns.lookup`
+  *before* fetching, reject any resolved address that is loopback/private/
+  link-local (including the `169.254.169.254` cloud-metadata address), only
+  allow `http(s):`, and pass `redirect: 'manual'` so a redirect can't silently
+  reach an unchecked host. Template: `isDisallowedIp()`
+  (`modules/skills/helpers.ts`) + `SkillsService.fetchUrlBody()`
+  (`modules/skills/service.ts`) — the skills URL-import route originally did a
+  bare `fetch(url)` with no destination check, which is a ready-made SSRF (the
+  fetched response body is returned to the caller, so it doubles as response
+  reflection) caught in self-review, not by any test. Any future "paste a URL"
+  feature in this codebase should reuse or mirror this pair rather than calling
+  `fetch()` on user input directly.
+
 - 2026-07-30 — `pnpm db:seed` creates a review with **no `run_id` and no
   `agent_id`**, and inserts **no `agent_runs` rows at all** (`db/seed.ts:136-148`
   — grep `runId` there returns nothing). So anything that joins reviews ↔ runs on
@@ -57,6 +71,29 @@ _None yet._
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
+
+- 2026-08-05 — `The "string" argument must be of type string or an instance
+  of Buffer or ArrayBuffer. Received an instance of Date` from a Fastify route
+  handler (surfaces as a bare 500, no stack trace in the response body — add a
+  temporary `console.error(res.body)` around the failing `app.inject` call to
+  even see this message) means a raw `sql\`...${jsDate}...\`` template
+  (drizzle-orm's `sql` tag, not `gte`/`lt`/`eq`) interpolated a `Date` value
+  directly into a hand-written fragment. Column-comparison helpers
+  (`gte`/`lt`/`eq`) apply the column's type mapping to a Date correctly; a raw
+  `sql` template with a bare `${someDate}` does not, and the failure surfaces
+  deep in postgres-js's parameter encoding, nowhere near the query that caused
+  it. Fix: use the typed helper (`lt(col, date)`) instead of hand-rolling the
+  comparison in `sql\`\`` (`modules/agents/repository.ts`'s `avgCostDelta`).
+
+- 2026-08-04 — `error TS1005: ',' expected` reported dozens of lines past the
+  real problem, inside a `seed-prompts.ts`/`community-catalog.ts`-style markdown
+  body written as a backtick template literal, means an inline code span in the
+  markdown (e.g. `` `Object.keys` ``) used an unescaped backtick and silently
+  closed the template literal early. TSC then mis-parses everything after it as
+  new statements, so the reported error location is nowhere near the actual
+  unescaped backtick. Fix: every literal backtick inside such a body must be
+  `` \` ``, not `` ` `` — grep the body for bare `` ` `` pairs when this error
+  shows up in one of these files.
 
 - 2026-07-30 — `TypeError: diagnostics.tracingChannel is not a function` at
   `node_modules/fastify/lib/wrap-thenable.js` when running `pnpm test` means the

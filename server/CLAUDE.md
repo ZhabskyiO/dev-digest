@@ -26,6 +26,8 @@ Package manager: **pnpm**. `pnpm dev` (:3001) · `pnpm db:migrate` · `pnpm db:s
   `pnpm db:generate` then `pnpm db:migrate`. pgvector is enabled by migration `0000`.
 - The DB schema already contains *every* course table; unused ones sit empty.
   An empty table is not a missing migration.
+  `run_skills` (added for L02 per-run skill attribution) is the first table
+  added beyond the starter schema, so this claim now needs that one amendment.
 
 ## Non-obvious: what the model actually sees
 

@@ -4,7 +4,7 @@
  * answer the cost badge must never give.
  */
 import { describe, it, expect } from "vitest";
-import { formatCostUsd, formatTokensCompact, NO_VALUE } from "./format";
+import { formatCostUsd, formatDurationMs, formatTokensCompact, NO_VALUE } from "./format";
 
 describe("formatCostUsd", () => {
   it("renders missing data as an em dash, never $0.00", () => {
@@ -51,5 +51,18 @@ describe("formatTokensCompact", () => {
   it("renders missing data as an em dash", () => {
     expect(formatTokensCompact(null)).toBe(NO_VALUE);
     expect(formatTokensCompact(undefined)).toBe(NO_VALUE);
+  });
+});
+
+describe("formatDurationMs", () => {
+  it("renders as seconds with one decimal place", () => {
+    expect(formatDurationMs(6234)).toBe("6.2s");
+    expect(formatDurationMs(500)).toBe("0.5s");
+    expect(formatDurationMs(0)).toBe("0.0s");
+  });
+
+  it("renders missing data as an em dash", () => {
+    expect(formatDurationMs(null)).toBe(NO_VALUE);
+    expect(formatDurationMs(undefined)).toBe(NO_VALUE);
   });
 });

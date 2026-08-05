@@ -1,0 +1,13 @@
+{
+  "name": "Skills page renders the seeded skills and opens a preview",
+  "description": "Loads /skills and confirms a seeded skill (uncovered-branch-gate, linked to the Test Quality Reviewer agent) is rendered by SkillCard, then clicks it to open the right-hand SkillPreview pane via the ?id= master-detail URL. Exercises the /skills route, its GET /skills fetch, and the SkillCard -> SkillPreview selection flow. Read-only seeded data (no model call, no mutation).",
+  "steps": [
+    { "cmd": ["open", "{BASE}/skills"], "label": "load the skills page" },
+    { "cmd": ["wait", "--url", "/skills"], "label": "skills route reached" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "skills fetch settles" },
+    { "cmd": ["wait", "--text", "uncovered-branch-gate"], "label": "seeded skill card is visible" },
+    { "cmd": ["find", "text", "uncovered-branch-gate", "click"], "label": "select the seeded skill" },
+    { "cmd": ["wait", "--url", "id="], "label": "selection reflected in the ?id= URL" },
+    { "cmd": ["wait", "--text", "Catches branches and conditionals introduced by a diff with no covering test."], "label": "SkillPreview shows the skill's description" }
+  ]
+}

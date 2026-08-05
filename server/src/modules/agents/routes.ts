@@ -16,6 +16,17 @@ const VersionParams = z.object({
   version: z.coerce.number().int().positive(),
 });
 
+/** `/agents/:id/skills/:skillId` — both ids are uuids. */
+const AgentSkillParams = z.object({
+  id: z.string().uuid(),
+  skillId: z.string().uuid(),
+});
+
+/** `/agents/:id/stats?days=` — optional window in days; all-time if omitted. */
+const AgentStatsQuery = z.object({
+  days: z.coerce.number().int().positive().optional(),
+});
+
 /**
  * A2 — agents module (owner A2).
  *   GET    /agents                  → list (workspace-scoped)
@@ -26,6 +37,8 @@ const VersionParams = z.object({
  *   GET    /agents/:id/versions/:version → one config snapshot
  *   GET    /agents/:id/skills       → linked skills (ordered)
  *   POST   /agents/:id/skills       → set/reorder linked skills OR link one
+ *   DELETE /agents/:id/skills/:skillId → unlink one skill
+ *   GET    /agents/:id/stats        → aggregate run stats (card row + Stats tab tiles)
  *   GET    /agents/:id/models       → dynamic model list for the agent's provider
  *   GET    /providers/:id/models    → dynamic model list for a provider (editor)
  */
@@ -161,6 +174,28 @@ export default async function agentsRoutes(appBase: FastifyInstance) {
           : await service.linkSkill(workspaceId, req.params.id, body.skill_id!, body.order);
       if (!links) throw new NotFoundError('Agent not found');
       return links;
+    },
+  );
+
+  app.delete(
+    '/agents/:id/skills/:skillId',
+    { schema: { params: AgentSkillParams } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const links = await service.unlinkSkill(workspaceId, req.params.id, req.params.skillId);
+      if (!links) throw new NotFoundError('Agent not found');
+      return links;
+    },
+  );
+
+  app.get(
+    '/agents/:id/stats',
+    { schema: { params: IdParams, querystring: AgentStatsQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const stats = await service.runStats(workspaceId, req.params.id, req.query.days);
+      if (!stats) throw new NotFoundError('Agent not found');
+      return stats;
     },
   );
 

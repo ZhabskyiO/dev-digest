@@ -1,7 +1,10 @@
 {
   "card": {
     "noDescription": "No description",
-    "skillCount": "{count} skills"
+    "skillCount": "{count} skills",
+    "runs": "{count} runs",
+    "acceptRate": "{pct}% accept",
+    "avgCost": "{amount} avg"
   },
   "list": {
     "breadcrumbLab": "Skills Lab",
@@ -82,6 +85,7 @@
     },
     "repoIntel": "Repo intelligence",
     "repoIntelHint": "Inject repo context (repo skeleton, callers of changed symbols, and a 'high blast-radius' note) into this agent's review prompt. On by default. Turning it off sends only the diff — useful for cheap models or self-contained PRs.",
+    "systemPromptTokens": "{count} / {budget} tokens",
     "save": "Save agent",
     "saving": "Saving…",
     "saved": "Saved (v{version})",
@@ -91,7 +95,19 @@
     "title": "Skills",
     "enabledCount": "{linked} of {total} enabled",
     "filterPlaceholder": "Filter skills…",
-    "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach."
+    "orderHint": "Order matters — earlier skills appear earlier in the assembled prompt. Toggle to attach.",
+    "dragHandleLabel": "Drag to reorder",
+    "moreSkillsLabel": "More skills",
+    "noMatch": "No skills match your filter."
+  },
+  "stats": {
+    "totalRuns": "TOTAL RUNS (30D)",
+    "avgCostPerRun": "AVG COST / RUN",
+    "avgDuration": "AVG DURATION",
+    "acceptRate": "ACCEPT RATE",
+    "mostUsedSkills": "Most-used skills",
+    "caveat": "% is share of this agent's skill-using runs in the last 30 days — runs where no skill was enabled are excluded from the total.",
+    "empty": "No skill usage yet — run this agent a few times."
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."

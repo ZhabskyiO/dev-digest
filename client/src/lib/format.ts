@@ -29,3 +29,9 @@ export function formatTokensCompact(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return NO_VALUE;
   return Math.round(value).toLocaleString("en-US");
 }
+
+/** Run duration in seconds, one decimal place (6234ms → "6.2s"). */
+export function formatDurationMs(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return NO_VALUE;
+  return `${(value / 1000).toFixed(1)}s`;
+}

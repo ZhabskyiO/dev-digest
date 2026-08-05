@@ -6,13 +6,34 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, EmptyState, ErrorState, Skeleton, Icon } from "@devdigest/ui";
+import type { Agent } from "@devdigest/shared";
 import { AppShell } from "../../../../components/app-shell";
-import { useAgents, useUpdateAgent } from "../../../../lib/hooks/agents";
+import { useAgents, useAgentStats, useUpdateAgent } from "../../../../lib/hooks/agents";
+import { useAgentSkills } from "../../../../lib/hooks/skills";
 import { AgentCard } from "../AgentCard";
 import { CreateAgentModal } from "./_components/CreateAgentModal";
 import { TEMPLATES } from "./constants";
 import { filterAgents } from "./helpers";
 import { s } from "./styles";
+
+// Wraps AgentCard to fetch its own skill count + run stats (small N of
+// per-id queries, deduped/cached by React Query — an accepted pattern for a
+// grid this size).
+function AgentGridItem({
+  a,
+  onClick,
+  onToggle,
+}: {
+  a: Agent;
+  onClick: () => void;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const { data: links } = useAgentSkills(a.id);
+  const { data: stats } = useAgentStats(a.id);
+  return (
+    <AgentCard ag={a} skillCount={links?.length} stats={stats} onClick={onClick} onToggle={onToggle} />
+  );
+}
 
 export function AgentsListView() {
   const t = useTranslations("agents");
@@ -83,9 +104,9 @@ export function AgentsListView() {
         {list.length > 0 && (
           <div style={s.grid}>
             {list.map((a) => (
-              <AgentCard
+              <AgentGridItem
                 key={a.id}
-                ag={a}
+                a={a}
                 onClick={() => router.push(`/agents/${a.id}?tab=config`)}
                 onToggle={(enabled) => update.mutate({ id: a.id, patch: { enabled } })}
               />
