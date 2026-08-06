@@ -23,4 +23,9 @@ export const s = {
     lineHeight: 1.5,
   } satisfies CSSProperties,
   noteIcon: { flexShrink: 0, marginTop: 1 } satisfies CSSProperties,
+  hiddenNote: {
+    marginBottom: 14,
+    fontSize: 13,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
 } as const;

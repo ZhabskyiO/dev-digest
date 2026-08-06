@@ -14,7 +14,7 @@ import {
 } from "@devdigest/ui";
 import type { Provider } from "@devdigest/shared";
 import { useCreateAgent, useProviderModels } from "../../../../../../lib/hooks/agents";
-import { toModelOptions } from "../../../../../../lib/model-label";
+import { toModelOptions, usableModels } from "../../../../../../lib/model-label";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODAL_WIDTH, PROVIDER_OPTIONS } from "./constants";
 import { s } from "./styles";
 
@@ -33,7 +33,10 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
   // /models, with the price (USD per 1M in/out tokens) in the label when the
   // provider exposes it (OpenRouter); the value stays the bare model id.
   const { data: models } = useProviderModels(provider);
-  const modelOptions = toModelOptions(models);
+  // Models that can't return structured output are dropped — an agent review is
+  // a completeStructured call, so picking one is a run that dies on the API.
+  const { usable, hidden } = usableModels(models);
+  const modelOptions = toModelOptions(usable);
   const missingModel =
     model !== "" && !modelOptions.some((o) => (typeof o === "string" ? o : o.value) === model);
   // Keep DEFAULT_MODEL selectable while the first fetch is still in flight.
@@ -97,7 +100,9 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
           hint={
             noModels
               ? t("create.fields.modelEmptyHint", { provider })
-              : t("create.fields.modelHint")
+              : hidden > 0
+                ? t("create.fields.modelHiddenHint", { count: hidden })
+                : t("create.fields.modelHint")
           }
         >
           <SearchableSelect

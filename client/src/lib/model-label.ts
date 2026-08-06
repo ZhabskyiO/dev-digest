@@ -12,6 +12,29 @@ export interface PricedModel {
   id: string;
   pricing?: { promptPerM: number; completionPerM: number } | null;
   contextLength?: number | null;
+  supportsStructuredOutput?: boolean | null;
+}
+
+/**
+ * Drop models that cannot return structured output, and say how many went.
+ *
+ * Every review calls `completeStructured`, which always sends
+ * `response_format: json_schema` — a model without it either 400s
+ * ("Provider returned error") or ignores the parameter and returns prose that
+ * fails schema validation on every reprompt. Both surface as a dead run long
+ * after the model was chosen, so the picker rules them out instead.
+ *
+ * Only an explicit `false` hides a model. `null`/`undefined` means the provider
+ * doesn't report the capability (OpenAI and Anthropic never do), and hiding
+ * those would empty their pickers entirely.
+ */
+export function usableModels(models: PricedModel[] | undefined): {
+  usable: PricedModel[];
+  hidden: number;
+} {
+  const all = models ?? [];
+  const usable = all.filter((m) => m.supportsStructuredOutput !== false);
+  return { usable, hidden: all.length - usable.length };
 }
 
 /** Compact USD-per-1M formatter for the model price label. */

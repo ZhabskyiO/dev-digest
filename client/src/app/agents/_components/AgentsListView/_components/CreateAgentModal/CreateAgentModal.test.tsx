@@ -71,6 +71,22 @@ describe("CreateAgentModal model picker", () => {
     expect(create).toBeDisabled();
   });
 
+  it("hides models that can't return structured output, and says how many", () => {
+    providerModels.mockReturnValue({
+      data: [
+        { id: "gpt-4.1", provider: "openai", supportsStructuredOutput: true },
+        { id: "legacy-a", provider: "openai", supportsStructuredOutput: false },
+        { id: "legacy-b", provider: "openai", supportsStructuredOutput: false },
+      ],
+    });
+    renderModal();
+
+    openModelDropdown();
+    expect(screen.queryByRole("button", { name: "legacy-a" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "legacy-b" })).not.toBeInTheDocument();
+    expect(screen.getByText(/2 hidden/)).toBeInTheDocument();
+  });
+
   it("points at the API keys settings when the provider returns no models", () => {
     providerModels.mockReturnValue({ data: [] });
     renderModal();

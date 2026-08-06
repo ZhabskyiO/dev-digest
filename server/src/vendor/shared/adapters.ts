@@ -24,6 +24,17 @@ export const ModelInfo = z.object({
     .nullish(),
   /** Max context window in tokens (when the provider exposes it). */
   contextLength: z.number().int().nullish(),
+  /**
+   * Whether the model can honour `response_format: json_schema` — which every
+   * review needs, since `completeStructured` always sends one.
+   *
+   * Three-valued on purpose: `false` means the provider explicitly said no,
+   * `null`/absent means it doesn't report the capability at all. Only OpenRouter
+   * does (`supported_parameters`), so treat absent as UNKNOWN and keep showing
+   * the model — never as "unsupported", or the OpenAI and Anthropic pickers
+   * would come back empty.
+   */
+  supportsStructuredOutput: z.boolean().nullish(),
 });
 export type ModelInfo = z.infer<typeof ModelInfo>;
 

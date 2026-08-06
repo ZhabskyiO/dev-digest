@@ -6,7 +6,7 @@ import { FormField, TextInput, SelectInput, SearchableSelect, Textarea, Toggle, 
 import type { Agent, CiFailOn, Provider, ReviewStrategy } from "@devdigest/shared";
 import { useUpdateAgent, useProviderModels } from "../../../../../../../lib/hooks/agents";
 import { useToast } from "../../../../../../../lib/toast";
-import { toModelOptions } from "../../../../../../../lib/model-label";
+import { toModelOptions, usableModels } from "../../../../../../../lib/model-label";
 import { approxTokens, DEFAULT_TOKEN_BUDGET } from "../../../../../../../lib/tokens";
 import { CI_FAIL_ON_VALUES, OUTPUT_SCHEMA_VALUE, PROVIDER_OPTIONS, STRATEGY_VALUES } from "./constants";
 import { s } from "./styles";
@@ -42,8 +42,13 @@ export function ConfigTab({ agent }: { agent: Agent }) {
   const { data: models } = useProviderModels(provider);
   // Show the price (USD per 1M in/out tokens) in the label when the provider
   // exposes it (OpenRouter) so a cheap model is easy to pick; value stays the id.
-  const modelOptions = toModelOptions(models);
+  // Models that can't return structured output are dropped — every review is a
+  // completeStructured call, so those only ever produce a failed run.
+  const { usable, hidden } = usableModels(models);
+  const modelOptions = toModelOptions(usable);
   const hasModel = modelOptions.some((o) => (typeof o === "string" ? o : o.value) === model);
+  // An agent already saved on a now-hidden model keeps showing it, so the field
+  // never silently misreports what this agent will actually run.
   if (!hasModel) modelOptions.unshift(model);
   // Empty list after load = provider key missing/invalid (listModels failed) —
   // guide the user instead of showing a silent one-item dropdown.
@@ -100,7 +105,13 @@ export function ConfigTab({ agent }: { agent: Agent }) {
       </FormField>
       <FormField
         label={t("config.model")}
-        hint={noModels ? t("config.modelEmptyHint", { provider }) : t("config.modelHint")}
+        hint={
+          noModels
+            ? t("config.modelEmptyHint", { provider })
+            : hidden > 0
+              ? t("config.modelHiddenHint", { count: hidden })
+              : t("config.modelHint")
+        }
       >
         <SearchableSelect
           value={model}

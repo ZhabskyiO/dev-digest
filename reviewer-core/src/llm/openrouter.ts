@@ -119,6 +119,13 @@ export class OpenRouterProvider implements LLMProvider {
    * List models with pricing from the OpenRouter `/models` endpoint (the OpenAI
    * SDK's models.list strips the `pricing` field, so we fetch raw). Prices are
    * converted from per-token to USD per 1M tokens; cheapest output first.
+   *
+   * `supported_parameters` is also carried through, because `completeStructured`
+   * ALWAYS sends `response_format: json_schema`. A model without
+   * `structured_outputs` fails one of two ways, neither obvious from the error:
+   * OpenRouter rejects the call with `400 Provider returned error`, or it drops
+   * the parameter and returns prose that then fails schema validation on every
+   * reprompt. Surfacing the capability lets the picker rule those out up front.
    */
   async listModels(): Promise<ModelInfo[]> {
     const res = await fetch(`${this.baseURL}/models`, {
@@ -131,6 +138,7 @@ export class OpenRouterProvider implements LLMProvider {
         name?: string;
         context_length?: number;
         pricing?: { prompt?: string; completion?: string };
+        supported_parameters?: string[];
       }>;
     };
     const models: ModelInfo[] = (json.data ?? []).map((m) => {
@@ -143,12 +151,19 @@ export class OpenRouterProvider implements LLMProvider {
         Number.isFinite(prompt) && Number.isFinite(completion) && prompt >= 0 && completion >= 0
           ? { promptPerM: prompt * 1_000_000, completionPerM: completion * 1_000_000 }
           : null;
+      // Absent `supported_parameters` = the API didn't say, which is NOT the
+      // same as "no". Report null so the picker keeps showing the model rather
+      // than hiding the whole catalogue if OpenRouter ever drops the field.
+      const params = m.supported_parameters;
       return {
         id: m.id,
         provider: 'openrouter' as const,
         label: m.name ?? null,
         pricing,
         contextLength: m.context_length ?? null,
+        supportsStructuredOutput: Array.isArray(params)
+          ? params.includes('structured_outputs')
+          : null,
       };
     });
     return models.sort(

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { FormField, SearchableSelect, Icon } from "@devdigest/ui";
 import { useSettings, useUpdateSettings } from "../../../../../../../lib/hooks";
 import { useProviderModels } from "../../../../../../../lib/hooks/agents";
-import { toModelOptions } from "../../../../../../../lib/model-label";
+import { toModelOptions, usableModels } from "../../../../../../../lib/model-label";
 import { FEATURE_MODELS } from "../../../../../../../lib/feature-models";
 import type { FeatureModelChoice, FeatureModelId } from "../../../../../../../lib/types";
 import { SectionTitle } from "../SectionTitle";
@@ -24,7 +24,10 @@ export function SettingsModels() {
   const { data: models } = useProviderModels("openrouter");
 
   const chosen = (settings?.feature_models ?? {}) as Partial<Record<FeatureModelId, FeatureModelChoice>>;
-  const baseOptions = toModelOptions(models);
+  // Every feature here drives completeStructured too, so the same filter
+  // applies: a model without structured output can only ever fail the call.
+  const { usable, hidden } = usableModels(models);
+  const baseOptions = toModelOptions(usable);
   const noModels = models !== undefined && models.length === 0;
 
   const setModel = (id: FeatureModelId, model: string) =>
@@ -35,6 +38,7 @@ export function SettingsModels() {
   return (
     <div style={s.wrap}>
       <SectionTitle title={t("models.title")} body={t("models.body")} />
+      {hidden > 0 && <p style={s.hiddenNote}>{t("models.hiddenNote", { count: hidden })}</p>}
 
       {FEATURE_MODELS.map((f) => {
         const current = chosen[f.id]?.model ?? f.defaultModel;
