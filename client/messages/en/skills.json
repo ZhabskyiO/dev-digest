@@ -67,8 +67,8 @@
   },
   "url": {
     "label": "Skill URL",
-    "hint": "Fetched server-side, stored as untrusted, and left disabled until vetted.",
-    "placeholder": "https://example.com/skills/security.md",
+    "hint": "Must point at raw markdown. A GitHub/GitLab/gist page URL is rewritten to its raw form automatically; HTML pages are refused.",
+    "placeholder": "https://raw.githubusercontent.com/owner/repo/main/skill.md",
     "fetching": "Fetching…",
     "import": "Import from URL",
     "success": "Imported \"{name}\". Disabled until you vet + enable it."
@@ -99,7 +99,10 @@
       "extracted": "Extracted",
       "community": "Community",
       "imported_url": "Imported"
-    }
+    },
+    "agentCount": "{count, plural, one {# agent} other {# agents}}",
+    "pull": "{pct}% pull",
+    "accept": "{pct}% accept"
   },
   "preview": {
     "untrustedBadge": "untrusted source",
@@ -117,5 +120,75 @@
   "edit": {
     "descriptionLabel": "Description",
     "descriptionHint": "Write this as an instruction — it's the skill's interface."
+  },
+  "risks": {
+    "heading": "Review before enabling",
+    "intro": "This body came from outside the workspace and will become part of an agent's prompt. Nothing here blocks the import — the skill lands disabled, and these are the spots worth reading first.",
+    "html_markup": "Contains raw HTML tags.",
+    "hidden_text": "Contains HTML comments or invisible characters — text you can't see in the preview. Invisible characters were removed.",
+    "instruction_override": "Contains text addressed at the model rather than at you (e.g. overriding earlier instructions).",
+    "external_url": "Links to other hosts. Check where they point before enabling.",
+    "credential_reference": "Mentions environment variables or key-shaped strings.",
+    "data_uri": "Embeds a data: or base64 blob.",
+    "oversized": "Long enough to crowd out the rest of the prompt."
+  },
+  "editor": {
+    "tabs": {
+      "config": "Config",
+      "preview": "Preview",
+      "stats": "Stats",
+      "versions": "Versions"
+    }
+  },
+  "config": {
+    "heading": "Configuration",
+    "enabled": "Enabled",
+    "enabledHint": "Whether this block is added to agents' prompts.",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "typeLabel": "Type",
+    "bodyLabel": "Skill body",
+    "unsaved": "unsaved",
+    "tokenCount": "{count} tokens",
+    "changeLabel": "What changed?",
+    "changeHint": "Optional — shown against this edit in Versions. Only recorded when the body changes.",
+    "changePlaceholder": "Tightened scope rule; cap at 5 high-signal findings",
+    "save": "Save skill",
+    "saving": "Saving…",
+    "savedToast": "Saved as v{version}."
+  },
+  "previewTab": {
+    "heading": "Preview",
+    "subtitle": "Rendered as the reviewing agent receives it.",
+    "empty": "This skill has no body yet."
+  },
+  "stats": {
+    "usedBy": "USED BY",
+    "usedByUnit": "{count, plural, one {agent} other {agents}}",
+    "pullFrequency": "PULL FREQUENCY",
+    "acceptRate": "ACCEPT RATE",
+    "findings": "FINDINGS ({days}D)",
+    "agentsHeading": "Agents using this skill",
+    "agentsEmpty": "Not attached to any agent yet.",
+    "open": "Open",
+    "categoryHeading": "Findings by category",
+    "categoryEmpty": "No findings attributed to this skill yet.",
+    "caveat": "A run attaches several skills and no table links a finding to the one that caused it, so findings and accept rate are credited to every skill on the run — read them as a signal, not a measurement. Pull frequency is a share of runs that used any skill, not of all runs."
+  },
+  "versions": {
+    "heading": "Version history",
+    "count": "{count, plural, one {# version} other {# versions}}",
+    "subtitle": "Every save snapshots the body so eval runs stay reproducible against the exact text they scored.",
+    "current": "Current",
+    "unlabelled": "No note for this version",
+    "diff": "Diff",
+    "hideDiff": "Hide diff",
+    "restore": "Restore",
+    "restoring": "Restoring…",
+    "restoredToast": "Restored v{version} as v{newVersion}.",
+    "diffHeading": "v{version} → current",
+    "diffIdentical": "Identical to the current body.",
+    "loadError": "Could not load version history.",
+    "empty": "No snapshots yet — the first body edit records one."
   }
 }

@@ -35,7 +35,15 @@ export const s = {
   } satisfies CSSProperties,
   railList: { flex: 1, overflow: "auto", padding: "0 12px 12px" } satisfies CSSProperties,
   railSkeletons: { padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 } satisfies CSSProperties,
-  detail: { flex: 1, minWidth: 0, minHeight: 0, overflow: "auto" } satisfies CSSProperties,
+  // SkillDetail is a flex column that scrolls its own body, so the pane must
+  // stretch it and NOT add a second scrollbar of its own.
+  detail: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    display: "flex",
+    overflow: "hidden",
+  } satisfies CSSProperties,
   selectPrompt: {
     height: "100%",
     display: "flex",

@@ -40,6 +40,22 @@ export const s = {
     textOverflow: "ellipsis",
   } satisfies CSSProperties,
   metaRow: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } satisfies CSSProperties,
+  statsRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 10,
+    paddingTop: 9,
+    borderTop: "1px solid var(--border)",
+    fontSize: 11.5,
+    color: "var(--text-muted)",
+    flexWrap: "wrap",
+  } satisfies CSSProperties,
+  /** Same accept-rate bands as the Stats tab, so a card and its tab agree. */
+  accept: (pct: number): CSSProperties => ({
+    color: pct >= 60 ? "var(--ok)" : pct >= 40 ? "var(--warn)" : "var(--crit)",
+    fontWeight: 600,
+  }),
   typeChip: (color: string): CSSProperties => ({
     fontSize: 12,
     fontWeight: 600,

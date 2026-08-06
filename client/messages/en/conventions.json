@@ -8,19 +8,73 @@
     "scanning": "Scanning…",
     "rescan": "Re-scan",
     "runExtraction": "Run extraction",
+    "createSkill": "Create skill",
     "extractionFailed": "Extraction failed",
     "loadError": "Could not load conventions.",
+    "retry": "Retry",
+    "notIndexedTitle": "This repo has not been indexed yet",
+    "notIndexedBody": "Convention extraction samples the highest-ranked files, which needs a repo-intel index. Re-sync the repo, then scan again.",
     "empty": {
       "title": "No conventions extracted yet",
       "body": "Scan the repo to surface house-rules — naming, error handling, structure — each backed by evidence you can turn into a Skill.",
       "cta": "Run extraction"
     },
-    "candidateCount": "{count, plural, one {# candidate} other {# candidates}} · grounded against sampled files"
+    "emptyFiltered": {
+      "title": "Nothing in this view",
+      "body": "No candidate has this status yet."
+    },
+    "acceptedCount": "{accepted} of {total} accepted",
+    "scanSummary": "{kept, plural, one {# new candidate} other {# new candidates}} · {dropped} dropped for unverifiable evidence · {duplicates} already known"
+  },
+  "filter": {
+    "pending": "Pending",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "all": "All"
   },
   "card": {
     "confidence": "Confidence",
+    "github": "GitHub",
+    "openOnGitHub": "Open {ref} on GitHub",
+    "accept": "Accept",
     "accepted": "Accepted",
-    "accepting": "Accepting…",
-    "acceptAsSkill": "Accept as Skill"
+    "reject": "Reject",
+    "rejected": "Rejected",
+    "reopen": "Reopen",
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "category": {
+      "naming": "naming",
+      "structure": "structure",
+      "error-handling": "error handling",
+      "testing": "testing",
+      "typing": "typing",
+      "imports": "imports",
+      "api-design": "api design",
+      "styling": "styling",
+      "other": "other"
+    }
+  },
+  "modal": {
+    "title": "Create skill from conventions",
+    "mergedFrom": "Merged from <b>{count, plural, one {# accepted convention} other {# accepted conventions}}</b> in <code>{repo}</code>. Everything below is editable before you save.",
+    "nameLabel": "Name",
+    "descriptionLabel": "Description",
+    "typeLabel": "Type",
+    "enabledLabel": "Enabled",
+    "enabledHint": "Whether this block is added to agents' prompts.",
+    "agentLabel": "Attach to agent",
+    "agentHint": "Appended to the end of that agent's skill list. You can reorder it later on the agent's Skills tab.",
+    "agentNone": "Don't attach",
+    "bodyLabel": "Skill body",
+    "unsaved": "unsaved",
+    "tokenCount": "{count} tokens",
+    "savedAs": "Saved as v1 · added to Skills Lab",
+    "save": "Create skill",
+    "saving": "Creating…",
+    "cancel": "Cancel",
+    "failed": "Could not create the skill.",
+    "defaultDescription": "{count, plural, one {# house convention} other {# house conventions}} extracted from {repo}"
   }
 }

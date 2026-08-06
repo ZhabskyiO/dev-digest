@@ -74,7 +74,16 @@ Quirks of dependencies, tooling, and the local environment.
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
 
-_None yet._
+- 2026-08-05 — A bare `Internal Server Error` / HTTP 500 on **every** route of the
+  running dev server (`/`, `/agents`, `/skills`, `/settings/…` all at once) means
+  `pnpm build` was run in `client/` while `pnpm dev` was still running. **NEVER
+  run `pnpm build` against a live dev server** — both write `client/.next/`, and
+  the production artifacts (`.next/BUILD_ID`, `prerender-manifest.json`,
+  `export-marker.json`) leave `next dev` reading a tree it did not create. The
+  blanket scope is the tell: a code fault breaks the route you touched, not the
+  whole app, so do not go hunting in your diff. Fix: stop the dev server,
+  `rm -rf client/.next`, restart it. To check a production build safely, do it in
+  a throwaway copy or after stopping dev.
 
 ## Session Notes
 

@@ -30,8 +30,11 @@ const SkillUsageQuery = z.object({
  *   POST   /skills                       → create
  *   PUT    /skills/:id                   → update (body change bumps version)
  *   DELETE /skills/:id                   → delete
+ *   GET    /skills/stats                 → per-skill summary rows (list rail)
  *   GET    /skills/:id/versions          → body history (newest first)
  *   GET    /skills/:id/versions/:version → one body snapshot
+ *   POST   /skills/:id/versions/:version/restore → re-apply an old body (201)
+ *   GET    /skills/:id/stats             → usage/accept/findings for one skill
  *   GET    /skills/:id/agents            → agents using this skill
  *   POST   /skills/import/preview        → preview an import (file/url/community); persists nothing
  *   GET    /skills/community             → curated community catalog
@@ -54,6 +57,13 @@ const UpdateSkillBody = z.object({
   body: z.string().min(1).optional(),
   source: SkillSource.optional(),
   enabled: z.boolean().optional(),
+  /** "What changed" note for the snapshot this edit creates. Ignored when the
+   *  body is unchanged, because no snapshot is written then. */
+  version_label: z.string().max(120).optional(),
+});
+
+const StatsQuery = z.object({
+  days: z.coerce.number().int().positive().optional(),
 });
 
 export default async function skillsRoutes(appBase: FastifyInstance) {
@@ -63,6 +73,13 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
   app.get('/skills', async (req) => {
     const { workspaceId } = await getContext(app.container, req);
     return service.list(workspaceId);
+  });
+
+  // MUST be declared before `/skills/:id` — Fastify would otherwise match
+  // "stats" as an id and reject it against the uuid schema with a 422.
+  app.get('/skills/stats', { schema: { querystring: StatsQuery } }, async (req) => {
+    const { workspaceId } = await getContext(app.container, req);
+    return service.statsSummaries(workspaceId, req.query.days);
   });
 
   app.get('/skills/:id', { schema: { params: IdParams } }, async (req) => {
@@ -92,7 +109,11 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
     { schema: { params: IdParams, body: UpdateSkillBody } },
     async (req) => {
       const { workspaceId } = await getContext(app.container, req);
-      const skill = await service.update(workspaceId, req.params.id, req.body);
+      const { version_label, ...rest } = req.body;
+      const skill = await service.update(workspaceId, req.params.id, {
+        ...rest,
+        ...(version_label !== undefined ? { versionLabel: version_label } : {}),
+      });
       if (!skill) throw new NotFoundError('Skill not found');
       return skill;
     },
@@ -120,6 +141,29 @@ export default async function skillsRoutes(appBase: FastifyInstance) {
       const version = await service.getVersion(workspaceId, req.params.id, req.params.version);
       if (!version) throw new NotFoundError('Skill version not found');
       return version;
+    },
+  );
+
+  app.post(
+    '/skills/:id/versions/:version/restore',
+    { schema: { params: VersionParams } },
+    async (req, reply) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const skill = await service.restoreVersion(workspaceId, req.params.id, req.params.version);
+      if (!skill) throw new NotFoundError('Skill version not found');
+      reply.status(201);
+      return skill;
+    },
+  );
+
+  app.get(
+    '/skills/:id/stats',
+    { schema: { params: IdParams, querystring: StatsQuery } },
+    async (req) => {
+      const { workspaceId } = await getContext(app.container, req);
+      const stats = await service.stats(workspaceId, req.params.id, req.query.days);
+      if (!stats) throw new NotFoundError('Skill not found');
+      return stats;
     },
   );
 

@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
+
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
 import type { SkillSource, SkillType } from '@devdigest/shared';
@@ -23,6 +24,8 @@ export interface InsertSkill {
   source: SkillSource;
   body: string;
   enabled?: boolean;
+  /** Files the skill's rules were extracted from — set by convention extraction. */
+  evidenceFiles?: string[];
 }
 
 export interface UpdateSkill {
@@ -32,6 +35,8 @@ export interface UpdateSkill {
   source?: SkillSource;
   body?: string;
   enabled?: boolean;
+  /** "What changed" note, recorded only when this patch snapshots a new body. */
+  versionLabel?: string;
 }
 
 /** One row of the per-agent skill-usage rollup, pre-DTO/pre-pct. */
@@ -80,6 +85,7 @@ export class SkillsRepository {
         body: values.body,
         enabled: values.enabled ?? true,
         version: 1,
+        ...(values.evidenceFiles ? { evidenceFiles: values.evidenceFiles } : {}),
       })
       .returning();
     await this.snapshotVersion(row!, 1);
@@ -115,14 +121,25 @@ export class SkillsRepository {
       .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
       .returning();
 
-    if (configChanged && row) await this.snapshotVersion(row, nextVersion);
+    // A label with no body change has nowhere to live — no snapshot is written,
+    // so it is dropped rather than attached to the previous version.
+    if (configChanged && row) await this.snapshotVersion(row, nextVersion, patch.versionLabel);
     return row;
   }
 
-  private async snapshotVersion(row: SkillRow, version: number): Promise<void> {
+  private async snapshotVersion(
+    row: SkillRow,
+    version: number,
+    label?: string,
+  ): Promise<void> {
     await this.db
       .insert(t.skillVersions)
-      .values({ skillId: row.id, version, body: row.body })
+      .values({
+        skillId: row.id,
+        version,
+        body: row.body,
+        ...(label ? { label } : {}),
+      })
       .onConflictDoNothing();
   }
 
@@ -214,5 +231,193 @@ export class SkillsRepository {
     await this.db
       .insert(t.runSkills)
       .values(skillIds.map((skillId, order) => ({ runId, skillId, order })));
+  }
+
+  // ---- per-skill stats -----------------------------------------------------
+  //
+  // Raw numerators and denominators only; the ratio and null-handling math is
+  // the service's job (same split as AgentsRepository.runStats).
+  //
+  // Everything findings-related walks
+  //   findings → reviews (review_id) → agent_runs (reviews.run_id) → run_skills
+  // `reviews.run_id` is nullable and carries no FK, so a review that was never
+  // linked to a run drops out of these joins. That is correct: an unattributed
+  // review can't be credited to a skill.
+
+  /** How many agents have this skill attached (configuration, not runs). */
+  async agentsUsingCount(skillId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(t.agentSkills)
+      .where(eq(t.agentSkills.skillId, skillId));
+    return row?.count ?? 0;
+  }
+
+  /** Distinct runs in the window that pulled this skill (the `pull_pct`
+   *  numerator; `workspaceSkillUsingRuns` is the denominator). */
+  async skillRunCount(workspaceId: string, skillId: string, days: number): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 86400000);
+    const [row] = await this.db
+      .select({ count: sql<number>`count(distinct ${t.runSkills.runId})`.mapWith(Number) })
+      .from(t.runSkills)
+      .innerJoin(t.agentRuns, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(
+        and(
+          eq(t.runSkills.skillId, skillId),
+          eq(t.agentRuns.workspaceId, workspaceId),
+          gte(t.agentRuns.ranAt, cutoff),
+        ),
+      );
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Findings from runs that pulled this skill, split by triage state. A finding
+   * is accepted, dismissed, or untouched — so the accept-rate denominator is
+   * `accepted + dismissed`, never `total` (dividing by total would read every
+   * untriaged finding as a rejection).
+   */
+  async skillFindingCounts(
+    workspaceId: string,
+    skillId: string,
+    days: number,
+  ): Promise<{ total: number; accepted: number; dismissed: number }> {
+    const cutoff = new Date(Date.now() - days * 86400000);
+    const [row] = await this.db
+      .select({
+        total: sql<number>`count(*)`.mapWith(Number),
+        accepted: sql<number>`count(*) filter (where ${t.findings.acceptedAt} is not null)`.mapWith(Number),
+        dismissed: sql<number>`count(*) filter (where ${t.findings.dismissedAt} is not null)`.mapWith(Number),
+      })
+      .from(t.findings)
+      .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+      .innerJoin(t.agentRuns, eq(t.reviews.runId, t.agentRuns.id))
+      .innerJoin(t.runSkills, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(
+        and(
+          eq(t.runSkills.skillId, skillId),
+          eq(t.agentRuns.workspaceId, workspaceId),
+          gte(t.agentRuns.ranAt, cutoff),
+        ),
+      );
+    return {
+      total: row?.total ?? 0,
+      accepted: row?.accepted ?? 0,
+      dismissed: row?.dismissed ?? 0,
+    };
+  }
+
+  /** Findings-by-category for this skill. `category` is free text in the DB, so
+   *  callers must not assume only the five contract values appear. */
+  async skillFindingsByCategory(
+    workspaceId: string,
+    skillId: string,
+    days: number,
+  ): Promise<{ category: string; count: number }[]> {
+    const cutoff = new Date(Date.now() - days * 86400000);
+    const rows = await this.db
+      .select({
+        category: t.findings.category,
+        count: sql<number>`count(*)`.mapWith(Number),
+      })
+      .from(t.findings)
+      .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+      .innerJoin(t.agentRuns, eq(t.reviews.runId, t.agentRuns.id))
+      .innerJoin(t.runSkills, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(
+        and(
+          eq(t.runSkills.skillId, skillId),
+          eq(t.agentRuns.workspaceId, workspaceId),
+          gte(t.agentRuns.ranAt, cutoff),
+        ),
+      )
+      .groupBy(t.findings.category)
+      .orderBy(desc(sql`count(*)`));
+    return rows;
+  }
+
+  /**
+   * The same aggregates for EVERY skill in the workspace, for the list rail —
+   * four grouped queries stitched in JS, rather than N per-card HTTP requests.
+   * Skills with no runs/agents still get a row (zeros), because a left join
+   * would drop them and the rail must show every skill.
+   */
+  async skillSummaries(
+    workspaceId: string,
+    days: number,
+  ): Promise<
+    {
+      skillId: string;
+      agentsUsing: number;
+      runs: number;
+      accepted: number;
+      dismissed: number;
+    }[]
+  > {
+    const cutoff = new Date(Date.now() - days * 86400000);
+
+    const agentCounts = await this.db
+      .select({
+        skillId: t.agentSkills.skillId,
+        count: sql<number>`count(*)`.mapWith(Number),
+      })
+      .from(t.agentSkills)
+      .innerJoin(t.skills, eq(t.agentSkills.skillId, t.skills.id))
+      .where(eq(t.skills.workspaceId, workspaceId))
+      .groupBy(t.agentSkills.skillId);
+
+    const runCounts = await this.db
+      .select({
+        skillId: t.runSkills.skillId,
+        count: sql<number>`count(distinct ${t.runSkills.runId})`.mapWith(Number),
+      })
+      .from(t.runSkills)
+      .innerJoin(t.agentRuns, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(and(eq(t.agentRuns.workspaceId, workspaceId), gte(t.agentRuns.ranAt, cutoff)))
+      .groupBy(t.runSkills.skillId);
+
+    const findingCounts = await this.db
+      .select({
+        skillId: t.runSkills.skillId,
+        accepted: sql<number>`count(*) filter (where ${t.findings.acceptedAt} is not null)`.mapWith(Number),
+        dismissed: sql<number>`count(*) filter (where ${t.findings.dismissedAt} is not null)`.mapWith(Number),
+      })
+      .from(t.findings)
+      .innerJoin(t.reviews, eq(t.findings.reviewId, t.reviews.id))
+      .innerJoin(t.agentRuns, eq(t.reviews.runId, t.agentRuns.id))
+      .innerJoin(t.runSkills, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(and(eq(t.agentRuns.workspaceId, workspaceId), gte(t.agentRuns.ranAt, cutoff)))
+      .groupBy(t.runSkills.skillId);
+
+    const skillIds = await this.db
+      .select({ id: t.skills.id })
+      .from(t.skills)
+      .where(eq(t.skills.workspaceId, workspaceId));
+
+    const agentMap = new Map(agentCounts.map((r) => [r.skillId, r.count]));
+    const runMap = new Map(runCounts.map((r) => [r.skillId, r.count]));
+    const findingMap = new Map(findingCounts.map((r) => [r.skillId, r]));
+
+    return skillIds.map(({ id }) => {
+      const f = findingMap.get(id);
+      return {
+        skillId: id,
+        agentsUsing: agentMap.get(id) ?? 0,
+        runs: runMap.get(id) ?? 0,
+        accepted: f?.accepted ?? 0,
+        dismissed: f?.dismissed ?? 0,
+      };
+    });
+  }
+
+  /** Workspace-wide skill-using run count — the shared `pull_pct` denominator. */
+  async workspaceSkillUsingRuns(workspaceId: string, days: number): Promise<number> {
+    const cutoff = new Date(Date.now() - days * 86400000);
+    const [row] = await this.db
+      .select({ count: sql<number>`count(distinct ${t.runSkills.runId})`.mapWith(Number) })
+      .from(t.runSkills)
+      .innerJoin(t.agentRuns, eq(t.runSkills.runId, t.agentRuns.id))
+      .where(and(eq(t.agentRuns.workspaceId, workspaceId), gte(t.agentRuns.ranAt, cutoff)));
+    return row?.count ?? 0;
   }
 }

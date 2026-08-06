@@ -35,6 +35,12 @@ export const skills = pgTable(
   }),
 );
 
+/**
+ * Immutable body snapshots. Written only when a skill's `body` actually changes,
+ * so eval runs stay reproducible against the exact text they scored — which is
+ * also why a restore appends a new snapshot instead of rewinding.
+ * `label` is the author's optional "what changed" note for the version.
+ */
 export const skillVersions = pgTable(
   'skill_versions',
   {
@@ -43,6 +49,7 @@ export const skillVersions = pgTable(
       .references(() => skills.id, { onDelete: 'cascade' }),
     version: integer('version').notNull(),
     body: text('body').notNull(),
+    label: text('label'),
     createdAt: now(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.skillId, t.version] }) }),

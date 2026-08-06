@@ -7,6 +7,8 @@ import type {
   SkillImportPreview,
   SkillImportRequest,
   SkillSource,
+  SkillStats,
+  SkillStatsSummary,
   SkillType,
   SkillUsage,
   SkillVersion,
@@ -14,16 +16,25 @@ import type {
 import { SkillType as SkillTypeSchema } from '@devdigest/shared';
 import { SkillsRepository } from './repository.js';
 import {
+  clampStatsDays,
   deriveSkillName,
   extractSkillFromArchive,
   isDisallowedIp,
+  looksLikeHtml,
+  normalizeImportUrl,
   parseFrontmatter,
+  sanitizeSkillBody,
+  scanSkillBodyRisks,
   toSkillDto,
   toSkillVersionDto,
 } from './helpers.js';
 import { toAgentDto } from '../agents/helpers.js';
 import { getCommunitySkillBody, searchCommunitySkills } from './community-catalog.js';
-import { MAX_URL_IMPORT_BYTES, URL_IMPORT_TIMEOUT_MS } from './constants.js';
+import {
+  ALLOWED_IMPORT_CONTENT_TYPES,
+  MAX_URL_IMPORT_BYTES,
+  URL_IMPORT_TIMEOUT_MS,
+} from './constants.js';
 import { NotFoundError, ValidationError } from '../../platform/errors.js';
 
 /**
@@ -49,6 +60,8 @@ export interface UpdateSkillInput {
   source?: SkillSource;
   body?: string;
   enabled?: boolean;
+  /** "What changed" note; only recorded when this patch snapshots a new body. */
+  versionLabel?: string;
 }
 
 /** First non-empty, non-heading line of a markdown body, trimmed and capped — the
@@ -110,6 +123,7 @@ export class SkillsService {
       ...(patch.source !== undefined ? { source: patch.source } : {}),
       ...(patch.body !== undefined ? { body: patch.body } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      ...(patch.versionLabel !== undefined ? { versionLabel: patch.versionLabel } : {}),
     });
     return row ? toSkillDto(row) : undefined;
   }
@@ -188,14 +202,26 @@ export class SkillsService {
       source = 'community';
     }
 
+    // A skill body is untrusted text headed for a model prompt. Reject anything
+    // that is plainly a web page rather than a skill (a lying content-type, or
+    // a file/archive that never had one), and strip invisible characters so the
+    // preview a human vets is byte-for-byte what the model would receive.
+    if (looksLikeHtml(body)) {
+      throw new ValidationError(
+        'That looks like an HTML page, not a skill. Link the raw markdown file instead.',
+      );
+    }
+    body = sanitizeSkillBody(body);
+
     const frontmatter = parseFrontmatter(body);
     const name = deriveSkillName(body);
     const description = frontmatter.description ?? synthesizeDescription(body);
     const type = SkillTypeSchema.safeParse(frontmatter.type).success
       ? (frontmatter.type as SkillType)
       : 'custom';
+    const warnings = scanSkillBodyRisks(body);
 
-    return { name, description, type, body, source, skipped };
+    return { name, description, type, body, source, skipped, warnings };
   }
 
   /**
@@ -213,7 +239,9 @@ export class SkillsService {
   private async fetchUrlBody(url: string): Promise<string> {
     let parsed: URL;
     try {
-      parsed = new URL(url);
+      // Rewrite a code-host page URL to the raw-markdown one FIRST, so the
+      // SSRF checks below run against the address actually fetched.
+      parsed = new URL(normalizeImportUrl(url));
     } catch {
       throw new ValidationError('Invalid URL');
     }
@@ -256,10 +284,15 @@ export class SkillsService {
       throw new ValidationError(`Failed to fetch skill from URL: HTTP ${response.status}`);
     }
 
+    // Allowlist the markdown/plain subtypes rather than all of `text/*`: a skill
+    // is markdown, and `text/html` means we'd be importing a whole rendered web
+    // page — nav, scripts, embedded JSON — into a body bound for a model prompt.
     const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.toLowerCase().startsWith('text/')) {
+    const mediaType = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!ALLOWED_IMPORT_CONTENT_TYPES.includes(mediaType as never)) {
       throw new ValidationError(
-        `Unsupported content-type "${contentType || 'unknown'}" — only text/* URLs can be imported`,
+        `Unsupported content-type "${mediaType || 'unknown'}" — link a raw markdown file ` +
+          `(one of: ${ALLOWED_IMPORT_CONTENT_TYPES.join(', ')})`,
       );
     }
 
@@ -298,6 +331,81 @@ export class SkillsService {
       }
     }
     return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
+  }
+
+  // ---- stats ---------------------------------------------------------------
+
+  /**
+   * Stats for one skill. The repository returns raw numerators and denominators;
+   * every ratio is computed here and is `null` when its denominator is zero, so
+   * "no data yet" renders as "—" instead of a confident 0%.
+   */
+  async stats(
+    workspaceId: string,
+    skillId: string,
+    days?: number,
+  ): Promise<SkillStats | undefined> {
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+
+    const window = clampStatsDays(days);
+    const [agentsUsing, runs, skillUsingRuns, findings, byCategory] = await Promise.all([
+      this.repo.agentsUsingCount(skillId),
+      this.repo.skillRunCount(workspaceId, skillId, window),
+      this.repo.workspaceSkillUsingRuns(workspaceId, window),
+      this.repo.skillFindingCounts(workspaceId, skillId, window),
+      this.repo.skillFindingsByCategory(workspaceId, skillId, window),
+    ]);
+
+    const triaged = findings.accepted + findings.dismissed;
+    return {
+      agents_using: agentsUsing,
+      runs,
+      pull_pct: skillUsingRuns > 0 ? Math.round((runs / skillUsingRuns) * 100) : null,
+      accept_rate: triaged > 0 ? Math.round((findings.accepted / triaged) * 100) : null,
+      findings: findings.total,
+      by_category: byCategory.map((r) => ({ category: r.category, count: r.count })),
+    };
+  }
+
+  /** One row per skill in the workspace, for the list rail. */
+  async statsSummaries(workspaceId: string, days?: number): Promise<SkillStatsSummary[]> {
+    const window = clampStatsDays(days);
+    const [rows, skillUsingRuns] = await Promise.all([
+      this.repo.skillSummaries(workspaceId, window),
+      this.repo.workspaceSkillUsingRuns(workspaceId, window),
+    ]);
+    return rows.map((r) => {
+      const triaged = r.accepted + r.dismissed;
+      return {
+        skill_id: r.skillId,
+        agents_using: r.agentsUsing,
+        pull_pct: skillUsingRuns > 0 ? Math.round((r.runs / skillUsingRuns) * 100) : null,
+        accept_rate: triaged > 0 ? Math.round((r.accepted / triaged) * 100) : null,
+      };
+    });
+  }
+
+  /**
+   * Restore a past body. Appends a NEW version carrying the old text rather than
+   * rewinding: the intervening snapshots are what past eval runs were scored
+   * against, so deleting them would make those runs unreproducible.
+   */
+  async restoreVersion(
+    workspaceId: string,
+    skillId: string,
+    version: number,
+  ): Promise<Skill | undefined> {
+    const snapshot = await this.repo.getVersion(skillId, version);
+    if (!snapshot) return undefined;
+    const skill = await this.repo.getById(workspaceId, skillId);
+    if (!skill) return undefined;
+
+    const row = await this.repo.update(workspaceId, skillId, {
+      body: snapshot.body,
+      versionLabel: `Restored from v${version}`,
+    });
+    return row ? toSkillDto(row) : undefined;
   }
 
   /** Synchronous passthrough to the in-repo community catalog — no I/O. */

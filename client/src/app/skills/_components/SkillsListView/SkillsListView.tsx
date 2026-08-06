@@ -1,5 +1,6 @@
-/* /skills — Skills list (L02). Master-detail via the URL (?id=), mirroring
-   how /agents/:id preserves ?tab= — never local state for the selection. */
+/* /skills — Skills list. Master-detail via the URL: `?id=` picks the skill and
+   `?tab=` picks the detail tab, mirroring /agents/:id. Never local state for
+   either, so both survive a reload and a shared link. */
 "use client";
 
 import React from "react";
@@ -7,9 +8,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Button, Dropdown, EmptyState, ErrorState, Icon, Skeleton } from "@devdigest/ui";
 import { AppShell } from "../../../../components/app-shell";
-import { useSkills, useUpdateSkill } from "../../../../lib/hooks/skills";
+import {
+  useSkills,
+  useSkillStatsSummary,
+  useUpdateSkill,
+} from "../../../../lib/hooks/skills";
 import { SkillCard } from "../SkillCard";
-import { SkillPreview } from "./_components/SkillPreview";
+import { DEFAULT_TAB, SkillDetail, TAB_KEYS } from "../SkillDetail";
 import { AddSkillDrawer } from "./_components/AddSkillDrawer";
 import { filterSkills } from "./helpers";
 import { s } from "./styles";
@@ -21,6 +26,8 @@ export function SkillsListView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: skills, isLoading, isError, refetch } = useSkills();
+  // One request for the whole rail instead of a per-card fetch.
+  const { data: summaries } = useSkillStatsSummary();
   const update = useUpdateSkill();
   const [drawerTab, setDrawerTab] = React.useState<DrawerTab | null>(null);
   const [search, setSearch] = React.useState("");
@@ -28,6 +35,17 @@ export function SkillsListView() {
   const selectedId = searchParams.get("id");
   const list = filterSkills(skills ?? [], search);
   const selected = (skills ?? []).find((sk) => sk.id === selectedId) ?? null;
+
+  const requestedTab = searchParams.get("tab") ?? "";
+  const tab = TAB_KEYS.includes(requestedTab) ? requestedTab : DEFAULT_TAB;
+  const statsFor = (id: string) => summaries?.find((r) => r.skill_id === id);
+
+  /** Tab switch replaces the entry — flipping tabs shouldn't fill the history. */
+  const setTab = (next: string) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.set("tab", next);
+    router.replace(`/skills?${sp.toString()}`);
+  };
 
   return (
     <AppShell crumb={[{ label: t("page.crumbLab") }, { label: t("page.crumbSkills") }]}>
@@ -87,17 +105,18 @@ export function SkillsListView() {
                 key={sk.id}
                 skill={sk}
                 active={sk.id === selectedId}
-                onClick={() => router.push(`/skills?id=${sk.id}`)}
+                stats={statsFor(sk.id)}
+                onClick={() => router.push(`/skills?id=${sk.id}&tab=${tab}`)}
                 onToggle={(enabled) => update.mutate({ id: sk.id, patch: { enabled } })}
               />
             ))}
           </div>
         </div>
 
-        {/* right: preview */}
+        {/* right: detail pane — config / preview / stats / versions */}
         <div style={s.detail}>
           {selected ? (
-            <SkillPreview skill={selected} />
+            <SkillDetail skill={selected} tab={tab} onTab={setTab} />
           ) : (
             <div style={s.selectPrompt}>
               <Icon.Sparkles size={28} style={{ color: "var(--text-muted)" }} />

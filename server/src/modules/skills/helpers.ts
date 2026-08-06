@@ -1,8 +1,22 @@
 import { strFromU8, unzipSync } from 'fflate';
 
-import type { Skill, SkillSource, SkillType, SkillVersion } from '@devdigest/shared';
+import type {
+  Skill,
+  SkillImportWarning,
+  SkillSource,
+  SkillType,
+  SkillVersion,
+} from '@devdigest/shared';
 import type { SkillRow, SkillVersionRow } from '../../db/rows.js';
-import { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_UNCOMPRESSED_BYTES } from './constants.js';
+import {
+  DEFAULT_STATS_DAYS,
+  HTML_SNIFF_CHARS,
+  LARGE_SKILL_BODY_CHARS,
+  MAX_ARCHIVE_ENTRIES,
+  MAX_ARCHIVE_UNCOMPRESSED_BYTES,
+  MAX_IMPORT_WARNINGS,
+  MAX_STATS_DAYS,
+} from './constants.js';
 
 /**
  * Pure helpers for the skills module — DB row ⇄ DTO mapping, the
@@ -31,6 +45,7 @@ export function toSkillVersionDto(row: SkillVersionRow): SkillVersion {
     skill_id: row.skillId,
     version: row.version,
     body: row.body,
+    label: row.label ?? null,
     created_at: row.createdAt.toISOString(),
   };
 }
@@ -77,6 +92,142 @@ export function isDisallowedIp(ip: string): boolean {
   if (norm.startsWith('fc') || norm.startsWith('fd')) return true; // unique local (fc00::/7)
   if (!/^[0-9a-f:]+$/.test(norm)) return true; // not a real IP literal → fail closed
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// URL import: normalization, HTML detection, body hygiene, advisory risk scan
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite a human-facing code-host URL to the one that actually serves the
+ * markdown. Pasting the page URL you were looking at is the overwhelmingly
+ * common mistake, and the page is HTML — which the importer now rejects — so
+ * silently fixing it beats an error the user can't act on.
+ *
+ * Only the host and path shape are rewritten. The result still goes through the
+ * full SSRF check in `fetchUrlBody`, so this cannot be used to reach somewhere
+ * the raw URL couldn't.
+ */
+export function normalizeImportUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return raw; // let the caller's own parse produce the error
+  }
+  const host = u.hostname.toLowerCase();
+  const segments = u.pathname.split('/').filter(Boolean);
+
+  // github.com/<owner>/<repo>/blob|raw/<ref>/<path...>
+  //   → raw.githubusercontent.com/<owner>/<repo>/<ref>/<path...>
+  if (host === 'github.com' || host === 'www.github.com') {
+    const [owner, repo, kind, ...rest] = segments;
+    if (owner && repo && (kind === 'blob' || kind === 'raw') && rest.length >= 2) {
+      return `https://raw.githubusercontent.com/${owner}/${repo}/${rest.join('/')}`;
+    }
+    return raw;
+  }
+
+  // gist.github.com/<user>/<id> → …/raw (gist.githubusercontent.com serves it)
+  if (host === 'gist.github.com') {
+    if (segments.length === 2 && segments[segments.length - 1] !== 'raw') {
+      return `https://gist.githubusercontent.com/${segments.join('/')}/raw`;
+    }
+    return raw;
+  }
+
+  // gitlab.com/<group…>/<repo>/-/blob/<ref>/<path…> → …/-/raw/<ref>/<path…>
+  if (host === 'gitlab.com' || host === 'www.gitlab.com') {
+    const dashIndex = segments.indexOf('-');
+    if (dashIndex > 0 && segments[dashIndex + 1] === 'blob') {
+      const rewritten = [...segments];
+      rewritten[dashIndex + 1] = 'raw';
+      return `https://gitlab.com/${rewritten.join('/')}`;
+    }
+    return raw;
+  }
+
+  return raw;
+}
+
+/**
+ * Content sniff for HTML, because a `content-type` header is only the server's
+ * claim. Checked against the head of the body, where a doctype or root tag
+ * lives; also catches the JSON-escaped (`<`) markup that code hosts embed
+ * in their page payloads.
+ */
+export function looksLikeHtml(body: string): boolean {
+  const head = body.slice(0, HTML_SNIFF_CHARS).toLowerCase();
+  if (/<!doctype\s+html/.test(head)) return true;
+  if (/<html[\s>]/.test(head)) return true;
+  if (/<(head|body|meta|script|link)[\s>]/.test(head)) return true;
+  if (/\\u003c(!doctype|html|head|body|script|div|p)[\s\\>]/.test(head)) return true;
+  return false;
+}
+
+/**
+ * Zero-width and bidi-override characters, which render as nothing but are read
+ * by the model. Stripped rather than flagged: they cannot carry legitimate
+ * meaning in a skill body, and leaving them in means the preview a human vets
+ * is not the text the model receives.
+ */
+const INVISIBLE_CHARS = /[​-‏‪-‮⁠-⁤⁪-⁯﻿]/g;
+
+/** True when `body` contains characters `sanitizeSkillBody` would remove. */
+export function hasInvisibleChars(body: string): boolean {
+  INVISIBLE_CHARS.lastIndex = 0;
+  return INVISIBLE_CHARS.test(body);
+}
+
+/** Strip invisible control characters and normalize line endings. */
+export function sanitizeSkillBody(body: string): string {
+  return body.replace(INVISIBLE_CHARS, '').replace(/\r\n?/g, '\n');
+}
+
+/** Text aimed at the model rather than at the human reviewing the skill. */
+const INSTRUCTION_OVERRIDE = [
+  /ignore\s+(all\s+|any\s+)?(previous|prior|above|preceding)\s+instructions?/i,
+  /disregard\s+(all\s+|any\s+|the\s+)?(previous|prior|above|preceding)/i,
+  /you\s+are\s+now\s+(a|an|the)\b/i,
+  /\bsystem\s*prompt\b/i,
+  /\b(reveal|print|output|repeat)\s+(your|the)\s+(system\s+)?(prompt|instructions)/i,
+  /\bdo\s+not\s+(tell|inform|mention\s+to)\s+the\s+(user|human|reviewer)/i,
+];
+
+const CREDENTIAL_REFERENCE = [
+  /process\.env\b/,
+  /\b[A-Z][A-Z0-9]*_(?:API_)?(?:KEY|TOKEN|SECRET|PASSWORD)\b/,
+  /\bsk[-_](?:live|test|proj)[-_][A-Za-z0-9]/i,
+  /\bauthorization\s*:\s*bearer\b/i,
+  /\bghp_[A-Za-z0-9]{10,}/,
+];
+
+/**
+ * Advisory risk flags for an imported body. Explicitly NOT a security gate: the
+ * real defenses are the content-type allowlist, the SSRF guard, imports landing
+ * disabled, and the trusted-rule/untrusted-wrapper split at prompt-assembly
+ * time (server/CLAUDE.md is emphatic that injection defense is never a
+ * denylist). This exists so the human doing the vetting knows where to look —
+ * a miss here costs nothing that wasn't already covered.
+ */
+export function scanSkillBodyRisks(body: string): SkillImportWarning[] {
+  const found = new Set<SkillImportWarning>();
+
+  if (/<\/?[a-z][a-z0-9-]*(\s[^>]*)?>/i.test(body)) found.add('html_markup');
+  if (/<!--/.test(body) || hasInvisibleChars(body)) found.add('hidden_text');
+  if (INSTRUCTION_OVERRIDE.some((re) => re.test(body))) found.add('instruction_override');
+  if (CREDENTIAL_REFERENCE.some((re) => re.test(body))) found.add('credential_reference');
+  if (/\bdata:[a-z/+-]+;base64,/i.test(body)) found.add('data_uri');
+  if (/\bhttps?:\/\/[^\s)>"']+/i.test(body)) found.add('external_url');
+  if (body.length > LARGE_SKILL_BODY_CHARS) found.add('oversized');
+
+  return [...found].slice(0, MAX_IMPORT_WARNINGS);
+}
+
+/** Clamp a caller-supplied `?days=` into [1, MAX_STATS_DAYS], defaulting when absent. */
+export function clampStatsDays(days?: number): number {
+  if (days === undefined || !Number.isFinite(days)) return DEFAULT_STATS_DAYS;
+  return Math.min(Math.max(Math.trunc(days), 1), MAX_STATS_DAYS);
 }
 
 /** Scalar frontmatter fields this module reads out of an imported skill's markdown. */

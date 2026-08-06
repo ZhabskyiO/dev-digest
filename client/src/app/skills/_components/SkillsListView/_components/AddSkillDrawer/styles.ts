@@ -45,8 +45,47 @@ export const s = {
     borderRadius: 8,
     border: "1px solid var(--border)",
     background: "var(--bg-elevated)",
-    maxHeight: 320,
+    maxHeight: 420,
     overflow: "auto",
+    // An imported body can carry a long unbroken token (a URL, a base64 blob);
+    // wrap it instead of making the whole preview scroll sideways.
+    overflowWrap: "anywhere",
+  } satisfies CSSProperties,
+  risks: {
+    padding: "12px 14px",
+    borderRadius: 8,
+    border: "1px solid var(--warn)",
+    background: "var(--warn-bg)",
+    marginBottom: 20,
+  } satisfies CSSProperties,
+  risksHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  } satisfies CSSProperties,
+  risksHeading: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "var(--text-primary)",
+  } satisfies CSSProperties,
+  risksIntro: {
+    fontSize: 12.5,
+    color: "var(--text-secondary)",
+    lineHeight: 1.5,
+    marginBottom: 8,
+  } satisfies CSSProperties,
+  risksList: {
+    margin: 0,
+    paddingLeft: 18,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  } satisfies CSSProperties,
+  risksItem: {
+    fontSize: 12.5,
+    color: "var(--text-secondary)",
+    lineHeight: 1.5,
   } satisfies CSSProperties,
   skippedLine: {
     fontSize: 12,
