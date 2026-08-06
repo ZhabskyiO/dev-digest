@@ -72,6 +72,20 @@ _None yet._
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
 
+- 2026-08-06 — `TypeError: Cannot read properties of undefined (reading 'skills')`
+  from `run-executor-skills.it.test.ts:142` is a **CI-only flake, and the error
+  names the wrong thing**. `waitForPrRuns` (`test/helpers/runs.ts:31`) *returns*
+  on timeout instead of throwing — `if (Date.now() - start > timeoutMs) return
+  runs;` — so on a loaded runner the run hasn't reached a terminal state, the
+  helper hands back anyway, and `GET /runs/:id/trace` answers without a
+  `prompt_assembly` key. The undefined property is the symptom; the silent
+  10s timeout is the cause. Seen green locally and on the previous CI run of the
+  same branch, red once, then green again on a bare `gh run rerun --failed` with
+  no code change. **Do not go hunting in your diff for a `prompt_assembly`
+  regression** — rerun first, and only investigate if it reproduces. The real fix
+  is for the helper to throw on timeout so the failure names itself; left alone
+  here because every caller would need re-checking.
+
 - 2026-08-05 — `The "string" argument must be of type string or an instance
   of Buffer or ArrayBuffer. Received an instance of Date` from a Fastify route
   handler (surfaces as a bare 500, no stack trace in the response body — add a
