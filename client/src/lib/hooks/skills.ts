@@ -4,6 +4,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
+  Agent,
   Skill,
   SkillType,
   SkillSource,
@@ -11,7 +12,10 @@ import type {
   AgentSkillLink,
   SkillImportPreview,
   SkillImportRequest,
+  SkillStats,
+  SkillStatsSummary,
   SkillUsage,
+  SkillVersion,
 } from "@devdigest/shared";
 
 export function useSkills() {
@@ -56,6 +60,8 @@ export interface UpdateSkillInput {
   body?: string;
   source?: SkillSource;
   enabled?: boolean;
+  /** "What changed" note; the server records it only when the body changed. */
+  version_label?: string;
 }
 
 export interface UpdateSkillArgs {
@@ -126,6 +132,81 @@ export function useSetAgentSkills() {
       api.post(`/agents/${agentId}/skills`, { skill_ids: skillIds }),
     onSuccess: (_d, { agentId }) => {
       qc.invalidateQueries({ queryKey: ["agent-skills", agentId] });
+    },
+  });
+}
+
+// ---- skill detail: versions, agents, stats -------------------------------
+
+/** GET /skills/:id/versions → body snapshots, newest version first. */
+export function useSkillVersions(skillId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["skill-versions", skillId],
+    queryFn: () => api.get<SkillVersion[]>(`/skills/${skillId}/versions`),
+    enabled: !!skillId,
+  });
+}
+
+/** GET /skills/:id/versions/:version → one snapshot (for the diff view). */
+export function useSkillVersion(skillId: string | null | undefined, version: number | null) {
+  return useQuery({
+    queryKey: ["skill-version", skillId, version],
+    queryFn: () => api.get<SkillVersion>(`/skills/${skillId}/versions/${version}`),
+    enabled: !!skillId && version !== null,
+  });
+}
+
+/** GET /skills/:id/agents → agents this skill is attached to. */
+export function useSkillAgents(skillId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["skill-agents", skillId],
+    queryFn: () => api.get<Agent[]>(`/skills/${skillId}/agents`),
+    enabled: !!skillId,
+  });
+}
+
+/** GET /skills/:id/stats → usage/accept/findings for one skill. */
+export function useSkillStats(skillId: string | null | undefined, days?: number) {
+  return useQuery({
+    queryKey: ["skill-stats", skillId, days ?? null],
+    queryFn: () => {
+      const qs = days != null ? `?days=${days}` : "";
+      return api.get<SkillStats>(`/skills/${skillId}/stats${qs}`);
+    },
+    enabled: !!skillId,
+  });
+}
+
+/** GET /skills/stats → one summary row per skill, for the list rail. One
+ *  request for the whole list rather than a fetch per card. */
+export function useSkillStatsSummary(days?: number) {
+  return useQuery({
+    queryKey: ["skill-stats-summary", days ?? null],
+    queryFn: () => {
+      const qs = days != null ? `?days=${days}` : "";
+      return api.get<SkillStatsSummary[]>(`/skills/stats${qs}`);
+    },
+  });
+}
+
+export interface RestoreSkillVersionArgs {
+  skillId: string;
+  version: number;
+}
+
+/**
+ * POST /skills/:id/versions/:version/restore → re-apply an old body. The server
+ * appends a NEW version rather than rewinding, so the version list grows.
+ */
+export function useRestoreSkillVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillId, version }: RestoreSkillVersionArgs) =>
+      api.post<Skill>(`/skills/${skillId}/versions/${version}/restore`),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.setQueryData(["skill", data.id], data);
+      qc.invalidateQueries({ queryKey: ["skill-versions", data.id] });
     },
   });
 }

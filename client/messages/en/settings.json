@@ -26,7 +26,8 @@
     "usingDefault": "default",
     "search": "Search models…",
     "liveNote": "Prices are pulled live from OpenRouter — USD per 1M input/output tokens.",
-    "noKeyNote": "Add an OpenRouter API key under API Keys to load the model list and prices."
+    "noKeyNote": "Add an OpenRouter API key under API Keys to load the model list and prices.",
+    "hiddenNote": "{count} models are hidden — they can't return structured output, which these features need."
   },
   "workspace": {
     "title": "Workspace",

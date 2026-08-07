@@ -34,6 +34,10 @@
       "descriptionPlaceholder": "What this agent reviews",
       "provider": "Provider",
       "model": "Model",
+      "modelHint": "Models are loaded dynamically from the provider's /models.",
+      "modelEmptyHint": "No models loaded — set the {provider} API key in Settings → API Keys.",
+      "modelHiddenHint": "Loaded from the provider's /models. {count} hidden — they can't return structured output, which every review needs.",
+      "modelSearch": "Search models…",
       "systemPrompt": "System prompt"
     }
   },
@@ -63,6 +67,7 @@
     "model": "Model",
     "modelHint": "Models are loaded dynamically from the provider's /models.",
     "modelEmptyHint": "No models loaded — set the {provider} API key in Settings → API Keys.",
+    "modelHiddenHint": "Loaded from the provider's /models. {count} hidden — they can't return structured output, which every review needs.",
     "modelSearch": "Search models…",
     "systemPrompt": "System prompt",
     "systemPromptHint": "Loaded as the static system message. Enabled skills are appended below it.",

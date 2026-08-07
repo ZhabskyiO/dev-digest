@@ -6,18 +6,21 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Icon, Badge, Toggle } from "@devdigest/ui";
-import type { Skill } from "@devdigest/shared";
+import type { Skill, SkillStatsSummary } from "@devdigest/shared";
 import { needsVetting, typeColor } from "./helpers";
 import { s } from "./styles";
 
 export function SkillCard({
   skill,
   active,
+  stats,
   onClick,
   onToggle,
 }: {
   skill: Skill;
   active?: boolean;
+  /** Summary row from GET /skills/stats; omitted while the list is loading. */
+  stats?: SkillStatsSummary;
   onClick?: () => void;
   onToggle?: (enabled: boolean) => void;
 }) {
@@ -51,6 +54,19 @@ export function SkillCard({
           </span>
         )}
       </div>
+      {stats && (
+        <div style={s.statsRow}>
+          <span>{t("listItem.agentCount", { count: stats.agents_using })}</span>
+          {stats.pull_pct !== null && (
+            <span className="tnum">{t("listItem.pull", { pct: stats.pull_pct })}</span>
+          )}
+          {stats.accept_rate !== null && (
+            <span className="tnum" style={s.accept(stats.accept_rate)}>
+              {t("listItem.accept", { pct: stats.accept_rate })}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

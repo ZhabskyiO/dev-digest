@@ -172,6 +172,7 @@ describe('toSkillVersionDto', () => {
       skillId: 'skill-1',
       version: 2,
       body: '# Version 2 body',
+      label: 'Tightened the scope rule',
       createdAt: new Date('2026-02-02T12:00:00Z'),
     } as SkillVersionRow;
 
@@ -179,8 +180,21 @@ describe('toSkillVersionDto', () => {
       skill_id: 'skill-1',
       version: 2,
       body: '# Version 2 body',
+      label: 'Tightened the scope rule',
       created_at: '2026-02-02T12:00:00.000Z',
     });
+  });
+
+  it('normalizes a missing label to null — snapshots predate the column', () => {
+    const row = {
+      skillId: 'skill-1',
+      version: 1,
+      body: '# v1',
+      label: null,
+      createdAt: new Date('2026-02-01T12:00:00Z'),
+    } as SkillVersionRow;
+
+    expect(toSkillVersionDto(row).label).toBeNull();
   });
 });
 

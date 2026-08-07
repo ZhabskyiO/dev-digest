@@ -11,6 +11,7 @@ const PREVIEW: SkillImportPreview = {
   body: "# No console.log\nFlag it.",
   source: "manual",
   skipped: [],
+  warnings: [],
 };
 
 const COMMUNITY: CommunitySkill[] = [
@@ -80,7 +81,7 @@ describe("AddSkillDrawer (smoke)", () => {
     mutateAsyncPreview.mockResolvedValueOnce({ ...PREVIEW, source: "imported_url" });
     renderWithIntl("url");
 
-    fireEvent.change(screen.getByPlaceholderText("https://example.com/skills/security.md"), {
+    fireEvent.change(screen.getByPlaceholderText(/raw\.githubusercontent/), {
       target: { value: "https://example.com/skills/security.md" },
     });
     fireEvent.click(screen.getByText("Import from URL"));
@@ -106,5 +107,37 @@ describe("AddSkillDrawer (smoke)", () => {
         id: "conventional-commits/conventionalcommits.org",
       }),
     );
+  });
+
+  it("shows the advisory risk panel when the preview carries warnings", async () => {
+    mutateAsyncPreview.mockResolvedValueOnce({
+      ...PREVIEW,
+      warnings: ["instruction_override", "external_url"],
+    });
+    renderWithIntl("url");
+
+    fireEvent.change(screen.getByPlaceholderText(/raw\.githubusercontent/), {
+      target: { value: "https://example.com/skills/security.md" },
+    });
+    fireEvent.click(screen.getByText("Import from URL"));
+
+    await waitFor(() => expect(screen.getByText(messages.risks.heading)).toBeInTheDocument());
+    expect(screen.getByText(messages.risks.instruction_override)).toBeInTheDocument();
+    expect(screen.getByText(messages.risks.external_url)).toBeInTheDocument();
+    // Not a gate — the confirm action stays available.
+    expect(screen.getByText(messages.file.confirm)).toBeInTheDocument();
+  });
+
+  it("omits the risk panel for a clean body", async () => {
+    mutateAsyncPreview.mockResolvedValueOnce(PREVIEW);
+    renderWithIntl("url");
+
+    fireEvent.change(screen.getByPlaceholderText(/raw\.githubusercontent/), {
+      target: { value: "https://example.com/skills/security.md" },
+    });
+    fireEvent.click(screen.getByText("Import from URL"));
+
+    await waitFor(() => expect(screen.getByText(messages.file.previewHeading)).toBeInTheDocument());
+    expect(screen.queryByText(messages.risks.heading)).toBeNull();
   });
 });

@@ -27,17 +27,34 @@ const SKILLS: Skill[] = [
   },
 ];
 
+const SUMMARIES = [
+  { skill_id: "sk1", agents_using: 3, pull_pct: 71, accept_rate: 74 },
+  { skill_id: "sk2", agents_using: 1, pull_pct: null, accept_rate: null },
+];
+
 const updateMutate = vi.fn();
 
 vi.mock("../../../../lib/hooks/skills", () => ({
   useSkills: () => ({ data: SKILLS, isLoading: false, isError: false, refetch: vi.fn() }),
   useUpdateSkill: () => ({ mutate: updateMutate, isPending: false }),
+  useSkillStatsSummary: () => ({ data: SUMMARIES }),
+}));
+
+// The detail pane owns its own data hooks (versions, stats, agents) and pulls in
+// CodeMirror; this suite covers the rail and the URL wiring, not the tabs.
+vi.mock("../SkillDetail", () => ({
+  SkillDetail: ({ skill, tab }: { skill: { name: string }; tab: string }) => (
+    <div data-testid="skill-detail">{`${skill.name}:${tab}`}</div>
+  ),
+  TAB_KEYS: ["config", "preview", "stats", "versions"],
+  DEFAULT_TAB: "config",
 }));
 
 const push = vi.fn();
+const replace = vi.fn();
 let searchParamsValue = "";
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, replace }),
   useSearchParams: () => new URLSearchParams(searchParamsValue),
 }));
 
@@ -84,17 +101,39 @@ describe("SkillsListView (smoke)", () => {
     expect(screen.getByText("Select a skill")).toBeInTheDocument();
   });
 
-  it("shows the selected skill's preview pane when ?id= matches a catalog entry", () => {
+  it("shows the detail pane when ?id= matches a catalog entry", () => {
     searchParamsValue = "id=sk2";
     renderWithIntl();
     expect(screen.queryByText("Select a skill")).not.toBeInTheDocument();
-    // SkillPreview renders the body via <Markdown> — its own heading text confirms selection worked.
-    expect(screen.getByText("Mock overuse")).toBeInTheDocument();
+    expect(screen.getByTestId("skill-detail")).toHaveTextContent("mock-overuse:config");
   });
 
-  it("navigates to the clicked skill's id on card click", () => {
+  it("defaults to the config tab and honours a valid ?tab=", () => {
+    searchParamsValue = "id=sk2&tab=versions";
+    renderWithIntl();
+    expect(screen.getByTestId("skill-detail")).toHaveTextContent("mock-overuse:versions");
+  });
+
+  it("falls back to config for a ?tab= that isn't a real tab", () => {
+    searchParamsValue = "id=sk2&tab=nonsense";
+    renderWithIntl();
+    expect(screen.getByTestId("skill-detail")).toHaveTextContent("mock-overuse:config");
+  });
+
+  it("carries the current tab across to the clicked skill", () => {
+    searchParamsValue = "id=sk1&tab=stats";
     renderWithIntl();
     fireEvent.click(screen.getByText("mock-overuse"));
-    expect(push).toHaveBeenCalledWith("/skills?id=sk2");
+    expect(push).toHaveBeenCalledWith("/skills?id=sk2&tab=stats");
+  });
+
+  it("shows per-skill stats on the rail card, omitting the unknown ratios", () => {
+    renderWithIntl();
+    expect(screen.getByText("3 agents")).toBeInTheDocument();
+    expect(screen.getByText("71% pull")).toBeInTheDocument();
+    expect(screen.getByText("74% accept")).toBeInTheDocument();
+    // sk2 has null ratios — they must not render as 0%.
+    expect(screen.getByText("1 agent")).toBeInTheDocument();
+    expect(screen.queryByText("0% pull")).not.toBeInTheDocument();
   });
 });

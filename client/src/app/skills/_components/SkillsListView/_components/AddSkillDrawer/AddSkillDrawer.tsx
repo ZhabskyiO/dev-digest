@@ -184,6 +184,24 @@ export function AddSkillDrawer({
           <FormField label={t("file.previewDescriptionLabel")} hint={t("edit.descriptionHint")}>
             <TextInput value={draftDescription} onChange={setDraftDescription} />
           </FormField>
+          {/* Advisory only — the import already happened and the skill lands
+              disabled. This tells the human vetting it where to look. */}
+          {preview.warnings.length > 0 && (
+            <div style={s.risks}>
+              <div style={s.risksHead}>
+                <Icon.Shield size={14} style={{ color: "var(--warn)", flexShrink: 0 }} />
+                <span style={s.risksHeading}>{t("risks.heading")}</span>
+              </div>
+              <div style={s.risksIntro}>{t("risks.intro")}</div>
+              <ul style={s.risksList}>
+                {preview.warnings.map((w) => (
+                  <li key={w} style={s.risksItem}>
+                    {t(`risks.${w}`)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <FormField label={t("file.previewHeading")}>
             <div style={s.previewBody}>
               <Markdown>{preview.body}</Markdown>

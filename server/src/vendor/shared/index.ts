@@ -6,6 +6,8 @@
  *  - contracts/brief      Intent, BlastRadius, Risks, PrHistory, SmartDiff, PrBrief
  *  - contracts/knowledge  Conformance, Onboarding, EvalRun/EvalCase, MemoryItem,
  *                         Skill/CommunitySkill, ConventionCandidate, Agent
+ *  - contracts/conventions ConventionCandidateDetail, ConventionExtraction,
+ *                         extract/update/create-skill DTOs
  *  - contracts/trace      RunTrace, RunEvent, RunLogLine (single-document trace)
  *  - contracts/platform   Settings, ConnTestResult, Repo, PrMeta/PrDetail, SpecFile, …
  *  - adapters             adapter interfaces + ModelInfo
@@ -18,6 +20,7 @@ export * from './contracts/findings.js';
 export * from './contracts/review-api.js';
 export * from './contracts/brief.js';
 export * from './contracts/knowledge.js';
+export * from './contracts/conventions.js';
 export * from './contracts/skills-studio.js';
 export * from './contracts/agent-stats.js';
 export * from './contracts/trace.js';
