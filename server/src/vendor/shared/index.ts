@@ -19,6 +19,7 @@
 export * from './contracts/findings.js';
 export * from './contracts/review-api.js';
 export * from './contracts/brief.js';
+export * from './contracts/intent.js';
 export * from './contracts/knowledge.js';
 export * from './contracts/conventions.js';
 export * from './contracts/skills-studio.js';

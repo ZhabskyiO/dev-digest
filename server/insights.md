@@ -23,11 +23,36 @@ _None yet._
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
-_None yet._
+- 2026-08-07 — NEVER write a literal glob pattern containing `*/` (e.g.
+  `` `*/docs/**` ``) inside a `/** … */` JSDoc block comment — the `*/`
+  sequence closes the comment early, and `tsc` then tries to parse the rest of
+  the glob text as code, producing a cascade of confusing errors (`TS1434`,
+  `TS1443`, `TS1109`, `TS1161` "Unterminated regular expression literal") many
+  lines below the real cause, none of which mention "comment". Hit writing the
+  doc-ref allowlist comment in `modules/reviews/intent/evidence.ts`
+  (`docs/**`, `specs/**`, `*/docs/**`, `*/specs/**`, …) as a block comment.
+  Fix: use `//` line comments for prose that must contain a literal `*/`, or
+  rephrase to avoid the sequence entirely. Same class of footgun as the
+  unescaped-backtick-in-template-literal entry below (2026-08-04), different
+  trigger character.
 
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
+
+- 2026-08-07 — `server/src/prompts/intent.extract.md` (T3) has exactly seven
+  placeholders (`title`, `branch`, `commits`, `paths`, `body`, `ticket`,
+  `docs`) with **no dedicated slot for evidence tiers (d) external URLs or
+  (e) Jira/Linear**, and the template is out of scope for whoever implements
+  those tiers (T15/T16) since it's already accept-criteria-frozen. The
+  working pattern (`modules/reviews/intent/service.ts`, the
+  `INTENT_EXTERNAL_EVIDENCE` seam): fold tier-(d) fetched URL content into the
+  existing `docsText` variable (same `{{docs}}` slot) and tier-(e) ticket
+  content into `ticketText` (same `{{ticket}}` slot), both still individually
+  `wrapEvidence()`-wrapped before concatenation. If a template placeholder set
+  is ever frozen like this again, check whether new evidence sources are
+  meant to widen the template or fold into an existing slot before assuming a
+  template edit is needed.
 
 - 2026-07-29 — Cost pricing is two-layered and the layers use **different model-id
   namespaces**. `PriceBook` (`platform/price-book.ts:54`) caches live OpenRouter
@@ -66,11 +91,71 @@ Conventions and architectural decisions specific to this repo.
 
 Quirks of dependencies, tooling, and the local environment.
 
-_None yet._
+- 2026-08-07 — `npm run depcruise` (referenced by the `onion-architecture` skill
+  as an already-working gate, "0 errors, 15 warnings") does **not exist yet** in
+  this repo: `dependency-cruiser` is a listed devDependency but there is no
+  `depcruise` script in `package.json` and no `.dependency-cruiser.cjs` (or
+  similar) config anywhere outside `node_modules`. `npx depcruise --version`
+  also fails outright on the default Node 18 (`SyntaxError: ... does not
+  provide an export named 'styleText'` from `node:util`) — it needs Node 22
+  (`nvm use` first) just to report its version, let alone run a graph check.
+  Until someone adds the script + config, treat "run depcruise" as a no-op and
+  say so explicitly in task reports rather than assuming a failure is yours.
+
+- 2026-08-07 — `drizzle-orm/postgres-js/migrator`'s skip/apply decision is
+  **purely by timestamp, not by file hash or tag name**
+  (`node_modules/drizzle-orm/pg-core/dialect.js`, `migrate()`): it reads only
+  the single most recent `created_at` row from `drizzle.__drizzle_migrations`
+  and applies every journal entry whose `when` is greater. So regenerating an
+  already-applied migration (e.g. adding a `check()` drizzle-kit previously
+  omitted) with `pnpm db:generate` after deleting the old `NNNN_*.sql` +
+  `meta/NNNN_snapshot.json` + journal entry produces a **new** `when`
+  timestamp (current time) — always greater than what's in the DB — so
+  `pnpm db:migrate` will try to re-run it and fail with "column already
+  exists". Fix: after regenerating, manually edit the new entry's `when` in
+  `meta/_journal.json` back to the original value (the one that's still in
+  `drizzle.__drizzle_migrations.created_at` for that slot) — the tag/file name
+  is free to change, only `when` gates re-application. Verify with `select
+  created_at from drizzle.__drizzle_migrations order by created_at desc limit
+  1` before and after `pnpm db:migrate` to confirm no new row was inserted.
 
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
+
+- 2026-08-07 — A doc-comment sentence like "never read `process.env`
+  directly" **fails** a verification gate phrased as
+  `` grep -rn "process.env" some/dir/ `` — must return nothing — even though
+  it isn't a real usage. `grep` without `-F`/`-E` still treats `.` as
+  "any character" (BRE), so `process.env` as a pattern also matches
+  `process environment` (space fills the wildcard) or any `processXenv`-shaped
+  text. Hit writing the credential-source doc comments on
+  `adapters/tickets/{jira,linear}.ts` (T16) — the honest "NEVER read
+  `process.env`" sentence in the JSDoc tripped the task's own
+  `grep -rn "process.env"` acceptance check. Fix: phrase such comments without
+  the exact wildcard-matchable shape (e.g. "the OS-level environment" instead
+  of "`process.env`"), or verify with `grep -F` if a literal match is truly
+  intended. Generalize: before writing a doc comment near code a
+  literal-string acceptance grep will scan, mentally run the grep pattern
+  against the comment text too — BRE metacharacters (`.`, `*`, `[`) make
+  "mentions the term" and "matches the pattern" different questions.
+
+- 2026-08-07 — `error TS2729: Property 'container' is used before its
+  initialization` on a class field initializer that reads a constructor
+  **parameter property**, e.g. `private repo = this.container.reviewRepo;`
+  next to `constructor(private container: Container) {}`. Class field
+  initializers run in declaration order as if they were the first statements
+  of the constructor, but a `private x: T` **parameter property** is assigned
+  from the parameter even later than that — so a field initializer above it
+  in the class body sees `this.container` as still `undefined`. Fix: declare
+  the field's type only (`private repo: Container['reviewRepo'];`) and assign
+  it in the constructor **body**, after the parameter property line executes.
+  Hit writing `IntentService` (`modules/reviews/intent/service.ts`), which
+  copies the `constructor(private container: Container) { this.repo = new
+  XRepository(container.db); }` shape seen in `conventions/service.ts` and
+  `reviews/service.ts` — that shape works specifically because it assigns in
+  the constructor body, not as a field initializer; matching it exactly avoids
+  this trap.
 
 - 2026-08-06 — `TypeError: Cannot read properties of undefined (reading 'skills')`
   from `run-executor-skills.it.test.ts:142` is a **CI-only flake, and the error
@@ -127,7 +212,26 @@ _None yet._
 
 Unresolved, worth investigating.
 
-_None yet._
+- 2026-08-07 — `modules/reviews/repository.ts` (the `ReviewRepository` facade)
+  exposes `getPrFiles(prId)` but has **no `getPrCommits`/equivalent for
+  `pr_commits`**, even though `pr_commits` is a first-class table with its own
+  schema (`db/schema/pulls.ts`). `IntentService.deriveForRun`
+  (`modules/reviews/intent/service.ts`) needs commit messages for tier-(a)
+  evidence and, lacking a facade method, queries `schema.prCommits` directly
+  via `container.db` — the same class of shortcut `pulls/routes.ts` already
+  takes for the same table (both are on the onion-architecture skill's known
+  `warn` drift list for touching `db/schema` outside a repository). Worth
+  adding a `getPrCommits`/`getCommitMessages` method to `ReviewRepository` (or
+  a shared one both modules can use) so this doesn't need re-deciding next
+  time something in `reviews/` needs commit data.
+  └ 2026-08-08 resolved: `getPrCommits(prId)` added to
+    `modules/reviews/repository/pull.repo.ts` + exposed on the
+    `ReviewRepository` facade, and `IntentService.deriveForRun` now calls
+    `this.repo.getPrCommits(pull.id)` instead of querying `schema.prCommits`
+    directly. `pulls/routes.ts:269`'s identical shortcut is untouched — it
+    remains the one still-open instance of this pattern (tracked separately
+    on the onion-architecture skill's `db-confined-to-repositories` drift
+    list).
 
 ---
 

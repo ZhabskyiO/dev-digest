@@ -13,6 +13,7 @@ import type {
   IssueMeta,
 } from '@devdigest/shared';
 import { withRetry, withTimeout } from '../../platform/resilience.js';
+import { extractTicketRefs } from '../../platform/ticket-refs.js';
 
 const TIMEOUT = 30_000;
 
@@ -123,12 +124,22 @@ export class OctokitGitHubClient implements GitHubClient {
     );
   }
 
-  /** linked issue via regex on PR body (#123 / closes #123). */
+  /**
+   * Linked issue via `extractTicketRefs` — a closing keyword (closes/fixes/
+   * resolves, …) is now REQUIRED, so a bare `#123` (e.g. "issue #1 of 3" or a
+   * markdown ordered list) no longer resolves as a linked issue. This
+   * deliberately narrows `PrDetail.linked_issue` versus the old optional-
+   * keyword regex (Intent Layer plan R-8) — do not "fix" it back.
+   *
+   * Only the first SAME-repo ref is fetched. Cross-repo refs
+   * (`owner/repo#123`) are captured by the matcher but never fetched here —
+   * this client only holds a token scoped to the current repo.
+   */
   private async resolveLinkedIssue(repo: RepoRef, body: string): Promise<IssueMeta | undefined> {
-    const m = body.match(/(?:closes|fixes|resolves)?\s*#(\d+)/i);
-    if (!m?.[1]) return undefined;
+    const ref = extractTicketRefs(body).find((r) => !r.crossRepo);
+    if (!ref) return undefined;
     try {
-      return await this.getIssue(repo, Number(m[1]));
+      return await this.getIssue(repo, ref.number);
     } catch {
       return undefined;
     }
@@ -361,6 +372,21 @@ export class OctokitGitHubClient implements GitHubClient {
       body: res.data.body,
       state: res.data.state,
     };
+  }
+
+  /**
+   * Batch sibling of `getIssue`. Per-issue failures are dropped, never
+   * thrown — a single 404 (or any other fetch error) must not fail intent
+   * derivation for the whole PR. Dedupes the input before fetching; an empty
+   * array short-circuits to `[]` with zero API calls.
+   */
+  async getIssues(repo: RepoRef, numbers: number[]): Promise<IssueMeta[]> {
+    const unique = [...new Set(numbers)];
+    if (unique.length === 0) return [];
+    const results = await Promise.allSettled(unique.map((n) => this.getIssue(repo, n)));
+    return results
+      .filter((r): r is PromiseFulfilledResult<IssueMeta> => r.status === 'fulfilled')
+      .map((r) => r.value);
   }
 
   async currentLogin(): Promise<string> {

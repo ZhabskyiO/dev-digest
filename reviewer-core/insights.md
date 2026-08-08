@@ -29,7 +29,19 @@ _None yet._
 
 Conventions and architectural decisions specific to this repo.
 
-_None yet._
+- 2026-08-07 — `PromptAssembly` fields are NOT all populated the same way.
+  `callers`/`repo_map`/`pr_description` store the raw pre-render string (no
+  section header, no `<untrusted>` wrapper — see `prompt.ts` around
+  `assemblePrompt`'s `assembly` object). `intent` is the one exception: it
+  stores the FULL rendered `## Stated intent…` section (header +
+  `<untrusted>` block + counter-framing paragraph), because unlike the other
+  slots its input is a structured object (statement/scope/confidence) with no
+  single raw string equivalent — the tiered rendering itself is the only
+  meaningful "content". If adding another structured (non-string) optional
+  slot, decide explicitly which pattern it needs; don't assume raw-string
+  storage is the default.
+
+
 
 ## Tool & Library Notes
 

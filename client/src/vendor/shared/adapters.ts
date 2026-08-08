@@ -173,8 +173,22 @@ export interface GitHubClient {
   /** The open PR whose head is `branch`, if any (so re-publish reuses it). */
   findOpenPr(repo: RepoRef, branch: string): Promise<{ url: string } | null>;
   getIssue(repo: RepoRef, n: number): Promise<IssueMeta>;
+  /** Batch sibling of `getIssue`. Per-issue failures are dropped, never thrown. */
+  getIssues(repo: RepoRef, numbers: number[]): Promise<IssueMeta[]>;
   /** GET /user — for "posting as @user". */
   currentLogin(): Promise<string>;
+}
+
+// ---------- Ticket provider (Jira/Linear; Intent Layer tier (e), gated OFF) ----------
+/**
+ * A single ticket looked up by its project key (e.g. `ENG-123`). Implementations
+ * (Jira, Linear) live behind this one port so `IntentService` never sees a
+ * vendor SDK. A missing credential or a failed lookup is NOT an error — it
+ * degrades to `undefined`, never a throw, exactly like `GitHubClient.getIssue`
+ * failures already degrade in the Intent Layer.
+ */
+export interface TicketProvider {
+  fetchTicket(key: string): Promise<{ key: string; title: string; description: string } | undefined>;
 }
 
 // ---------- Git (simple-git, heavy) ----------

@@ -55,3 +55,23 @@ export async function resolveFeatureModel(
 ): Promise<FeatureModelChoice> {
   return (await getFeatureModelOverride(container, workspaceId, id)) ?? DEFAULTS[id];
 }
+
+/**
+ * The workspace's `ticket_project_keys` allowlist — same generic settings
+ * key/value read + `rowsToSettings` fold as `getFeatureModelOverride` above,
+ * just reading a different key. There is no dedicated route/UI for this key
+ * yet; `Settings` is a `.passthrough()` schema, so an operator can already
+ * set it via `PUT /settings` with an arbitrary `ticket_project_keys: string[]`
+ * key today. Absent or malformed → `[]`.
+ */
+export async function getTicketProjectKeys(
+  container: Container,
+  workspaceId: string,
+): Promise<string[]> {
+  const rows = await container.db
+    .select({ key: t.settings.key, value: t.settings.value })
+    .from(t.settings)
+    .where(eq(t.settings.workspaceId, workspaceId));
+  const raw = (rowsToSettings(rows) as { ticket_project_keys?: unknown }).ticket_project_keys;
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : [];
+}

@@ -1,5 +1,5 @@
 import type { Container } from '../../platform/container.js';
-import type { FindingActionKind, RunEventKind, RunTrace } from '@devdigest/shared';
+import type { FindingActionKind, PrIntentDetail, RunEventKind, RunTrace } from '@devdigest/shared';
 import { AppError, NotFoundError } from '../../platform/errors.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
@@ -175,5 +175,17 @@ export class ReviewService {
 
   async getRunTrace(runId: string): Promise<RunTrace | undefined> {
     return this.repo.getRunTrace(runId);
+  }
+
+  /**
+   * Derived PR intent (L03), or `undefined` when none exists yet.
+   *
+   * Workspace-scoped: `pr_intent` has no `workspace_id` of its own, so this
+   * MUST go through `getIntentDetail`'s join — a bare `prId` lookup (e.g.
+   * `getIntent`) would be a cross-workspace read. The route returns 200+`null`
+   * (never 404) for "no intent yet" — see routes.ts.
+   */
+  async getIntentDetail(workspaceId: string, prId: string): Promise<PrIntentDetail | undefined> {
+    return this.repo.getIntentDetail(workspaceId, prId);
   }
 }

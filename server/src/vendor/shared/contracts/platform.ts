@@ -53,7 +53,10 @@ export const FEATURE_MODELS: FeatureModelDef[] = [
     label: 'PR Review · Intent',
     description: 'Derives a PR’s intent and scope before review.',
     defaultProvider: 'openai',
-    defaultModel: 'gpt-4.1',
+    // Cheap by design: 5x cheaper than gpt-4.1 both directions (pricing.ts:19),
+    // same OpenAI credential, already in the static price table — cost is
+    // non-null on day one.
+    defaultModel: 'gpt-4.1-mini',
   },
   {
     id: 'risk_brief',

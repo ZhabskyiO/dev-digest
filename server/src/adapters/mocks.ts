@@ -31,6 +31,7 @@ import type {
   AuthWorkspace,
   SecretsProvider,
   SecretKey,
+  TicketProvider,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
@@ -234,6 +235,12 @@ export class MockGitHubClient implements GitHubClient {
     return { number: n, title: `Issue #${n}`, body: 'mock issue', state: 'open' };
   }
 
+  /** Batch sibling of `getIssue` — mirrors it, dedupes, no real network. */
+  async getIssues(repo: RepoRef, numbers: number[]): Promise<IssueMeta[]> {
+    const unique = [...new Set(numbers)];
+    return Promise.all(unique.map((n) => this.getIssue(repo, n)));
+  }
+
   async currentLogin(): Promise<string> {
     return this.opts.login ?? 'mock-user';
   }
@@ -326,5 +333,24 @@ export class MockSecretsProvider implements SecretsProvider {
   constructor(private secrets: Partial<Record<string, string>> = {}) {}
   async get(key: SecretKey): Promise<string | undefined> {
     return this.secrets[key as string];
+  }
+}
+
+// ---------- Mock Ticket Provider ----------
+export interface MockTicketOptions {
+  /** Keyed by the exact ticket key (e.g. `"ENG-123"`) passed to `fetchTicket`. */
+  tickets?: Record<string, { key: string; title: string; description: string }>;
+}
+
+export class MockTicketProvider implements TicketProvider {
+  public calls: string[] = [];
+
+  constructor(private opts: MockTicketOptions = {}) {}
+
+  async fetchTicket(
+    key: string,
+  ): Promise<{ key: string; title: string; description: string } | undefined> {
+    this.calls.push(key);
+    return this.opts.tickets?.[key];
   }
 }

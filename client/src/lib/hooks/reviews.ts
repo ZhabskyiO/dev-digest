@@ -9,6 +9,7 @@ import { notify } from "../toast";
 import type {
   FindingActionKind,
   PrReviewComment,
+  PrIntentDetail,
   ReviewRecord,
   ReviewRunResponse,
   RunEvent,
@@ -53,6 +54,19 @@ export function usePrReviews(prId: string | null | undefined) {
     queryKey: ["reviews", prId],
     queryFn: () => api.get<ReviewRecord[]>(`/pulls/${prId}/reviews`),
     enabled: !!prId,
+  });
+}
+
+/** The Intent Layer's derived intent for a PR (title/body/commits/paths → a
+   structured claim about what the PR is for), with its provenance. `null`
+   while no run has derived one yet — that is the normal state, not an error.
+   Invalidation is event-driven (see the page's `onRunDone` fan-out): no
+   `refetchInterval`, a completed run can change intent on a new head. */
+export function usePrIntent(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["pr-intent", prId],
+    queryFn: () => api.get<PrIntentDetail | null>(`/pulls/${prId}/intent`),
+    enabled: prId != null,
   });
 }
 

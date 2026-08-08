@@ -1,6 +1,6 @@
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { Finding, Intent, RunSummary, RunTrace } from '@devdigest/shared';
+import type { Finding, PrIntentDetail, RunSummary, RunTrace } from '@devdigest/shared';
 
 /**
  * A2 — review data-access. The ONLY layer touching the DB for the review
@@ -17,10 +17,13 @@ import type { FindingRow, PullRow } from '../../db/rows.js';
 export type { FindingRow, PullRow };
 
 export type ReviewRow = typeof t.reviews.$inferSelect;
+export type RepoRow = typeof t.repos.$inferSelect;
 
 import * as reviewRepo from './repository/review.repo.js';
 import * as runRepo from './repository/run.repo.js';
 import * as pullRepo from './repository/pull.repo.js';
+import type { IntentRow, UpsertIntentInput } from './repository/pull.repo.js';
+export type { IntentRow, UpsertIntentInput };
 
 export class ReviewRepository {
   constructor(private db: Db) {}
@@ -37,6 +40,10 @@ export class ReviewRepository {
 
   getPrFiles(prId: string): Promise<(typeof t.prFiles.$inferSelect)[]> {
     return pullRepo.getPrFiles(this.db, prId);
+  }
+
+  getPrCommits(prId: string): Promise<(typeof t.prCommits.$inferSelect)[]> {
+    return pullRepo.getPrCommits(this.db, prId);
   }
 
   // ---- reviews + findings -------------------------------------------------
@@ -127,12 +134,26 @@ export class ReviewRepository {
 
   // ---- intent -------------------------------------------------------------
 
-  upsertIntent(prId: string, intent: Intent): Promise<void> {
-    return pullRepo.upsertIntent(this.db, prId, intent);
+  upsertIntent(prId: string, input: UpsertIntentInput): Promise<void> {
+    return pullRepo.upsertIntent(this.db, prId, input);
   }
 
-  getIntent(prId: string): Promise<Intent | undefined> {
+  /**
+   * Full persisted row (incl. `headSha` for cache-hit comparison).
+   *
+   * NOT workspace-scoped — `prId` alone is trusted. Only call this with a
+   * `prId` that has already been resolved through a workspace-scoped lookup
+   * (e.g. the `PullRow` returned by `getPull`). Do not expose this to a route
+   * handler taking an untrusted `prId` from the request; use
+   * `getIntentDetail` for that.
+   */
+  getIntent(prId: string): Promise<IntentRow | undefined> {
     return pullRepo.getIntent(this.db, prId);
+  }
+
+  /** Workspace-scoped — the only safe lookup for `GET /pulls/:id/intent`. */
+  getIntentDetail(workspaceId: string, prId: string): Promise<PrIntentDetail | undefined> {
+    return pullRepo.getIntentDetail(this.db, workspaceId, prId);
   }
 
   // ---- observability: agent_runs + run_traces ----------------------------

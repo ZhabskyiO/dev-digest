@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { RunRequest } from '@devdigest/shared';
+import { RunRequest, PrIntentDetail } from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
@@ -13,6 +13,7 @@ import { ReviewService } from './service.js';
  *   GET    /runs/:id/events                            → SSE stream of RunEvent (replay-first)
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
+ *   GET    /pulls/:id/intent                           → the derived PR intent (L03), or null
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
@@ -130,6 +131,25 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     const { workspaceId } = await getContext(container, req);
     return service.reviewsForPull(workspaceId, req.params.id);
   });
+
+  // ---- Derived PR intent (L03) — read-only, lazy-inside-the-run only ------
+  // 200 + `null` (never 404): "no intent yet" is the normal state for any PR
+  // never reviewed, and a 404 would route through the client's full-screen
+  // ApiError taxonomy for what is an ordinary empty state. No POST — the
+  // trigger is fixed as lazy-inside-the-run (see IntentService.deriveForRun);
+  // a manual derive endpoint would be a second uncached way to burn tokens.
+  app.get(
+    '/pulls/:id/intent',
+    { schema: { params: IdParams, response: { 200: PrIntentDetail.nullable() } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      // Workspace-scoped: `pr_intent` has no workspace_id of its own, so this
+      // MUST go through the join in getIntentDetail (via the service) — a
+      // bare pr_id lookup would be a cross-workspace read.
+      const detail = await service.getIntentDetail(workspaceId, req.params.id);
+      return detail ?? null;
+    },
+  );
 
   // ---- Delete a whole review run (one agent's pass) + its findings --------
   app.delete('/reviews/:id', { schema: { params: IdParams } }, async (req) => {

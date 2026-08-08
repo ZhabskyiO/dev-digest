@@ -134,7 +134,7 @@ export default function PRDetailPage() {
       />
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} />}
+        {tab === "overview" && <OverviewTab prId={prId} prBody={pr.body} />}
 
         {tab === "findings" && (
           <FindingsTab
@@ -157,6 +157,10 @@ export default function PRDetailPage() {
               invalidateActiveRuns();
               invalidateRunHistory();
               refetchReviews();
+              // Intent can change when a run completes on a new head — the
+              // review's derivation is cached by head_sha server-side, so a
+              // fresh run may have derived a new intent worth re-fetching.
+              if (prId) qc.invalidateQueries({ queryKey: ["pr-intent", prId] });
             }}
           />
         )}
