@@ -15,7 +15,10 @@
     "outOfScope": "Out of scope",
     "riskAreas": "Risk areas",
     "scopeNotPrompted": "These scope lists were not shown to the reviewer. At low confidence they are inferred rather than stated, so the review was run without them.",
-    "error": "Couldn't load the derived intent."
+    "error": "Couldn't load the derived intent.",
+    "recalculate": "Re-derive",
+    "recalculating": "Deriving…",
+    "recalculateFailed": "Couldn't re-derive the intent. The previously derived one is unchanged."
   },
   "why": {
     "title": "git-why",

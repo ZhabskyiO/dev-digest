@@ -7,7 +7,8 @@ import { seed } from '../src/db/seed.js';
 import { MockLLMProvider, MockEmbedder, MockGitClient } from '../src/adapters/mocks.js';
 import * as t from '../src/db/schema.js';
 import { eq } from 'drizzle-orm';
-import type { Review } from '@devdigest/shared';
+import { randomUUID } from 'node:crypto';
+import type { Intent, Review, StructuredRequest, StructuredResult } from '@devdigest/shared';
 
 const hasDocker = await dockerAvailable();
 const d = hasDocker ? describe : describe.skip;
@@ -58,6 +59,14 @@ const REVIEW_FIXTURE: Review = {
       kind: 'finding',
     },
   ],
+};
+
+/** What the (cheap) intent model returns for the PR built by setupRepoAndPr. */
+const INTENT_FIXTURE: Intent = {
+  intent: 'Add rate limiting to the payments API.',
+  in_scope: ['src/config.ts'],
+  out_of_scope: ['billing reconciliation'],
+  risk_areas: [{ kind: 'security', label: 'Secret handling' }],
 };
 
 let repoSeq = 0;
@@ -297,6 +306,205 @@ d('A2 reviews + agents (Testcontainers pg)', () => {
     ).json();
     // seed has 2 enabled agents; we may have created more above in this PR's ws.
     expect(body.runs.length).toBeGreaterThanOrEqual(2);
+    await app.close();
+  });
+
+  // ==========================================================================
+  // POST /pulls/:id/intent/recalculate — the ONE manual, token-spending trigger
+  //
+  // The route's per-route rate limit is NOT exercised here: app.ts skips
+  // registering @fastify/rate-limit entirely when nodeEnv === 'test', so
+  // `config.rateLimit` is inert under inject(). What IS testable — and is the
+  // fence that actually matters — is the per-PR in-flight dedupe.
+  // ==========================================================================
+
+  /** `review_intent` resolves to provider `openai` by default (FEATURE_MODELS). */
+  function intentApp(llm: MockLLMProvider, cfg = config()) {
+    return buildApp({
+      config: cfg,
+      db: pg.handle.db,
+      overrides: {
+        embedder: new MockEmbedder(),
+        git: new MockGitClient({ diff: DIFF }),
+        llm: { openai: llm },
+      },
+    });
+  }
+
+  /** Structured calls the mock served for the `Intent` schema (not `Review`). */
+  const intentCalls = (llm: MockLLMProvider) =>
+    llm.calls.filter(
+      (c) =>
+        c.method === 'completeStructured' &&
+        (c.req as { schemaName?: string }).schemaName === 'Intent',
+    );
+
+  const intentLlm = () =>
+    new MockLLMProvider('openai', {
+      structuredBySchema: { Intent: INTENT_FIXTURE, Review: REVIEW_FIXTURE },
+    });
+
+  it('recalculate: 404 for an unknown PR and for a PR in another workspace', async () => {
+    const llm = intentLlm();
+    const app = await intentApp(llm);
+
+    const unknown = await app.inject({
+      method: 'POST',
+      url: `/pulls/${randomUUID()}/intent/recalculate`,
+    });
+    expect(unknown.statusCode).toBe(404);
+
+    // The ownership check: `pr_intent` carries no workspace_id, so a PR that
+    // exists but belongs to someone else must 404, not derive.
+    const [other] = await pg.handle.db
+      .insert(t.workspaces)
+      .values({ name: 'other-ws' })
+      .returning();
+    const { pr: foreignPr } = await setupRepoAndPr(pg.handle.db, other!.id);
+    const foreign = await app.inject({
+      method: 'POST',
+      url: `/pulls/${foreignPr.id}/intent/recalculate`,
+    });
+    expect(foreign.statusCode).toBe(404);
+    expect(intentCalls(llm)).toHaveLength(0);
+
+    await app.close();
+  });
+
+  it('recalculate: derives on a PR that was never reviewed and returns full provenance', async () => {
+    const llm = intentLlm();
+    const app = await intentApp(llm);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    // No run has ever touched this PR, so the GET is the empty state.
+    const before = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(before.json()).toBeNull();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/intent/recalculate`,
+    });
+    expect(res.statusCode).toBe(200);
+    const detail = res.json();
+    expect(detail.intent).toBe(INTENT_FIXTURE.intent);
+    expect(detail.pr_id).toBe(pr.id);
+    expect(detail.head_sha).toBe(pr.headSha);
+    // Confidence is computed server-side from the evidence, never model-reported.
+    expect(detail.confidence.sources).toEqual(
+      expect.arrayContaining(['title', 'branch', 'commits', 'paths']),
+    );
+    expect(detail.provider).toBe('openai');
+    expect(detail.model).toBe('gpt-4.1-mini');
+    expect(intentCalls(llm)).toHaveLength(1);
+
+    // and it is readable through the ordinary GET afterwards
+    const after = await app.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` });
+    expect(after.json().derived_at).toBe(detail.derived_at);
+
+    await app.close();
+  });
+
+  it('recalculate: bypasses the head_sha cache — the same head re-derives', async () => {
+    const llm = intentLlm();
+    const app = await intentApp(llm);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const first = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` })
+    ).json();
+    await new Promise((r) => setTimeout(r, 5)); // so derived_at can strictly advance
+    const second = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` })
+    ).json();
+
+    // This is the whole point of the endpoint: `deriveForRun` would have
+    // returned the cached row here (same head_sha) without calling the model.
+    expect(intentCalls(llm)).toHaveLength(2);
+    expect(second.head_sha).toBe(first.head_sha);
+    expect(new Date(second.derived_at).getTime()).toBeGreaterThan(
+      new Date(first.derived_at).getTime(),
+    );
+
+    await app.close();
+  });
+
+  it('recalculate: concurrent calls for one PR share a single derivation', async () => {
+    // Delayed structured output widens the window the in-flight entry is held,
+    // so the second request reliably arrives while the first is still deriving.
+    class SlowLLM extends MockLLMProvider {
+      override async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+        await new Promise((r) => setTimeout(r, 60));
+        return super.completeStructured(req);
+      }
+    }
+    const llm = new SlowLLM('openai', {
+      structuredBySchema: { Intent: INTENT_FIXTURE, Review: REVIEW_FIXTURE },
+    });
+    const app = await intentApp(llm);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const [a, b] = await Promise.all([
+      app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` }),
+      app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` }),
+    ]);
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(200);
+    expect(a.json().derived_at).toBe(b.json().derived_at);
+    // ONE model call for two clicks — the fence the rate limit can't provide.
+    expect(intentCalls(llm)).toHaveLength(1);
+
+    // The entry is cleared afterwards, so a later call derives again.
+    await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` });
+    expect(intentCalls(llm)).toHaveLength(2);
+
+    await app.close();
+  });
+
+  it('recalculate: a failed derivation is a 502 and leaves the stored intent intact', async () => {
+    const good = intentLlm();
+    const app = await intentApp(good);
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+    const stored = (
+      await app.inject({ method: 'POST', url: `/pulls/${pr.id}/intent/recalculate` })
+    ).json();
+    await app.close();
+
+    // No `Intent` fixture ⇒ the mock's schema parse throws, standing in for any
+    // derivation failure (missing key, bad structured output, timeout).
+    const broken = new MockLLMProvider('openai', {
+      structuredBySchema: { Review: REVIEW_FIXTURE },
+    });
+    const app2 = await intentApp(broken);
+    const res = await app2.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/intent/recalculate`,
+    });
+    // Reported, not swallowed: D5 protects a *run*, and there is no run here.
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error.code).toBe('external_service_error');
+
+    const still = (await app2.inject({ method: 'GET', url: `/pulls/${pr.id}/intent` })).json();
+    expect(still.derived_at).toBe(stored.derived_at);
+
+    await app2.close();
+  });
+
+  it('recalculate: 422 with no model call when INTENT_ENABLED=false', async () => {
+    const llm = intentLlm();
+    const app = await intentApp(
+      llm,
+      loadConfig({ ...process.env, NODE_ENV: 'test', INTENT_ENABLED: 'false' } as NodeJS.ProcessEnv),
+    );
+    const { pr } = await setupRepoAndPr(pg.handle.db, workspaceId);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/pulls/${pr.id}/intent/recalculate`,
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('validation_error');
+    expect(intentCalls(llm)).toHaveLength(0);
+
     await app.close();
   });
 });

@@ -14,6 +14,7 @@ import { ReviewService } from './service.js';
  *   GET    /runs/:id/trace                             → the single-document RunTrace
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
  *   GET    /pulls/:id/intent                           → the derived PR intent (L03), or null
+ *   POST   /pulls/:id/intent/recalculate               → force a fresh derivation (spends tokens)
  *   GET    /pulls/:id/smart-diff                       → reviewer-ordered files (deterministic, no LLM)
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
@@ -133,12 +134,14 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     return service.reviewsForPull(workspaceId, req.params.id);
   });
 
-  // ---- Derived PR intent (L03) — read-only, lazy-inside-the-run only ------
+  // ---- Derived PR intent (L03) -------------------------------------------
   // 200 + `null` (never 404): "no intent yet" is the normal state for any PR
   // never reviewed, and a 404 would route through the client's full-screen
-  // ApiError taxonomy for what is an ordinary empty state. No POST — the
-  // trigger is fixed as lazy-inside-the-run (see IntentService.deriveForRun);
-  // a manual derive endpoint would be a second uncached way to burn tokens.
+  // ApiError taxonomy for what is an ordinary empty state.
+  //
+  // The AUTOMATIC trigger is still lazy-inside-the-run and only that (see
+  // IntentService.deriveForRun) — nothing polls, nothing derives on read. The
+  // manual POST below is the one exception, and it is fenced accordingly.
   app.get(
     '/pulls/:id/intent',
     { schema: { params: IdParams, response: { 200: PrIntentDetail.nullable() } } },
@@ -149,6 +152,29 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
       // bare pr_id lookup would be a cross-workspace read.
       const detail = await service.getIntentDetail(workspaceId, req.params.id);
       return detail ?? null;
+    },
+  );
+
+  // ---- Force a fresh derivation (the ONE manual trigger) ------------------
+  // This is the only route in the module that spends tokens without a run
+  // behind it, so it carries its own fences: a rate limit stricter than
+  // /pulls/:id/review (3/min vs 10/min — there is no per-agent fan-out to
+  // amortise the call over) on top of IntentService.recalculate's per-PR
+  // in-flight dedupe, which is what actually stops a double-click from buying
+  // two model calls.
+  //
+  // Non-nullable response by design: unlike the GET, "nothing came back" here
+  // means the derivation failed, and the service raises a 502 rather than
+  // answering 200 with the stale row.
+  app.post(
+    '/pulls/:id/intent/recalculate',
+    {
+      schema: { params: IdParams, response: { 200: PrIntentDetail } },
+      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return service.recalculateIntent(workspaceId, req.params.id, req.log);
     },
   );
 

@@ -6,11 +6,18 @@ import type {
   RunTrace,
   SmartDiff,
 } from '@devdigest/shared';
-import { AppError, NotFoundError } from '../../platform/errors.js';
+import {
+  AppError,
+  NotFoundError,
+  ValidationError,
+  ExternalServiceError,
+} from '../../platform/errors.js';
+import { RunLogger } from '../../platform/run-logger.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
+import { IntentService } from './intent/service.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
 import { reviewToDto, findingsFromLatestRunPerAgent } from './helpers.js';
 import { buildSmartDiff } from './smart-diff/index.js';
@@ -194,6 +201,48 @@ export class ReviewService {
    */
   async getIntentDetail(workspaceId: string, prId: string): Promise<PrIntentDetail | undefined> {
     return this.repo.getIntentDetail(workspaceId, prId);
+  }
+
+  /**
+   * Force a fresh intent derivation for one PR — `POST /pulls/:id/intent/recalculate`.
+   *
+   * Unlike every other read here this SPENDS TOKENS, so it is deliberately the
+   * only manual trigger: no cache to short-circuit it (that is the point), a
+   * tight per-route rate limit, and `IntentService.recalculate`'s per-PR
+   * in-flight dedupe so concurrent callers share one model call.
+   *
+   * Failure is reported, not swallowed. D5 ("intent can never fail a review")
+   * protects a *run* that has other work to finish; a manual call has none, and
+   * returning the stale row would claim a re-derive that never happened.
+   */
+  async recalculateIntent(
+    workspaceId: string,
+    prId: string,
+    logger?: Logger,
+  ): Promise<PrIntentDetail> {
+    if (!this.container.config.intentEnabled) {
+      throw new ValidationError('Intent Layer is disabled (INTENT_ENABLED=false)');
+    }
+    // Workspace-scoped: this lookup is the ownership check for everything
+    // below, since `pr_intent` carries no workspace_id of its own.
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const repo = await this.repo.getRepo(pull.repoId);
+    if (!repo) throw new NotFoundError('Repo not found');
+
+    // No runIds → the logger publishes to no SSE stream (RunLogger.event loops
+    // over them), so there is no fake agent_run row and nothing to subscribe
+    // to; the evidence/confidence lines still reach the server's pino log.
+    const runLog = new RunLogger(this.container.runBus, [], logger, { prId });
+    try {
+      await new IntentService(this.container).recalculate(workspaceId, pull, repo, runLog);
+    } catch (err) {
+      throw new ExternalServiceError(`Intent derivation failed: ${(err as Error).message}`);
+    }
+
+    const detail = await this.repo.getIntentDetail(workspaceId, prId);
+    if (!detail) throw new ExternalServiceError('Intent was derived but could not be read back');
+    return detail;
   }
 
   /**

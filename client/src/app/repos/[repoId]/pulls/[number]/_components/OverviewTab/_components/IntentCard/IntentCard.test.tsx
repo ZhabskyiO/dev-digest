@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrIntentDetail } from "@devdigest/shared";
 // 10×`../` reaches `client/` from here: `messages/` sits at the package root,
@@ -9,10 +9,26 @@ import commonMessages from "../../../../../../../../../../messages/en/common.jso
 import { IntentCard } from "./IntentCard";
 
 const usePrIntent = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/hooks/reviews", () => ({ usePrIntent }));
+const useRecalculateIntent = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/hooks/reviews", () => ({ usePrIntent, useRecalculateIntent }));
+
+/** The re-derive mutation's return, with the mutate spy the tests assert on. */
+const mutate = vi.fn();
+function mockRecalculate(state: { isPending?: boolean; isError?: boolean } = {}) {
+  useRecalculateIntent.mockReturnValue({
+    mutate,
+    isPending: state.isPending ?? false,
+    isError: state.isError ?? false,
+  });
+}
 
 afterEach(cleanup);
-beforeEach(() => usePrIntent.mockReset());
+beforeEach(() => {
+  usePrIntent.mockReset();
+  useRecalculateIntent.mockReset();
+  mutate.mockReset();
+  mockRecalculate();
+});
 
 const INTENT: PrIntentDetail = {
   intent: "Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.",
@@ -88,5 +104,43 @@ describe("IntentCard", () => {
     renderCard();
     expect(screen.getByText("Brief not available yet.")).toBeInTheDocument();
     expect(screen.queryByText("In scope")).not.toBeInTheDocument();
+  });
+
+  describe("re-derive", () => {
+    it("triggers the mutation from both the card and the empty state", () => {
+      mockIntent(INTENT);
+      renderCard();
+      fireEvent.click(screen.getByRole("button", { name: "Re-derive" }));
+      expect(mutate).toHaveBeenCalledTimes(1);
+
+      // The empty state is the one place this button is the ONLY way forward —
+      // otherwise leaving it means running a whole review.
+      cleanup();
+      mockIntent(null);
+      renderCard();
+      fireEvent.click(screen.getByRole("button", { name: "Re-derive" }));
+      expect(mutate).toHaveBeenCalledTimes(2);
+    });
+
+    it("disables the button while a derivation is in flight", () => {
+      mockIntent(INTENT);
+      mockRecalculate({ isPending: true });
+      renderCard();
+
+      const button = screen.getByRole("button", { name: "Deriving…" });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    it("reports a failed re-derive while keeping the stored intent on screen", () => {
+      mockIntent(INTENT);
+      mockRecalculate({ isError: true });
+      renderCard();
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't re-derive/);
+      // The POST failing says nothing about what is already stored.
+      expect(screen.getByText(`“${INTENT.intent}”`)).toBeInTheDocument();
+    });
   });
 });

@@ -14,7 +14,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { SectionLabel, Skeleton, Icon, Button } from "@devdigest/ui";
 import type { RiskAreaKind } from "@devdigest/shared";
-import { usePrIntent } from "@/lib/hooks/reviews";
+import { usePrIntent, useRecalculateIntent } from "@/lib/hooks/reviews";
 import { s } from "./styles";
 
 /* One icon + accent per `RiskAreaKind`. Exhaustive by construction: the record
@@ -37,6 +37,24 @@ export function IntentCard({ prId }: { prId: string | null }) {
   const t = useTranslations("brief");
   const tCommon = useTranslations("common");
   const { data, isLoading, isError, refetch } = usePrIntent(prId);
+  const recalculate = useRecalculateIntent(prId);
+
+  /* Unlike the retry button in the error state, this one SPENDS TOKENS: it is
+     the manual trigger for a fresh derivation, not a refetch. Hence the
+     distinct label, the pending state, and `disabled` while in flight — a
+     second click within the same derivation is deduped server-side, but the
+     UI should not invite it. */
+  const recalcButton = (
+    <Button
+      kind="ghost"
+      size="sm"
+      icon="RefreshCw"
+      disabled={prId == null || recalculate.isPending}
+      onClick={() => recalculate.mutate()}
+    >
+      {recalculate.isPending ? t("intent.recalculating") : t("intent.recalculate")}
+    </Button>
+  );
 
   if (isLoading) {
     return (
@@ -59,6 +77,8 @@ export function IntentCard({ prId }: { prId: string | null }) {
             <Icon.AlertTriangle size={15} style={{ color: "var(--warn)", flexShrink: 0 }} />
             <span>{t("intent.error")}</span>
           </div>
+          {/* The GET failed, so a plain refetch is the right first move here —
+              re-deriving would spend tokens to fix what may be a transport blip. */}
           <Button kind="ghost" size="sm" icon="RefreshCw" onClick={() => refetch()}>
             {tCommon("actions.retry")}
           </Button>
@@ -70,11 +90,20 @@ export function IntentCard({ prId }: { prId: string | null }) {
   if (data == null) {
     return (
       <section style={s.section}>
-        <SectionLabel icon="Target">{t("block.intent")}</SectionLabel>
+        {/* The one state where this button is the only way out: without it,
+            leaving "not derived yet" requires running a whole review. */}
+        <SectionLabel icon="Target" right={recalcButton}>
+          {t("block.intent")}
+        </SectionLabel>
         <div style={s.unavailableBox}>
           <div style={s.unavailableTitle}>{t("unavailable")}</div>
           <div style={s.unavailableHint}>{t("unavailableHint")}</div>
         </div>
+        {recalculate.isError && (
+          <p role="alert" style={s.recalcError}>
+            {t("intent.recalculateFailed")}
+          </p>
+        )}
       </section>
     );
   }
@@ -90,7 +119,15 @@ export function IntentCard({ prId }: { prId: string | null }) {
 
   return (
     <section style={s.section}>
-      <SectionLabel icon="Target">{t("block.intent")}</SectionLabel>
+      <SectionLabel icon="Target" right={recalcButton}>
+        {t("block.intent")}
+      </SectionLabel>
+
+      {recalculate.isError && (
+        <p role="alert" style={s.recalcError}>
+          {t("intent.recalculateFailed")}
+        </p>
+      )}
 
       <div style={s.box}>
         {/* The quotation marks are content, not decoration: they mark the
