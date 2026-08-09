@@ -6,10 +6,48 @@ import { z } from 'zod';
  */
 
 // ---- Intent ----
+
+/**
+ * The bucket a risk area falls into. A CLOSED enum on purpose: the client maps
+ * each member to a fixed icon, so a free-form string would render as a chip
+ * with no icon. Widening this means adding the icon at the same time (see
+ * `RISK_AREA_ICON` in the client's IntentCard).
+ */
+export const RiskAreaKind = z.enum([
+  'security',
+  'dependency',
+  'performance',
+  'data',
+  'breaking',
+  'other',
+]);
+export type RiskAreaKind = z.infer<typeof RiskAreaKind>;
+
+/**
+ * One "worth a closer look here" flag on a PR — e.g. `security` / "Auth surface
+ * touched". Like the rest of `Intent` this is a CLAIM derived from PR metadata,
+ * not a finding: it says where to look, never that something is wrong. Risk
+ * areas are display-only and are deliberately NOT fed to the reviewer prompt —
+ * a derived hint from a cheap model must not steer what the review looks for.
+ */
+export const RiskArea = z.object({
+  kind: RiskAreaKind,
+  /** Short noun phrase, 2-6 words — chip text. */
+  label: z.string(),
+});
+export type RiskArea = z.infer<typeof RiskArea>;
+
 export const Intent = z.object({
   intent: z.string(),
   in_scope: z.array(z.string()),
   out_of_scope: z.array(z.string()),
+  /**
+   * Required with no `.default([])`, exactly like `out_of_scope`: this schema is
+   * handed to the provider as a strict JSON schema, and `default` is not among
+   * the keywords OpenAI's strict structured-output mode accepts. The prompt
+   * carries the leniency instead — "return `[]`" is the stated, common answer.
+   */
+  risk_areas: z.array(RiskArea),
 });
 export type Intent = z.infer<typeof Intent>;
 

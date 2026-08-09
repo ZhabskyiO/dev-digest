@@ -10,7 +10,6 @@ import type {
 import type { SkillRow, SkillVersionRow } from '../../db/rows.js';
 import {
   DEFAULT_STATS_DAYS,
-  HTML_SNIFF_CHARS,
   LARGE_SKILL_BODY_CHARS,
   MAX_ARCHIVE_ENTRIES,
   MAX_ARCHIVE_UNCOMPRESSED_BYTES,
@@ -62,37 +61,12 @@ export function isConfigChange(
   return patch.body !== undefined && patch.body !== existing.body;
 }
 
-/**
- * True when `ip` (a resolved IPv4/IPv6 literal) is loopback, private, link-local
- * (including the `169.254.169.254` cloud-metadata address), or otherwise not a
- * safe target for a server-side fetch. Used by the URL-import SSRF guard in
- * `service.ts`: a skill URL is resolved via DNS first, and any resolved address
- * failing this check is rejected before the actual fetch happens — otherwise an
- * "import a skill from a URL" feature is a ready-made SSRF into this server's
- * own network (internal services, cloud metadata endpoints, localhost).
- */
-export function isDisallowedIp(ip: string): boolean {
-  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v4)) {
-    const parts = v4.split('.').map(Number);
-    if (parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true; // malformed → fail closed
-    const [a, b] = parts as [number, number, number, number];
-    if (a === 127) return true; // loopback
-    if (a === 10) return true; // private
-    if (a === 172 && b >= 16 && b <= 31) return true; // private
-    if (a === 192 && b === 168) return true; // private
-    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
-    if (a === 0) return true; // "this network"
-    return false;
-  }
-  // IPv6 (anything not matched above, incl. non-mapped IPv6 literals).
-  const norm = ip.toLowerCase();
-  if (norm === '::1') return true; // loopback
-  if (norm.startsWith('fe80:')) return true; // link-local
-  if (norm.startsWith('fc') || norm.startsWith('fd')) return true; // unique local (fc00::/7)
-  if (!/^[0-9a-f:]+$/.test(norm)) return true; // not a real IP literal → fail closed
-  return false;
-}
+// `isDisallowedIp` and `looksLikeHtml` moved to `modules/_shared/net-guards.ts`
+// so `modules/reviews/intent/external.ts` can reuse them without a
+// module→module internal import (`no-cross-module-internals` in
+// `.dependency-cruiser.cjs`). Re-exported here so existing callers of this
+// file (`service.ts`) keep working unchanged.
+export { isDisallowedIp, looksLikeHtml } from '../_shared/net-guards.js';
 
 // ---------------------------------------------------------------------------
 // URL import: normalization, HTML detection, body hygiene, advisory risk scan
@@ -148,21 +122,6 @@ export function normalizeImportUrl(raw: string): string {
   }
 
   return raw;
-}
-
-/**
- * Content sniff for HTML, because a `content-type` header is only the server's
- * claim. Checked against the head of the body, where a doctype or root tag
- * lives; also catches the JSON-escaped (`<`) markup that code hosts embed
- * in their page payloads.
- */
-export function looksLikeHtml(body: string): boolean {
-  const head = body.slice(0, HTML_SNIFF_CHARS).toLowerCase();
-  if (/<!doctype\s+html/.test(head)) return true;
-  if (/<html[\s>]/.test(head)) return true;
-  if (/<(head|body|meta|script|link)[\s>]/.test(head)) return true;
-  if (/\\u003c(!doctype|html|head|body|script|div|p)[\s\\>]/.test(head)) return true;
-  return false;
 }
 
 /**

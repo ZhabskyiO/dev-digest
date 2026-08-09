@@ -59,13 +59,27 @@ export default function PRDetailPage() {
 
   const tab = search.get("tab") ?? "overview";
   const traceRunId = search.get("trace");
-  const setParam = (key: string, val: string | null) => {
+  /* Which finding to reveal on the Agent runs tab. Lives in the URL rather than
+     in state so that jumping from a diff badge is a real deep link: it survives
+     a reload and can be shared, and one router.replace can move tabs and pick
+     the finding in a single navigation. */
+  const targetFindingId = search.get("finding");
+  const setParams = (entries: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
-    if (val == null) sp.delete(key);
-    else sp.set(key, val);
+    for (const [key, val] of Object.entries(entries)) {
+      if (val == null) sp.delete(key);
+      else sp.set(key, val);
+    }
     router.replace(`/repos/${repoId}/pulls/${number}${sp.toString() ? `?${sp.toString()}` : ""}`);
   };
-  const setTab = (t: string) => setParam("tab", t);
+  const setParam = (key: string, val: string | null) => setParams({ [key]: val });
+  // Leaving a tab drops the finding target — it only means anything on the
+  // Agent runs tab, and a stale `?finding=` would re-scroll on the way back.
+  const setTab = (t: string) => setParams({ tab: t, finding: null });
+  /* A severity badge in the diff → the finding in full, on the Agent runs tab.
+     Both params move together so the tab switch and the target land in one
+     history entry (two setParam calls would race on the same `search`). */
+  const openFinding = (findingId: string) => setParams({ tab: "findings", finding: findingId });
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -134,11 +148,12 @@ export default function PRDetailPage() {
       />
 
       <div style={{ padding: "24px 32px 44px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1080, margin: "0 auto" }}>
-        {tab === "overview" && <OverviewTab prBody={pr.body} />}
+        {tab === "overview" && <OverviewTab prId={prId} prBody={pr.body} />}
 
         {tab === "findings" && (
           <FindingsTab
             prId={prId}
+            targetFindingId={targetFindingId}
             liveRunIds={liveRunIds}
             reviewRunning={reviewRunning}
             lethalTrifecta={lethalTrifecta}
@@ -157,6 +172,10 @@ export default function PRDetailPage() {
               invalidateActiveRuns();
               invalidateRunHistory();
               refetchReviews();
+              // Intent can change when a run completes on a new head — the
+              // review's derivation is cached by head_sha server-side, so a
+              // fresh run may have derived a new intent worth re-fetching.
+              if (prId) qc.invalidateQueries({ queryKey: ["pr-intent", prId] });
             }}
           />
         )}
@@ -167,6 +186,7 @@ export default function PRDetailPage() {
             filesCount={pr.files_count}
             files={pr.files}
             canComment={pr.status === "open"}
+            onOpenFinding={openFinding}
           />
         )}
       </div>

@@ -32,6 +32,7 @@ export function ReviewRunAccordion({
   headSha,
   targetRunId = null,
   targetNonce = 0,
+  targetFindingId = null,
 }: {
   review: ReviewRecord;
   prId: string;
@@ -42,6 +43,9 @@ export function ReviewRunAccordion({
    *  (driven from the Timeline: clicking an agent name navigates here). */
   targetRunId?: string | null;
   targetNonce?: number;
+  /** A finding to reveal (from `?finding=`). Only the ONE run that actually
+   *  contains it reacts; the rest ignore it. */
+  targetFindingId?: string | null;
 }) {
   const [open, setOpen] = React.useState(defaultOpen);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -52,6 +56,15 @@ export function ReviewRunAccordion({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetRunId, targetNonce, review.run_id]);
+
+  /* A finding id is unique to one review, so at most one accordion matches.
+     Only opening is handled here — the scroll belongs to FindingsPanel, which
+     knows where the card is and must wait for this body to mount first. */
+  const holdsTarget =
+    targetFindingId != null && review.findings.some((f) => f.id === targetFindingId);
+  React.useEffect(() => {
+    if (holdsTarget) setOpen(true);
+  }, [holdsTarget]);
   const del = useDeleteReview(prId);
   const findings = review.findings;
   const blockers = findings.filter((f) => f.severity === "CRITICAL" && !f.dismissed_at).length;
@@ -154,6 +167,7 @@ export function ReviewRunAccordion({
             prId={prId}
             repoFullName={repoFullName}
             headSha={headSha}
+            targetFindingId={holdsTarget ? targetFindingId : null}
           />
         </div>
       )}

@@ -6,6 +6,7 @@ import type {
   CodeIndex,
   Embedder,
   LLMProvider,
+  TicketProvider,
 } from '@devdigest/shared';
 import type { AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
@@ -30,6 +31,8 @@ import type { RepoIntel } from '../modules/repo-intel/types.js';
 import { RepoIntelService } from '../modules/repo-intel/service.js';
 import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
+import { JiraTicketProvider } from '../adapters/tickets/jira.js';
+import { LinearTicketProvider } from '../adapters/tickets/linear.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -52,6 +55,8 @@ export interface ContainerOverrides {
   /** repo-intel T3 adapters — only the indexer pipeline reads these. */
   depgraph?: DepGraph;
   tokenizer?: Tokenizer;
+  /** Intent Layer tier (e), gated by INTENT_EXTERNAL_EVIDENCE — tests inject a MockTicketProvider. */
+  tickets?: TicketProvider;
 }
 
 export class Container {
@@ -78,6 +83,7 @@ export class Container {
   private _depgraph?: DepGraph;
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
+  private _tickets?: TicketProvider;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -135,6 +141,32 @@ export class Container {
     if (this.overrides.tokenizer) return this.overrides.tokenizer;
     this._tokenizer ??= new TiktokenTokenizer();
     return this._tokenizer;
+  }
+
+  /**
+   * Jira/Linear ticket lookup — Intent Layer tier (e). Lazy, like every other
+   * adapter getter: nothing here is constructed until this getter is first
+   * read. The caller (`IntentService.deriveForRun`) only reads it inside its
+   * `INTENT_EXTERNAL_EVIDENCE` gate, so with that flag off (the default)
+   * neither `JiraTicketProvider` nor `LinearTicketProvider` is ever
+   * constructed and no network call is reachable.
+   *
+   * Tries Jira first, then Linear; each adapter degrades to `undefined` on
+   * its own when its credential is unconfigured, so this composite needs no
+   * config check of its own.
+   */
+  get tickets(): TicketProvider {
+    if (this.overrides.tickets) return this.overrides.tickets;
+    this._tickets ??= this.buildTicketProvider();
+    return this._tickets;
+  }
+
+  private buildTicketProvider(): TicketProvider {
+    const jira = new JiraTicketProvider(this.secrets);
+    const linear = new LinearTicketProvider(this.secrets);
+    return {
+      fetchTicket: async (key: string) => (await jira.fetchTicket(key)) ?? linear.fetchTicket(key),
+    };
   }
 
   /**

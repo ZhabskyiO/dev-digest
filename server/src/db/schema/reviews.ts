@@ -8,10 +8,12 @@ import {
   timestamp,
   doublePrecision,
   index,
+  check,
 } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
+import type { IntentSource, RiskArea } from '@devdigest/shared';
 
 // ============================================================ Review & findings
 
@@ -60,14 +62,57 @@ export const findings = pgTable(
   (t) => ({ reviewIdx: index('findings_review_idx').on(t.reviewId) }),
 );
 
-export const prIntent = pgTable('pr_intent', {
-  prId: uuid('pr_id')
-    .primaryKey()
-    .references(() => pullRequests.id, { onDelete: 'cascade' }),
-  intent: text('intent').notNull(),
-  inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
-  outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
-});
+export const prIntent = pgTable(
+  'pr_intent',
+  {
+    prId: uuid('pr_id')
+      .primaryKey()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    intent: text('intent').notNull(),
+    inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Display-only reviewer hints ("Auth surface touched"). Defaults to `'[]'`
+     * so every row written before this column existed reads back as "no risk
+     * areas" rather than null — the API contract has no nullable form for it.
+     */
+    riskAreas: jsonb('risk_areas').$type<RiskArea[]>().notNull().default(sql`'[]'::jsonb`),
+    /**
+     * The commit this row was derived from. Defaults to `''`, never to a real
+     * sha — `''` can never equal a real `pull_requests.head_sha`, so any
+     * pre-existing row (or a row inserted before this column existed) is a
+     * guaranteed cache miss and gets re-derived rather than silently reused.
+     */
+    headSha: text('head_sha').notNull().default(''),
+    /**
+     * TEXT + CHECK, not a PG enum: this may gain a tier later, and extending a
+     * `CREATE TYPE` needs its own migration, while a CHECK is a single ALTER.
+     */
+    confidence: text('confidence', { enum: ['high', 'medium', 'low'] }).notNull().default('low'),
+    confidenceScore: doublePrecision('confidence_score').notNull().default(0.3),
+    sources: jsonb('sources').$type<IntentSource[]>().notNull().default(sql`'[]'::jsonb`),
+    provider: text('provider'),
+    model: text('model'),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    /**
+     * Nullable: null means "unknown price", rendered as `—` and never `$0.00` —
+     * same rule as `agent_runs.cost_usd` / `RunStats.cost_usd`.
+     */
+    costUsd: doublePrecision('cost_usd'),
+    derivedAt: timestamp('derived_at', { withTimezone: true }).notNull().defaultNow(),
+    // No index on head_sha: the only access path is `WHERE pr_id = $1`, already
+    // served by the PK above; the sha is compared in application code after
+    // that lookup. An index here would be pure write overhead.
+    // No history table: the PK stays `pr_id`, so a re-derive overwrites — one
+    // PR has exactly one current intent.
+  },
+  (t) => [
+    // Declared here (not hand-appended to a migration) so `pnpm db:generate`
+    // and its snapshot stay the source of truth for this constraint.
+    check('pr_intent_confidence_chk', sql`${t.confidence} IN ('high','medium','low')`),
+  ],
+);
 
 export const prBrief = pgTable('pr_brief', {
   prId: uuid('pr_id')

@@ -28,6 +28,7 @@
   },
   "panel": {
     "hideLowConfidence": "Hide low confidence",
+    "jumpToSeverity": "Jump to the next {severity} finding",
     "noMatchTitle": "No findings match",
     "noMatchBody": "Adjust the filters above, or run a review to generate findings."
   },
@@ -51,14 +52,34 @@
     "blockers": " · {count} blockers"
   },
   "smartDiff": {
-    "coreLabel": "Core",
-    "wiringLabel": "Wiring",
-    "boilerplateLabel": "Boilerplate",
     "largeTitle": "This PR is large ({lines} changed lines)",
     "largeBody": "Consider splitting it into smaller, focused PRs for easier review:",
-    "filesCount": "{count} files",
+    "filesCount": "{count, plural, one {# file} other {# files}}",
     "findingLines": "{count} finding-lines",
-    "groupedByRole": "Smart Diff · grouped by role"
+    "groupedByRole": "Smart Diff · grouped by role",
+    "role": {
+      "core": {
+        "label": "Core logic",
+        "hint": "The substance of the change — review closely"
+      },
+      "wiring": {
+        "label": "Wiring",
+        "hint": "Hooks the core into the app"
+      },
+      "boilerplate": {
+        "label": "Boilerplate",
+        "hint": "Generated / mechanical — skim"
+      }
+    },
+    "findingsBadge": "{count, plural, one {# finding} other {# findings}}",
+    "jumpToFinding": "Jump to the first finding in this file",
+    "smartOrder": "Smart order",
+    "originalOrder": "Original order",
+    "tokenNote": "0 new tokens · built on {tokens} from last review",
+    "tokenNoteNoReview": "0 new tokens · no review has run yet",
+    "tokenNoteTitle": "Both orders are computed locally from the last review's findings — browsing this tab never calls a model.",
+    "summary": "{count, plural, one {# file} other {# files}}",
+    "sectionLabel": "Reviewer-ordered diff"
   },
   "list": {
     "breadcrumb": "Pull Requests",

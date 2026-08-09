@@ -8,6 +8,7 @@ import type { ReviewRepository, FindingRow, PullRow, ReviewRow } from './reposit
 import { REVIEW_STRATEGY } from './constants.js';
 import { taskLine } from './helpers.js';
 import { loadDiff } from './diff-loader.js';
+import { IntentService, type PromptIntentSlot } from './intent/service.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -41,11 +42,15 @@ export type RunOutcome = {
  * review. Per-agent failures are isolated.
  */
 export class ReviewRunExecutor {
+  private intentService: IntentService;
+
   constructor(
     private container: Container,
     private repo: ReviewRepository,
     private agents: Container['agentsRepo'],
-  ) {}
+  ) {
+    this.intentService = new IntentService(container);
+  }
 
   /**
    * Background execution of the queued agent runs (NOT awaited by the route).
@@ -111,6 +116,26 @@ export class ReviewRunExecutor {
     }
     runLog.info(`Diff ready — ${diff.files.length} changed file(s); starting ${jobs.length} agent run(s)`);
 
+    // Derive intent ONCE per executeRuns (shared across every queued agent),
+    // exactly like the diff above — not per agent inside runOneAgent, or N
+    // agents would each pay for a derivation and their Live Logs would
+    // diverge. `deriveForRun` already swallows every internal failure and
+    // returns `undefined` (D5); this try/catch is defense in depth so that
+    // even an unexpected throw here can NEVER reach `failAll` below, which
+    // would fail every queued run in this batch for what is an optional
+    // enrichment, not the review itself.
+    let intentSlot: PromptIntentSlot | undefined;
+    try {
+      intentSlot = await runLog.step(
+        'Deriving PR intent',
+        () => this.intentService.deriveForRun(workspaceId, pull, repo, runLog),
+        { kind: 'tool' },
+      );
+    } catch (err) {
+      runLog.info(`Intent derivation step threw unexpectedly (ignored): ${(err as Error).message}`);
+      intentSlot = undefined;
+    }
+
     for (const { agent, runId } of jobs) {
       const agentStart = Date.now();
       logger?.info(
@@ -118,7 +143,7 @@ export class ReviewRunExecutor {
         `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
       );
       try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, agent, runId, runLog);
+        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, intentSlot, agent, runId, runLog);
         logger?.info(
           {
             runId,
@@ -147,6 +172,7 @@ export class ReviewRunExecutor {
     pull: PullRow,
     repo: typeof schema.repos.$inferSelect,
     diff: UnifiedDiff,
+    intent: PromptIntentSlot | undefined,
     agent: AgentRow,
     runId: string,
     parentLog: RunLogger,
@@ -239,6 +265,11 @@ export class ReviewRunExecutor {
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
+        // L03 — derived PR intent, once per executeRuns. INTENT_IN_PROMPT is
+        // the A/B lever for the confirmation-bias risk (plan R-1): when
+        // false, intent is still derived/persisted/served to the UI, but the
+        // slot is withheld here so the prompt is unaffected.
+        ...(intent && this.container.config.intentInPromptEnabled ? { intent } : {}),
         task,
         sessionId: `${repo.owner}/${repo.name}#${pull.number}:${agent.name}`,
         onEvent: (e) => runLog.event(e.kind, e.msg, e.data),

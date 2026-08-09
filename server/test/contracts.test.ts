@@ -67,8 +67,27 @@ describe('AI contracts parse fixtures', () => {
 
   it('Intent / BlastRadius / Risks / PrHistory', () => {
     expect(() =>
-      Intent.parse({ intent: 'x', in_scope: ['a'], out_of_scope: ['b'] }),
+      Intent.parse({
+        intent: 'x',
+        in_scope: ['a'],
+        out_of_scope: ['b'],
+        risk_areas: [{ kind: 'security', label: 'Auth surface touched' }],
+      }),
     ).not.toThrow();
+    // `risk_areas` is required, like `out_of_scope` — the model is told to send
+    // `[]`, not to omit the key. A `.default([])` would have made this pass and
+    // would also have put an unsupported `default` keyword in the strict JSON
+    // schema handed to the provider.
+    expect(() => Intent.parse({ intent: 'x', in_scope: [], out_of_scope: [] })).toThrow();
+    // `kind` is a closed enum: an unknown bucket would render a chip with no icon.
+    expect(() =>
+      Intent.parse({
+        intent: 'x',
+        in_scope: [],
+        out_of_scope: [],
+        risk_areas: [{ kind: 'nonsense', label: 'x' }],
+      }),
+    ).toThrow();
     expect(() =>
       BlastRadius.parse({
         changed_symbols: [{ name: 'rateLimit', file: 'a.ts', kind: 'function' }],

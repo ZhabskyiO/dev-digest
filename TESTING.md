@@ -74,6 +74,25 @@ npm i -g agent-browser && agent-browser install
 cd e2e && pnpm install && pnpm test
 ```
 
+### Feature verifiers
+
+Focused wrappers over tests that already exist, for checking one feature's logic
+without opening the UI. They add no coverage of their own.
+
+```sh
+./scripts/verify-l03.sh          # L03 Smart Diff — file classification
+cd server && pnpm verify:l03     # …the server half only
+```
+
+`verify-l03.sh` runs both halves of Smart Diff's grouping — the server's
+core/wiring/boilerplate classification, ordering and split suggestion
+(`server/test/smart-diff.test.ts`), and the client's rendering of those groups,
+including that a lockfile starts collapsed and a core file with a finding starts
+expanded (`SmartDiffViewer.test.tsx`). Both are hermetic — no DB, API, browser,
+or network — and neither spends a token, since Smart Diff never calls a model.
+A failure in one half does not skip the other; the script exits non-zero if
+either fails.
+
 ## Conventions
 
 - **Integration tests end in `*.it.test.ts`.** The unit lane excludes that glob

@@ -26,6 +26,16 @@ const EnvSchema = z.object({
   // Note: even when on, sections only populate once the repo is indexed; an
   // unindexed repo degrades gracefully. Per-agent override: agents.repo_intel.
   REPO_INTEL_ENABLED: z.string().optional(),
+  // Intent Layer (L03) — derives a per-PR `Intent` (statement + in/out-of-scope)
+  // once per head_sha and feeds it to the reviewer. Default ON.
+  INTENT_ENABLED: z.string().optional(),
+  // A/B lever for the confirmation-bias risk (see the Intent Layer plan, R-1):
+  // when false, intent is still derived/persisted/served to the UI, but the
+  // slot is withheld from reviewPullRequest so the prompt is unaffected.
+  INTENT_IN_PROMPT: z.string().optional(),
+  // Gates evidence tiers (d) external URLs and (e) Jira/Linear. Default OFF —
+  // opt-in only, unlike the other two flags above.
+  INTENT_EXTERNAL_EVIDENCE: z.string().optional(),
   API_PORT: z.coerce.number().int().default(3001),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
@@ -59,6 +69,17 @@ export type AppConfig = {
    * EXACTLY like the ripgrep-only baseline.
    */
   repoIntelEnabled: boolean;
+  /** Master switch for the Intent Layer (L03). Default ON. */
+  intentEnabled: boolean;
+  /**
+   * Whether a derived intent is passed into the review prompt. Default ON.
+   * Set INTENT_IN_PROMPT=false to keep deriving/persisting/serving the card
+   * while withholding the slot from `reviewPullRequest` — the A/B lever for
+   * the confirmation-bias risk (see the Intent Layer plan, R-1).
+   */
+  intentInPromptEnabled: boolean;
+  /** Gates evidence tiers (d)/(e) (external URLs, Jira/Linear). Default OFF. */
+  intentExternalEvidenceEnabled: boolean;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -77,5 +98,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigin: `http://localhost:${parsed.WEB_PORT}`,
     embeddingsEnabled: parsed.EMBEDDINGS_ENABLED === 'true',
     repoIntelEnabled: parsed.REPO_INTEL_ENABLED !== 'false',
+    intentEnabled: parsed.INTENT_ENABLED !== 'false',
+    intentInPromptEnabled: parsed.INTENT_IN_PROMPT !== 'false',
+    intentExternalEvidenceEnabled: parsed.INTENT_EXTERNAL_EVIDENCE === 'true',
   };
 }

@@ -4,12 +4,20 @@ import type { CSSProperties } from "react";
 export const s = {
   card: (focused: boolean, sevColor: string, muted: boolean): CSSProperties => ({
     borderRadius: 8,
-    // All-longhand (never mix `border` shorthand with `borderLeft` — React warns
-    // about updating shorthand + non-shorthand on the same rerender).
+    /* FULLY per-side, no shorthand at any level. Dropping `border` for
+       `borderColor` was not enough: `borderColor` is itself a shorthand over
+       `borderLeftColor`, so React still warned "Updating borderColor
+       borderLeftColor" on every rerender that flipped `focused` — which now
+       happens on each jump from a diff badge to its finding. Only the four
+       per-side longhands silence it for real. */
     borderStyle: "solid",
-    borderColor: focused ? sevColor : "var(--border)",
-    borderWidth: 1,
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
     borderLeftWidth: 3,
+    borderTopColor: focused ? sevColor : "var(--border)",
+    borderRightColor: focused ? sevColor : "var(--border)",
+    borderBottomColor: focused ? sevColor : "var(--border)",
     borderLeftColor: sevColor,
     background: "var(--bg-elevated)",
     overflow: "hidden",

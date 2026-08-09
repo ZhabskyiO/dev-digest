@@ -11,6 +11,9 @@ import type { UseMutationResult } from "@tanstack/react-query";
 
 interface FindingsTabProps {
   prId: string | null;
+  /** A finding to reveal, from `?finding=` — set by clicking a severity badge
+   *  in the diff. The run containing it opens and the card scrolls into view. */
+  targetFindingId?: string | null;
   liveRunIds: string[];
   reviewRunning: boolean;
   lethalTrifecta: FindingRecord[];
@@ -28,6 +31,7 @@ interface FindingsTabProps {
 
 export function FindingsTab({
   prId,
+  targetFindingId,
   liveRunIds,
   reviewRunning,
   lethalTrifecta,
@@ -180,6 +184,7 @@ export function FindingsTab({
             headSha={headSha}
             targetRunId={target?.runId ?? null}
             targetNonce={target?.n ?? 0}
+            targetFindingId={targetFindingId ?? null}
           />
         ))
       )}

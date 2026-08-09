@@ -4,5 +4,6 @@ export { SeverityTally } from "./SeverityTally";
 export { useHoverCard } from "./useHoverCard";
 export { EMPTY_BREAKDOWN, popoverPosition, tallySeverities, totalFindings } from "./helpers";
 export type { AnchorRect } from "./helpers";
+export { TALLY_SEVERITIES } from "./constants";
 export type { SeverityBreakdown, TallySeverity } from "./constants";
 export { s as findingsSummaryStyles } from "./styles";

@@ -10,6 +10,13 @@
   "overlap": "{count} overlap",
   "unavailable": "Brief not available yet.",
   "unavailableHint": "Run a review or open the PR to compute it.",
+  "intent": {
+    "inScope": "In scope",
+    "outOfScope": "Out of scope",
+    "riskAreas": "Risk areas",
+    "scopeNotPrompted": "These scope lists were not shown to the reviewer. At low confidence they are inferred rather than stated, so the review was run without them.",
+    "error": "Couldn't load the derived intent."
+  },
   "why": {
     "title": "git-why",
     "blame": "blame",

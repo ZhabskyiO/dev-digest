@@ -71,6 +71,18 @@ export interface ReviewInput {
   /** PR author's description/body (untrusted; truncated + delimiter-wrapped in
       the prompt). Empty/undefined → section omitted. */
   prDescription?: string;
+  /**
+   * Optional server-derived intent (L03): statement + in/out-of-scope claims
+   * + a server-computed confidence tier. Untrusted except `confidence` — see
+   * `PromptParts.intent` in `prompt.ts` for the full trust/rendering
+   * rationale. Rendered LAST, after the diff. Undefined → section omitted.
+   */
+  intent?: {
+    statement: string;
+    inScope: string[];
+    outOfScope: string[];
+    confidence: 'high' | 'medium' | 'low';
+  };
   /** Task framing line, e.g. "Review PR #482 …". */
   task?: string;
   /** Override the structured-output retry budget. */
@@ -135,6 +147,9 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
     callers: input.callers,
     repoMap: input.repoMap,
     prDescription: input.prDescription,
+    // Same optional-slot passthrough as the other untrusted context slots
+    // above; assemblePrompt renders it (or omits it) — see prompt.ts.
+    intent: input.intent,
     task: input.task,
   };
 

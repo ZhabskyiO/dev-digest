@@ -27,6 +27,7 @@ export function FindingCard({
   f,
   focused,
   defaultExpanded,
+  expanded: expandedProp,
   onAction,
   pending,
   repoFullName,
@@ -35,6 +36,9 @@ export function FindingCard({
   f: FindingRecord;
   focused?: boolean;
   defaultExpanded?: boolean;
+  /** Forces the card open (a deep-linked `?finding=` target). `undefined`
+   *  leaves the card self-managed — it does NOT force it closed. */
+  expanded?: true | undefined;
   onAction?: (action: FindingActionKind, reply?: string) => void;
   pending?: boolean;
   repoFullName?: string | null;
@@ -42,6 +46,11 @@ export function FindingCard({
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
+  // A card already mounted and collapsed must still open when it becomes the
+  // deep-link target, which an initial-state-only `defaultExpanded` cannot do.
+  React.useEffect(() => {
+    if (expandedProp) setExpanded(true);
+  }, [expandedProp]);
   const sevColor = SEV_COLOR[f.severity] ?? SEV_COLOR_FALLBACK;
   const fileHref =
     repoFullName && headSha
