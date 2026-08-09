@@ -13,17 +13,7 @@
   "intent": {
     "inScope": "In scope",
     "outOfScope": "Out of scope",
-    "claimNote": "Derived by a separate model from the PR's title, body, commits, and paths — a claim to verify, not a fact.",
-    "confidence": {
-      "high": "High confidence",
-      "medium": "Medium confidence",
-      "low": "Low confidence"
-    },
-    "confidenceHint": {
-      "high": "Derived from a linked ticket and an in-repo spec or plan.",
-      "medium": "Derived from a linked ticket, a spec doc, or a substantive PR description.",
-      "low": "Inferred from the title, branch, and commits only — no ticket, spec, or description."
-    },
+    "riskAreas": "Risk areas",
     "scopeNotPrompted": "These scope lists were not shown to the reviewer. At low confidence they are inferred rather than stated, so the review was run without them.",
     "error": "Couldn't load the derived intent."
   },

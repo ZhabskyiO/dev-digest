@@ -3,7 +3,9 @@
 "use client";
 
 import React from "react";
+import { SeverityBadge } from "@devdigest/ui";
 import { commentTargetFor, type CommentThread, type DiffCommentApi, cs } from "../comments";
+import { diffLineAnchorId, type LineFinding } from "../annotations";
 import { type Line } from "../helpers";
 import { s, lineRowFor, lineSignFor } from "../styles";
 import { CommentThreadView } from "../CommentThreadView";
@@ -14,11 +16,18 @@ export function CodeLine({
   path,
   threads,
   commenting,
+  findings,
+  onSelectFinding,
 }: {
   ln: Line;
   path: string;
   threads: CommentThread[];
   commenting?: DiffCommentApi;
+  /** Review findings anchored to this line — badges + the scroll target. */
+  findings?: LineFinding[];
+  /** Makes each severity badge a button that opens the finding in full.
+   *  Omitted ⇒ the badges render as plain, non-interactive labels. */
+  onSelectFinding?: (finding: LineFinding) => void;
 }) {
   const [hover, setHover] = React.useState(false);
   const [composing, setComposing] = React.useState(false);
@@ -34,6 +43,7 @@ export function CodeLine({
   const sign = ln.kind === "add" ? "+" : ln.kind === "del" ? "−" : "";
   const target = commenting?.canComment ? commentTargetFor(ln) : null;
   const showAdd = hover && !!target && !composing;
+  const flagged = (findings?.length ?? 0) > 0;
 
   return (
     <div
@@ -41,7 +51,12 @@ export function CodeLine({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <div style={lineRowFor(ln.kind)}>
+      <div
+        /* The anchor sits on the NEW line number, which is what a finding's
+           `start_line` cites — deleted lines are never finding targets. */
+        {...(ln.newNo != null ? { id: diffLineAnchorId(path, ln.newNo) } : {})}
+        style={flagged ? { ...lineRowFor(ln.kind), ...s.flaggedRow } : lineRowFor(ln.kind)}
+      >
         <span className="mono tnum" style={{ ...s.lineNo, position: "relative" }}>
           {showAdd && target && (
             <button
@@ -62,6 +77,30 @@ export function CodeLine({
         <span className="mono" style={s.lineText}>
           {ln.text || " "}
         </span>
+        {flagged && (
+          <span style={s.lineFindings}>
+            {findings!.map((f) =>
+              onSelectFinding ? (
+                /* A real <button>, not a clickable span: this is a navigation
+                   control (it leaves the diff for the finding in full), so it
+                   must be tabbable and operable from the keyboard. */
+                <button
+                  key={f.id}
+                  type="button"
+                  title={f.title}
+                  onClick={() => onSelectFinding(f)}
+                  style={s.lineFindingBtn}
+                >
+                  <SeverityBadge severity={f.severity} />
+                </button>
+              ) : (
+                <span key={f.id} title={f.title}>
+                  <SeverityBadge severity={f.severity} />
+                </span>
+              ),
+            )}
+          </span>
+        )}
       </div>
 
       {commenting &&

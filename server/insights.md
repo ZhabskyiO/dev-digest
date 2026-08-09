@@ -35,6 +35,17 @@ most-skipped and most-valuable section: if something failed, record it here.**
   rephrase to avoid the sequence entirely. Same class of footgun as the
   unescaped-backtick-in-template-literal entry below (2026-08-04), different
   trigger character.
+- 2026-08-08 — NEVER give a field a Zod `.default([])` in a contract that is
+  passed as `schema:` to `llm.completeStructured`. `toJsonSchema`
+  (`platform/structured.ts` → reviewer-core `llm/structured.ts`, which wraps
+  OpenAI's `zodResponseFormat`) emits a literal `"default": []` keyword into the
+  generated JSON schema — verified by dumping the schema for `Intent` — and
+  `default` is **not** among the keywords OpenAI's strict structured-output mode
+  accepts. The field still lands in `required`, so the default buys nothing at
+  the provider and risks a 400. Model-facing contract fields must be plain and
+  required; put the leniency in the prompt instead ("return `[]`" as an
+  explicitly stated, common answer), exactly as `Intent.out_of_scope` already
+  does. Hit adding `Intent.risk_areas` in `vendor/shared/contracts/brief.ts`.
 
 ## Codebase Patterns
 
@@ -86,6 +97,28 @@ Conventions and architectural decisions specific to this repo.
   the demo PR — run a real review, or check a genuinely imported repo, before
   concluding the join is broken. (Hit while adding the per-run findings breakdown
   to the PR timeline: seeded PRs silently fell back to the plain count.)
+
+- 2026-08-08 — There is NO identifier shared across one "Run Review (all
+  agents)". `ReviewService.runReview` calls `createAgentRun` inside the
+  per-agent loop, so every agent gets its own `agent_runs.id` and writes its own
+  `reviews` row seconds apart. Two consequences for any feature reading "the
+  latest review": `reviewsForPull(prId)[0]` is whichever agent's write landed
+  LAST — routinely one that found nothing (observed: rows at 19:58:06 with 0
+  findings, 19:58:01 with 0, 19:57:40 with 8) — and grouping by `run_id` does
+  NOT repair it, because each of those rows has a different run id. ALWAYS
+  de-duplicate by `agentId` newest-first instead (`findingsFromLatestRunPerAgent`
+  in `modules/reviews/helpers.ts`): one vote per agent, a re-run supersedes only
+  that agent. Taking every row is the opposite error — it double-counts re-runs.
+
+- 2026-08-08 — Adding a new derived field to `pr_intent` does NOT backfill on the
+  next review run. `IntentService.deriveForRun` short-circuits on
+  `cached.headSha === pull.headSha` (`modules/reviews/intent/service.ts:126`)
+  and returns the persisted row without calling the model, so every PR whose
+  head hasn't moved keeps the old shape — the new column sits at its DB default
+  forever and re-running the review changes nothing. ALWAYS state this when
+  shipping such a field, and force a re-derive with
+  `DELETE FROM pr_intent WHERE pr_id = …` (or push a new commit) rather than
+  debugging why the value is empty. Hit shipping `risk_areas`.
 
 ## Tool & Library Notes
 

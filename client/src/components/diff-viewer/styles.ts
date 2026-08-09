@@ -64,6 +64,28 @@ export const s = {
     color: "var(--text-primary)",
     paddingRight: 12,
   } satisfies CSSProperties,
+  /* A line carrying a finding. The left rule is the marker that survives the
+     add/del row tint underneath — a background change alone would be
+     invisible on an added (green) line. */
+  flaggedRow: {
+    boxShadow: "inset 3px 0 0 var(--crit)",
+  } satisfies CSSProperties,
+  lineFindings: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    paddingRight: 12,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+  /* The badge already carries all the colour; the button is a bare wrapper so
+     it stays visually identical to the non-interactive form. */
+  lineFindingBtn: {
+    display: "inline-flex",
+    padding: 0,
+    border: "none",
+    background: "none",
+    cursor: "pointer",
+  } satisfies CSSProperties,
 } as const;
 
 /** Chevron rotates 90deg when the file card is open. */

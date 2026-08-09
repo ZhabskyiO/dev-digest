@@ -9,48 +9,45 @@ export const s = {
   } satisfies CSSProperties,
   box: {
     border: "1px solid var(--border)",
-    borderRadius: 8,
+    borderRadius: 14,
     background: "var(--bg-elevated)",
-    padding: 18,
+    padding: 26,
     display: "flex",
     flexDirection: "column",
-    gap: 14,
+    gap: 24,
   } satisfies CSSProperties,
+  /* The statement is the card's headline, not a caption — it carries its own
+     quotation marks (added in the component) instead of the old left rule. */
   statement: {
     margin: 0,
-    borderLeft: "2px solid var(--border)",
-    paddingLeft: 14,
-    fontSize: 14,
+    fontSize: 19,
     fontStyle: "italic",
+    fontWeight: 400,
     color: "var(--text-primary)",
-    lineHeight: 1.55,
-  } satisfies CSSProperties,
-  claimNote: {
-    margin: 0,
-    fontSize: 12,
-    color: "var(--text-muted)",
-    lineHeight: 1.5,
+    lineHeight: 1.45,
   } satisfies CSSProperties,
   /* auto-fit keeps the two scope columns side by side on a wide card and
      collapses them to one column on a narrow one — no media query needed,
      which inline style objects cannot express. */
   scopeGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 18,
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: 32,
   } satisfies CSSProperties,
   scopeBlock: {
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    gap: 12,
   } satisfies CSSProperties,
+  /* Shared by both scope headers and the risk-areas header. IN SCOPE overrides
+     `color` to --ok inline; everything else inherits the muted default. */
   scopeLabel: {
     display: "flex",
     alignItems: "center",
-    gap: 6,
-    fontSize: 11,
+    gap: 8,
+    fontSize: 12,
     fontWeight: 700,
-    letterSpacing: "0.06em",
+    letterSpacing: "0.11em",
     textTransform: "uppercase",
     color: "var(--text-muted)",
   } satisfies CSSProperties,
@@ -69,20 +66,53 @@ export const s = {
   } satisfies CSSProperties,
   scopeList: {
     margin: 0,
-    paddingLeft: 18,
+    padding: 0,
+    listStyle: "none",
     display: "flex",
     flexDirection: "column",
-    gap: 4,
+    gap: 10,
   } satisfies CSSProperties,
   scopeItem: {
-    fontSize: 13.5,
+    display: "flex",
+    alignItems: "baseline",
+    gap: 10,
+    fontSize: 15,
     color: "var(--text-secondary)",
-    lineHeight: 1.5,
+    lineHeight: 1.45,
   } satisfies CSSProperties,
-  confidenceWrap: {
+  /* Fixed width so wrapped item text stays flush with the first line. */
+  scopeBullet: {
+    flexShrink: 0,
+    width: 4,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+  /* The rule above RISK AREAS. `box` already supplies the gap below the scope
+     grid, so the divider needs only its own padding above the label. */
+  riskSection: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    paddingTop: 24,
+    borderTop: "1px solid var(--border)",
+  } satisfies CSSProperties,
+  riskChips: {
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+  } satisfies CSSProperties,
+  riskChip: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    padding: "10px 16px",
+    fontSize: 15,
+    color: "var(--text-secondary)",
+    lineHeight: 1.3,
   } satisfies CSSProperties,
   unavailableBox: {
     border: "1px solid var(--border)",

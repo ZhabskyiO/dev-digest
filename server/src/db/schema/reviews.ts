@@ -13,7 +13,7 @@ import {
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
-import type { IntentSource } from '@devdigest/shared';
+import type { IntentSource, RiskArea } from '@devdigest/shared';
 
 // ============================================================ Review & findings
 
@@ -71,6 +71,12 @@ export const prIntent = pgTable(
     intent: text('intent').notNull(),
     inScope: jsonb('in_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     outOfScope: jsonb('out_of_scope').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /**
+     * Display-only reviewer hints ("Auth surface touched"). Defaults to `'[]'`
+     * so every row written before this column existed reads back as "no risk
+     * areas" rather than null — the API contract has no nullable form for it.
+     */
+    riskAreas: jsonb('risk_areas').$type<RiskArea[]>().notNull().default(sql`'[]'::jsonb`),
     /**
      * The commit this row was derived from. Defaults to `''`, never to a real
      * sha — `''` can never equal a real `pull_requests.head_sha`, so any

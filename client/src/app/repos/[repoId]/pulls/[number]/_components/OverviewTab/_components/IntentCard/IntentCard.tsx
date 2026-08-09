@@ -1,7 +1,8 @@
 /* IntentCard — the Intent Layer's derived intent for a PR (title/body/branch/
    commits/paths → a structured claim about what the PR is for), rendered on
-   the Overview tab. `data` is a CLAIM produced by a separate, cheap model —
-   never presented as fact (see `intent.claimNote` and the confidence chip).
+   the Overview tab. `data` is a CLAIM produced by a separate, cheap model, not
+   a review finding: the quote is typeset in quotation marks and risk areas are
+   named as places to look, never as verdicts.
 
    Early-return states, in order: loading → skeleton; error → an inline error
    (never full-screen — the Description section below must still render);
@@ -11,9 +12,26 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { SectionLabel, Chip, ConfidenceNum, Skeleton, Icon, Button } from "@devdigest/ui";
+import { SectionLabel, Skeleton, Icon, Button } from "@devdigest/ui";
+import type { RiskAreaKind } from "@devdigest/shared";
 import { usePrIntent } from "@/lib/hooks/reviews";
 import { s } from "./styles";
+
+/* One icon + accent per `RiskAreaKind`. Exhaustive by construction: the record
+   is keyed by the union, so widening `RiskAreaKind` in the shared contract
+   fails typecheck here until an icon is chosen — which is exactly why that
+   enum is closed (see contracts/brief.ts). */
+const RISK_AREA_STYLE: Record<
+  RiskAreaKind,
+  { icon: keyof typeof Icon; color: string }
+> = {
+  security: { icon: "Shield", color: "var(--crit)" },
+  dependency: { icon: "Boxes", color: "var(--warn)" },
+  performance: { icon: "Zap", color: "var(--sugg)" },
+  data: { icon: "Database", color: "var(--accent)" },
+  breaking: { icon: "AlertTriangle", color: "var(--crit)" },
+  other: { icon: "Info", color: "var(--text-muted)" },
+};
 
 export function IntentCard({ prId }: { prId: string | null }) {
   const t = useTranslations("brief");
@@ -64,6 +82,7 @@ export function IntentCard({ prId }: { prId: string | null }) {
   const tier = data.confidence.tier;
   const hasInScope = data.in_scope.length > 0;
   const hasOutOfScope = data.out_of_scope.length > 0;
+  const hasRiskAreas = data.risk_areas.length > 0;
   /* At `low` confidence the prompt builder omits both scope lists from the
      reviewer's prompt, but they are still persisted and shown here. Say so,
      or the card implies the review was informed by them. */
@@ -71,55 +90,55 @@ export function IntentCard({ prId }: { prId: string | null }) {
 
   return (
     <section style={s.section}>
-      <SectionLabel
-        icon="Target"
-        right={
-          <div style={s.confidenceWrap} title={t(`intent.confidenceHint.${tier}`)}>
-            <Chip>{t(`intent.confidence.${tier}`)}</Chip>
-            <ConfidenceNum value={data.confidence.score} />
-          </div>
-        }
-      >
-        {t("block.intent")}
-      </SectionLabel>
+      <SectionLabel icon="Target">{t("block.intent")}</SectionLabel>
 
       <div style={s.box}>
-        <blockquote style={s.statement}>{data.intent}</blockquote>
-        <p style={s.claimNote}>{t("intent.claimNote")}</p>
+        {/* The quotation marks are content, not decoration: they mark the
+            sentence as the PR author's claim as read by the model. */}
+        <blockquote style={s.statement}>&ldquo;{data.intent}&rdquo;</blockquote>
 
         {(hasInScope || hasOutOfScope) && (
           <div style={s.scopeGrid}>
             {hasInScope && (
               <div style={s.scopeBlock}>
-                <div style={s.scopeLabel}>
-                  <Icon.Check size={13} style={{ color: "var(--ok)" }} aria-hidden="true" />
+                <div style={{ ...s.scopeLabel, color: "var(--ok)" }}>
+                  <Icon.Check size={15} aria-hidden="true" />
                   {t("intent.inScope")}
                 </div>
-                <ul style={s.scopeList}>
-                  {data.in_scope.map((item, i) => (
-                    <li key={`${i}-${item}`} style={s.scopeItem}>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
+                <ScopeList items={data.in_scope} />
               </div>
             )}
 
             {hasOutOfScope && (
               <div style={s.scopeBlock}>
                 <div style={s.scopeLabel}>
-                  <Icon.X size={13} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                  <Icon.X size={15} aria-hidden="true" />
                   {t("intent.outOfScope")}
                 </div>
-                <ul style={s.scopeList}>
-                  {data.out_of_scope.map((item, i) => (
-                    <li key={`${i}-${item}`} style={s.scopeItem}>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
+                <ScopeList items={data.out_of_scope} />
               </div>
             )}
+          </div>
+        )}
+
+        {hasRiskAreas && (
+          <div style={s.riskSection}>
+            <div style={s.scopeLabel}>
+              <Icon.AlertTriangle size={15} aria-hidden="true" />
+              {t("intent.riskAreas")}
+            </div>
+            <ul style={s.riskChips}>
+              {data.risk_areas.map((area, i) => {
+                const style = RISK_AREA_STYLE[area.kind];
+                const Glyph = Icon[style.icon];
+                return (
+                  <li key={`${i}-${area.label}`} style={s.riskChip}>
+                    <Glyph size={15} style={{ color: style.color, flexShrink: 0 }} aria-hidden="true" />
+                    {area.label}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
 
@@ -135,5 +154,23 @@ export function IntentCard({ prId }: { prId: string | null }) {
         )}
       </div>
     </section>
+  );
+}
+
+/* Scope items use an explicit `·` span rather than a list marker: the design's
+   bullet is dimmer than its label and `::marker` can't be reached from an
+   inline style object. `listStyle: none` is therefore mandatory here. */
+function ScopeList({ items }: { items: string[] }) {
+  return (
+    <ul style={s.scopeList}>
+      {items.map((item, i) => (
+        <li key={`${i}-${item}`} style={s.scopeItem}>
+          <span style={s.scopeBullet} aria-hidden="true">
+            ·
+          </span>
+          {item}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -1,12 +1,19 @@
 import type { Container } from '../../platform/container.js';
-import type { FindingActionKind, PrIntentDetail, RunEventKind, RunTrace } from '@devdigest/shared';
+import type {
+  FindingActionKind,
+  PrIntentDetail,
+  RunEventKind,
+  RunTrace,
+  SmartDiff,
+} from '@devdigest/shared';
 import { AppError, NotFoundError } from '../../platform/errors.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
 import { actOnFinding as actOnFindingImpl } from './findings.js';
-import { reviewToDto } from './helpers.js';
+import { reviewToDto, findingsFromLatestRunPerAgent } from './helpers.js';
+import { buildSmartDiff } from './smart-diff/index.js';
 
 // Re-export DTO types + converters for backward-compatible imports from
 // './service.js' (these previously lived here; logic now in ./helpers.ts).
@@ -187,5 +194,34 @@ export class ReviewService {
    */
   async getIntentDetail(workspaceId: string, prId: string): Promise<PrIntentDetail | undefined> {
     return this.repo.getIntentDetail(workspaceId, prId);
+  }
+
+  /**
+   * Smart Diff for a PR — files grouped core/wiring/boilerplate and ordered
+   * findings-first.
+   *
+   * Costs ZERO tokens by construction: the two reads below are the already
+   * imported `pr_files` rows and the already persisted findings of the latest
+   * review. `buildSmartDiff` is pure. Nothing on this path touches
+   * `container.llm()` — see the acceptance criterion "no new model call in the
+   * logs when viewing Smart Diff".
+   *
+   * Findings come from `findingsFromLatestRunPerAgent` — see that helper for
+   * why neither "the newest review" nor "group by run id" nor "everything"
+   * is the right set. The client renders its badges through the mirrored
+   * helper in `lib/findings.ts`; the two must stay in step.
+   */
+  async smartDiffForPull(workspaceId: string, prId: string): Promise<SmartDiff> {
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+
+    const files = await this.repo.getPrFiles(prId);
+    const reviews = await this.repo.reviewsForPull(prId);
+    const anchors = findingsFromLatestRunPerAgent(reviews).map((f) => ({
+      file: f.file,
+      start_line: f.startLine,
+    }));
+
+    return buildSmartDiff(files, anchors);
   }
 }

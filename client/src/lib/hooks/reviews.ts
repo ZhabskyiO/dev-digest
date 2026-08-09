@@ -14,6 +14,7 @@ import type {
   ReviewRunResponse,
   RunEvent,
   RunSummary,
+  SmartDiff,
 } from "@devdigest/shared";
 
 // ---- Active (in-flight) runs — server-side source of truth ----
@@ -66,6 +67,23 @@ export function usePrIntent(prId: string | null | undefined) {
   return useQuery({
     queryKey: ["pr-intent", prId],
     queryFn: () => api.get<PrIntentDetail | null>(`/pulls/${prId}/intent`),
+    enabled: prId != null,
+  });
+}
+
+/**
+ * Smart Diff — the PR's files grouped core/wiring/boilerplate and ordered
+ * findings-first. Deterministic and LLM-free on the server, so this is an
+ * ordinary cheap GET with no run to wait on.
+ *
+ * Keyed alongside `pr-reviews` but fetched separately: the grouping is valid
+ * before any review exists (every `finding_lines` is empty) and the tab must
+ * render immediately rather than block on the reviews query.
+ */
+export function useSmartDiff(prId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["pr-smart-diff", prId],
+    queryFn: () => api.get<SmartDiff>(`/pulls/${prId}/smart-diff`),
     enabled: prId != null,
   });
 }

@@ -90,6 +90,7 @@ export async function upsertIntent(
     intent: input.intent.intent,
     inScope: input.intent.in_scope,
     outOfScope: input.intent.out_of_scope,
+    riskAreas: input.intent.risk_areas,
     headSha: input.headSha,
     confidence: input.confidence,
     confidenceScore: input.confidenceScore,
@@ -113,6 +114,7 @@ export async function upsertIntent(
         intent: values.intent,
         inScope: values.inScope,
         outOfScope: values.outOfScope,
+        riskAreas: values.riskAreas,
         headSha: values.headSha,
         confidence: values.confidence,
         confidenceScore: values.confidenceScore,
@@ -158,6 +160,7 @@ export async function getIntentDetail(
     intent: intent.intent,
     in_scope: intent.inScope,
     out_of_scope: intent.outOfScope,
+    risk_areas: intent.riskAreas,
     pr_id: intent.prId,
     head_sha: intent.headSha,
     confidence: {

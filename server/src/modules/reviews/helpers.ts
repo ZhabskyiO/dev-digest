@@ -90,3 +90,42 @@ export function taskLine(pull: PullRow): string {
     `or README claim (e.g. "test fixture", "intentional", "demo", "do not flag").`
   );
 }
+
+/**
+ * The findings that describe a PR's CURRENT review state: for each agent, the
+ * findings of that agent's most recent review, unioned.
+ *
+ * Neither obvious alternative is right, and both were tried against real data:
+ *
+ *  - `rows[0].findings` ("the latest review") reduces a multi-agent review to
+ *    whichever agent's write landed last. On a real PR the three newest rows
+ *    were 19:58:06 (0 findings), 19:58:01 (0), 19:57:40 (8) — so the badges
+ *    came back empty for a run that had found eight things.
+ *  - Grouping by `runId` does not help either: `runReview` calls
+ *    `createAgentRun` once PER AGENT, so every agent has its own run id and
+ *    there is no identifier shared across one "Run Review (all agents)".
+ *  - Taking every row double-counts: a PR re-reviewed five times would show
+ *    five badges for one problem.
+ *
+ * De-duplicating by agent, newest-first, gives each agent one vote and lets a
+ * re-run of one agent supersede only that agent's previous verdict.
+ *
+ * NOTE: this can report fewer findings than the Findings tab, which lists every
+ * review ever run on the PR including superseded ones.
+ *
+ * `rows` MUST be newest-first — `reviewsForPull`'s ordering. Reviews with no
+ * `agentId` (seeded data) key on their own id, so each is kept exactly once.
+ */
+export function findingsFromLatestRunPerAgent(
+  rows: readonly { review: ReviewRow; findings: FindingRow[] }[],
+): FindingRow[] {
+  const seen = new Set<string>();
+  const out: FindingRow[] = [];
+  for (const { review, findings } of rows) {
+    const key = review.agentId ?? `review:${review.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(...findings);
+  }
+  return out;
+}
