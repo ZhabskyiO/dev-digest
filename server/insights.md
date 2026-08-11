@@ -46,6 +46,13 @@ most-skipped and most-valuable section: if something failed, record it here.**
   required; put the leniency in the prompt instead ("return `[]`" as an
   explicitly stated, common answer), exactly as `Intent.out_of_scope` already
   does. Hit adding `Intent.risk_areas` in `vendor/shared/contracts/brief.ts`.
+- 2026-08-09 — NEVER expect a route's `config: { rateLimit: … }` to fire in a
+  `.it.test.ts`. `app.ts:95` skips registering `@fastify/rate-limit` entirely
+  when `config.nodeEnv === 'test'`, so per-route limits are inert under
+  `app.inject()` — a test asserting a 429 after N calls will never see one, and
+  a test that *relies* on the limit as a safety fence is testing nothing. Cost
+  fences that must hold in tests have to live in the service (e.g. the per-PR
+  in-flight dedupe in `IntentService.recalculate`), not in the route config.
 
 ## Codebase Patterns
 
@@ -119,6 +126,12 @@ Conventions and architectural decisions specific to this repo.
   shipping such a field, and force a re-derive with
   `DELETE FROM pr_intent WHERE pr_id = …` (or push a new commit) rather than
   debugging why the value is empty. Hit shipping `risk_areas`.
+  └ 2026-08-09 update: there is now a supported escape hatch —
+    `POST /pulls/:id/intent/recalculate` force-derives one PR at the same
+    `head_sha` (`IntentService.recalculate`, which skips the cache check that
+    `deriveForRun` still performs). Prefer it over `DELETE FROM pr_intent` for
+    a handful of PRs; the SQL is still the move for a bulk backfill, since the
+    endpoint is one PR per call and rate-limited.
 
 ## Tool & Library Notes
 

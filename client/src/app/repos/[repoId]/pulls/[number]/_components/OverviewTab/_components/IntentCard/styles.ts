@@ -146,6 +146,14 @@ export const s = {
     color: "var(--text-secondary)",
     fontSize: 13.5,
   } satisfies CSSProperties,
+  /* Failure of the manual re-derive. Inline and above the card so the previous
+     (still valid) intent stays readable underneath — the POST failing does not
+     invalidate what is already stored. */
+  recalcError: {
+    margin: "0 0 12px",
+    fontSize: 12.5,
+    color: "var(--crit)",
+  } satisfies CSSProperties,
   skeletonWrap: {
     display: "flex",
     flexDirection: "column",

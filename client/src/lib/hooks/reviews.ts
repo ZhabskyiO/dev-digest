@@ -71,6 +71,24 @@ export function usePrIntent(prId: string | null | undefined) {
   });
 }
 
+/** Force a fresh derivation of the PR's intent.
+ *
+ * The only user-triggered action here that spends tokens without running a
+ * review, so it is a deliberate button press and never automatic — no retry, no
+ * refetch-on-focus. The server bounds the cost (rate limit + per-PR in-flight
+ * dedupe); the caller's job is to keep the button disabled while `isPending`.
+ *
+ * Seeds the cache from the response instead of only invalidating: the POST
+ * already returns the fresh `PrIntentDetail`, so a follow-up GET would be a
+ * second round-trip for data we hold. */
+export function useRecalculateIntent(prId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<PrIntentDetail>(`/pulls/${prId}/intent/recalculate`),
+    onSuccess: (detail) => qc.setQueryData(["pr-intent", prId], detail),
+  });
+}
+
 /**
  * Smart Diff — the PR's files grouped core/wiring/boilerplate and ordered
  * findings-first. Deterministic and LLM-free on the server, so this is an
