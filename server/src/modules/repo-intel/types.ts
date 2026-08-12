@@ -24,6 +24,14 @@
 
 export type IndexStatus = 'full' | 'partial' | 'degraded' | 'failed';
 
+/**
+ * Identity of a declared symbol: a name is only unique WITHIN a file. Every
+ * per-symbol map in BlastResult is keyed with this.
+ */
+export function symbolKey(file: string, name: string): string {
+  return `${file}\u0000${name}`;
+}
+
 export type DegradedReason =
   | 'flag_off'
   | 'index_failed'
@@ -65,17 +73,65 @@ export interface BlastCallerRow {
   symbol: string;
   /** Which changed symbol this caller reaches. */
   viaSymbol: string;
+  /**
+   * The file that changed symbol is declared in. `viaSymbol` alone does NOT
+   * identify it — `getById` / `list` / `remove` are each declared in several
+   * files in a typical repo, and keying on the bare name makes every same-named
+   * symbol report every other one's callers.
+   */
+  viaFile: string;
   /** 1-based line of the reference (representative; for the BlastRadius view). */
   line: number;
   /** file_rank.rank of the caller file (0 in the degraded/ripgrep path). */
   rank: number;
 }
 
+/** A 1-based, inclusive line span. */
+export interface LineRange {
+  start: number;
+  end: number;
+}
+
+export interface BlastOptions {
+  /**
+   * Per-file line spans the diff actually touches, measured against the BASE
+   * side of the patch. When given, only symbols overlapping one of these spans
+   * count as "changed".
+   *
+   * Without it, "symbols declared in a changed file" means EVERY symbol the
+   * index knows in that file — a one-line edit to a 40-symbol repository file
+   * reports all 40 as changed, which is both wrong and useless. Line numbers
+   * come from the index, so this filter is only as aligned as the indexed
+   * revision is to the diff's base.
+   */
+  touchedLines?: Record<string, LineRange[]>;
+}
+
 export interface BlastResult {
   changedSymbols: BlastChangedSymbol[];
+  /**
+   * Capped at MAX_CALLERS_PER_SYMBOL **per `viaSymbol`** (not globally) and
+   * sorted by `rank` DESC within each symbol. Capping the flat list instead
+   * would silently drop whole symbols off the end of a multi-symbol diff.
+   */
   callers: BlastCallerRow[];
   /** "METHOD /path" (via extractEndpoints / file_facts) — flat union. */
   impactedEndpoints: string[];
+  /**
+   * Caller count per changed symbol BEFORE the cap, so a consumer can say
+   * "20 of 63" rather than presenting a truncated list as the whole story.
+   * Keyed by `symbolKey(file, name)` — see BlastCallerRow.viaFile for why the
+   * bare name is not a key.
+   */
+  callerTotals: Record<string, number>;
+  /**
+   * Endpoints/crons attributed to the changed symbol that reaches them, keyed
+   * by `symbolKey(file, name)`. Populated on the persistent path by walking the reverse
+   * import graph BFS_DEPTH hops out from the declaring file; absent on the
+   * degraded path, where only `impactedEndpoints` is available.
+   */
+  endpointsBySymbol?: Record<string, string[]>;
+  cronsBySymbol?: Record<string, string[]>;
   /**
    * Per-caller-file precomputed facts, so consumers (blast) can attribute
    * endpoints/crons to the changed symbol whose callers live in that file.
@@ -84,6 +140,11 @@ export interface BlastResult {
   factsByFile?: Record<string, { endpoints: string[]; crons: string[] }>;
   degraded?: boolean;
   reason?: DegradedReason;
+  /**
+   * True when the downstream walk hit MAX_BLAST_FRONTIER_FILES and stopped
+   * early — the endpoint list is then a subset, not the full picture.
+   */
+  frontierClipped?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +205,11 @@ export interface RepoIntel {
   getIndexState(repoId: string): Promise<IndexState>;
 
   // --- Reads --------------------------------------------------------------
-  getBlastRadius(repoId: string, changedFiles: string[]): Promise<BlastResult>;
+  getBlastRadius(
+    repoId: string,
+    changedFiles: string[],
+    opts?: BlastOptions,
+  ): Promise<BlastResult>;
   getRepoMap(repoId: string, tokenBudget?: number): Promise<RepoMapResult>;
   getFileRank(repoId: string, paths: string[]): Promise<FileRankRow[]>;
   getSymbolsInFiles(repoId: string, paths: string[]): Promise<SymbolRow[]>;

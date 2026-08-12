@@ -1,6 +1,17 @@
 import type { CSSProperties } from "react";
 
 export const s = {
+  /* Intent | Blast radius. `auto-fit` + a 380px floor collapses the pair to one
+     column on a narrow viewport without a media query — inline style objects
+     cannot express one, and the two cards are equal-weight, so neither should
+     win the space when only one fits. */
+  cardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    gap: 24,
+    alignItems: "start",
+    marginBottom: 28,
+  } satisfies CSSProperties,
   descriptionBox: {
     border: "1px solid var(--border)",
     borderRadius: 8,

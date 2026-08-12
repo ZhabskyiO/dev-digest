@@ -10,9 +10,20 @@
     "graph": "graph"
   },
   "callerCount": "{count} callers",
+  "callerCountCapped": "{shown} of {count} callers",
   "noDownstream": "{count} changed symbol(s), no downstream callers found.",
   "graph": {
     "empty": "No downstream callers to graph.",
     "ariaLabel": "Blast radius graph"
-  }
+  },
+  "error": "Could not load the blast radius.",
+  "unavailable": "No impact map yet",
+  "unavailableHint": "Index this repo (Re-analyze on the repo page) to see which symbols this PR changes and who calls them.",
+  "degraded": "Incomplete map",
+  "partial": "Partial map",
+  "priorPrs": "Prior PRs touching these files",
+  "priorPrOverlap": "{count} shared file(s)",
+  "declaredIn": "declared in",
+  "expandSymbol": "Show callers of {name}",
+  "collapseSymbol": "Hide callers of {name}"
 }

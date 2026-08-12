@@ -58,6 +58,21 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-11 — ALWAYS pin a code link built from repo-intel data to
+  `repo_index_state.last_indexed_sha`, **never** to the repo's default branch or
+  the PR head sha. Every `file:line` the index emits (`symbols.line`,
+  `references.line`, and so anything downstream like `BlastCallerRow.line`) is
+  measured against the commit the indexer walked, and the index lags `main` by
+  however many commits have landed since — so a `blob/main/...#L146` link drifts
+  by however many lines were inserted above. Verified concretely: for the
+  `deriveReviewStatus` caller in `server/src/modules/pulls/routes.ts`, line 146
+  at the indexed sha is the real call site, while line 146 on `main` is an
+  unrelated `.where(and(eq(...)))`. The PR head sha is wrong too — index callers
+  mostly live in files the PR never touched. This is why
+  `BlastRadiusResult.indexed_sha` exists
+  (`server/src/vendor/shared/contracts/blast.ts`); any new surface over index
+  data needs the same field rather than reusing `repo.default_branch`.
+
 - 2026-08-07 — `server/src/prompts/intent.extract.md` (T3) has exactly seven
   placeholders (`title`, `branch`, `commits`, `paths`, `body`, `ticket`,
   `docs`) with **no dedicated slot for evidence tiers (d) external URLs or

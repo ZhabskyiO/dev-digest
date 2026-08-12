@@ -30,6 +30,16 @@ export const EXCLUDED_DIRS = [
 export const MAX_CALLERS_PER_SYMBOL = 20;
 
 /**
+ * Ceiling on the downstream-file frontier the blast walk may visit per repo.
+ * A hub file (a barrel, a shared util) is imported by hundreds of modules, and
+ * two hops out from one of those is most of the repo — without this cap a
+ * single PR touching `index.ts` turns one request into a full-graph scan.
+ * When the walk clips, `BlastResult.frontierClipped` says so instead of
+ * pretending the shorter endpoint list is complete.
+ */
+export const MAX_BLAST_FRONTIER_FILES = 300;
+
+/**
  * [T1] Bumped whenever the AST extractor or symbol schema changes. A mismatch
  * with `repo_index_state.indexer_version` forces a full reindex.
  *
