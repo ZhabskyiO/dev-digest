@@ -3,6 +3,8 @@
  *
  * Exports (Zod schemas + inferred TS types):
  *  - contracts/findings   Review, Finding, Severity, Verdict, FindingAction, trifecta
+ *  - contracts/local-review LocalReviewRequest/Result — reviewing a local diff
+ *                         with no PR behind it (POST /reviews/local, CLI)
  *  - contracts/brief      Intent, BlastRadius, Risks, PrHistory, SmartDiff, PrBrief
  *  - contracts/blast      BlastRadiusResult — the index-backed PR impact map
  *                         (GET /pulls/:id/blast); distinct from brief's BlastRadius
@@ -20,6 +22,7 @@
 
 export * from './contracts/findings.js';
 export * from './contracts/review-api.js';
+export * from './contracts/local-review.js';
 export * from './contracts/brief.js';
 export * from './contracts/blast.js';
 export * from './contracts/intent.js';

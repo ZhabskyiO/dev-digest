@@ -69,7 +69,7 @@ flowchart TB
     polling["polling<br/>/repos/:id/poll"]
   end
   subgraph Review["Review & runs"]
-    reviews["reviews<br/>/pulls/:id/review · /reviews · /findings/:id/(accept|dismiss)<br/>/runs/:id/(events|trace)"]
+    reviews["reviews<br/>/pulls/:id/review · /reviews · /reviews/local · /findings/:id/(accept|dismiss)<br/>/runs/:id/(events|trace)"]
   end
   subgraph Agents["Agents"]
     agents["agents<br/>/agents · /agents/:id"]
@@ -108,6 +108,29 @@ through `SecretsProvider` (`~/.devdigest/secrets.json`, mode `0600`, with
 Migrations are **not** applied on boot — run `pnpm db:migrate` (pgvector is
 enabled by migration `0000`). `pnpm db:seed` is idempotent demo data
 (`acme/payments-api`, PR #482, the two built-in agents).
+
+## Local review — `POST /reviews/local`
+
+The same review, before there is a pull request. The body carries a raw unified
+diff (`{ mode: "working", diff, agentId?, repo?, failOn?, label? }`) instead of a
+`pr_id`; `modules/reviews/local-review.ts` parses it, resolves the agent, builds
+the prompt through the **same** `prompt-context.ts` enrichment and skill
+resolution a PR run uses, and calls `reviewPullRequest` from
+`@devdigest/reviewer-core` — so grounding, the injection guard, and the
+`countBlockers` gate all behave identically.
+
+Two deliberate differences from `POST /pulls/:id/review`:
+
+- **Synchronous, not queued.** The caller is a CLI that must exit with a
+  verdict, so the response *is* the review. No run id, no SSE stream.
+- **Nothing is persisted.** `reviews`, `findings`, `agent_runs`, and
+  `run_traces` all hang off a `pr_id`, and a working tree has none. Inventing a
+  synthetic PR row for throwaway pre-push runs would pollute every PR-scoped
+  query and rollup in the studio.
+
+`repo` is only an enrichment hint: unknown, or known-but-unindexed, still
+reviews the diff and reports what was missing in `degraded[]`. The client is
+[`mcp-server`'s `devdigest review` CLI](../mcp-server/README.md#cli-devdigest-review).
 
 ## Review context (non-obvious)
 

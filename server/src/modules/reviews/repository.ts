@@ -38,6 +38,14 @@ export class ReviewRepository {
     return pullRepo.getRepo(this.db, repoId);
   }
 
+  /** Repo by `owner/name` — the local review path's entry point (no PR row). */
+  getRepoByFullName(
+    workspaceId: string,
+    fullName: string,
+  ): Promise<typeof t.repos.$inferSelect | undefined> {
+    return pullRepo.getRepoByFullName(this.db, workspaceId, fullName);
+  }
+
   getPrFiles(prId: string): Promise<(typeof t.prFiles.$inferSelect)[]> {
     return pullRepo.getPrFiles(this.db, prId);
   }

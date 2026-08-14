@@ -17,6 +17,8 @@ import type {
   RunTrace,
   ConventionCandidate,
   BlastRadiusResult,
+  LocalReviewRequest,
+  LocalReviewResult,
 } from '@devdigest/shared';
 import { config } from '../config.js';
 
@@ -120,6 +122,28 @@ export async function getBlastRadius(pullId: string): Promise<BlastRadiusResult>
   return request<BlastRadiusResult>(`/pulls/${encodeURIComponent(pullId)}/blast`);
 }
 
+/**
+ * POST /reviews/local → LocalReviewResult
+ *
+ * Reviews a raw diff that has no PR behind it (the `devdigest review` CLI).
+ * Synchronous: the server runs the review inline and answers with the grounded
+ * findings, so unlike triggerReview there is nothing to poll. Rate-limited
+ * 10/min, same as a PR review.
+ *
+ * `timeoutMs` aborts the request — an LLM review takes tens of seconds and Node
+ * would otherwise wait indefinitely for a server that never answers.
+ */
+export async function reviewLocalDiff(
+  body: LocalReviewRequest,
+  opts?: { timeoutMs?: number },
+): Promise<LocalReviewResult> {
+  return request<LocalReviewResult>('/reviews/local', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    ...(opts?.timeoutMs ? { signal: AbortSignal.timeout(opts.timeoutMs) } : {}),
+  });
+}
+
 /** Bundled client object for dependency injection into tools and core modules. */
 export type DevDigestClient = {
   listAgents: typeof listAgents;
@@ -131,6 +155,7 @@ export type DevDigestClient = {
   getTrace: typeof getTrace;
   listConventions: typeof listConventions;
   getBlastRadius: typeof getBlastRadius;
+  reviewLocalDiff: typeof reviewLocalDiff;
 };
 
 export function createClient(): DevDigestClient {
@@ -144,5 +169,6 @@ export function createClient(): DevDigestClient {
     getTrace,
     listConventions,
     getBlastRadius,
+    reviewLocalDiff,
   };
 }

@@ -31,6 +31,26 @@ export async function getRepo(
   return row;
 }
 
+/**
+ * Look a repo up by its `owner/name`, workspace-scoped.
+ *
+ * Used by the local (no-PR) review path, where the caller names a repo instead
+ * of pointing at a PR row that already carries `repoId`. Workspace-scoped
+ * because the caller-supplied name is untrusted input, unlike `getRepo`'s
+ * `repoId`, which always comes from a PR already resolved inside a workspace.
+ */
+export async function getRepoByFullName(
+  db: Db,
+  workspaceId: string,
+  fullName: string,
+): Promise<typeof t.repos.$inferSelect | undefined> {
+  const [row] = await db
+    .select()
+    .from(t.repos)
+    .where(and(eq(t.repos.workspaceId, workspaceId), eq(t.repos.fullName, fullName)));
+  return row;
+}
+
 export async function getPrFiles(
   db: Db,
   prId: string,

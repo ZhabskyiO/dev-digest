@@ -143,3 +143,52 @@ export async function resolvePullId(
     error: `PR #${pr} not found in '${repo}'.${hint}`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Agent resolution
+// ---------------------------------------------------------------------------
+
+/** Successful outcome of agent resolution. */
+export type AgentResolved = { agentId: string; agentName: string };
+
+/**
+ * Resolve an agent arg (uuid or name) to an agent id.
+ *
+ * The API takes a uuid; a human at a terminal types a name. Match order:
+ *   1. exact id
+ *   2. name, case-insensitively
+ * Only ENABLED agents are considered — a disabled agent is not a valid target,
+ * and matching one would produce a confusing 422 from the server instead of a
+ * message the caller can act on here.
+ */
+export async function resolveAgentId(
+  client: DevDigestClient,
+  agent: string,
+): Promise<AgentResolved | ResolutionError> {
+  let agents;
+  try {
+    agents = await client.listAgents();
+  } catch (cause) {
+    return { error: `DevDigest API unreachable while listing agents: ${String(cause)}` };
+  }
+
+  const enabled = agents.filter((a) => a.enabled);
+  const needle = agent.toLowerCase();
+  const matches = enabled.filter(
+    (a) => a.id === agent || a.name.toLowerCase() === needle,
+  );
+
+  const first = matches[0];
+  if (first && matches.length === 1) {
+    return { agentId: first.id, agentName: first.name };
+  }
+
+  const available = enabled.map((a) => `${a.name} (${a.id})`).join(', ') || 'none';
+
+  if (matches.length === 0) {
+    return { error: `Agent '${agent}' not found or not enabled. Enabled agents: ${available}.` };
+  }
+  return {
+    error: `Agent '${agent}' is ambiguous — several enabled agents share that name. Pass the id: ${available}.`,
+  };
+}
