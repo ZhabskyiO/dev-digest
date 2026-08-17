@@ -55,10 +55,22 @@ export type BlastCallerRef = z.infer<typeof BlastCallerRef>;
  * `caller_count` is the total BEFORE that cap, so the UI can say "20 of 63"
  * instead of quietly showing a truncated list as if it were the whole story.
  */
+/**
+ * `added` — declared at the PR head but not at the indexed revision.
+ * `modified` — pre-existed; the diff touches it.
+ *
+ * A refactor touches dozens of symbols, so the flat count is dominated by call
+ * sites that only shifted a line. This is what separates the handful of things
+ * the PR is ABOUT from everything it brushes against.
+ */
+export const BlastChangeKind = z.enum(['added', 'modified']);
+export type BlastChangeKind = z.infer<typeof BlastChangeKind>;
+
 export const BlastSymbol = z.object({
   name: z.string(),
   kind: z.string(),
   file: z.string(),
+  change: BlastChangeKind,
   callers: z.array(BlastCallerRef),
   caller_count: z.number().int(),
   endpoints: z.array(BlastEndpoint),
@@ -106,6 +118,8 @@ export const BlastRadiusResult = z.object({
   crons: z.array(z.string()),
   totals: z.object({
     symbols: z.number().int(),
+    /** Of `symbols`, how many are new in this PR. */
+    added: z.number().int(),
     callers: z.number().int(),
     endpoints: z.number().int(),
     crons: z.number().int(),

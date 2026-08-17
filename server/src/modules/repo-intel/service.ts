@@ -45,6 +45,8 @@ import type {
   SymbolRow,
 } from './types.js';
 import { symbolKey } from './types.js';
+import { buildHeadOverlay, type HeadOverlay } from './head-overlay.js';
+import { isTestFile } from './helpers.js';
 import {
   BFS_DEPTH,
   DEFAULT_REPO_MAP_TOKEN_BUDGET,
@@ -263,7 +265,7 @@ export class RepoIntelService implements RepoIntel {
       const key = `${s.name}:${s.path}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      changedSymbols.push({ file: s.path, name: s.name, kind: s.kind });
+      changedSymbols.push({ file: s.path, name: s.name, kind: s.kind, change: 'modified' });
     }
 
     const callerRows: BlastCallerRow[] = [];
@@ -343,10 +345,69 @@ export class RepoIntelService implements RepoIntel {
 
     // Changed symbols = declared in a changed file. Skip the qualified
     // `Class.method` dual-emit (the bare form already covers the name).
-    const declRows = await this.repo.getSymbolRows(repoId, changedFiles);
+    // Overlay the PR's own code when asked. Symbols this PR ADDS exist only
+    // there — the index is built from the default branch — so without it the
+    // map silently omits the code under review.
+    let overlay: HeadOverlay | null = null;
+    let overlayReason: string | undefined;
+    if (opts?.head) {
+      const repo = await this.repo.getRepoBasics(repoId);
+      if (!repo) {
+        overlayReason = 'repo not found';
+      } else {
+        const built = await buildHeadOverlay(
+          this.container,
+          { owner: repo.owner, name: repo.name },
+          changedFiles,
+          opts.head,
+        );
+        if ('overlay' in built) overlay = built.overlay;
+        else overlayReason = built.reason;
+      }
+    }
+
     const changedSymbols: BlastChangedSymbol[] = [];
     const nameSet = new Set<string>();
     const seenSym = new Set<string>();
+    const push = (file: string, name: string, kind: string, change: 'added' | 'modified') => {
+      // A helper declared in a test file has no blast radius — nothing ships
+      // downstream of it. Tests still appear as CALLERS of production symbols,
+      // which is real impact ("this change reaches 4 suites"); it is only the
+      // declaration side that is noise.
+      if (isTestFile(file)) return;
+      const key = `${name}:${file}`;
+      if (!seenSym.has(key)) {
+        seenSym.add(key);
+        changedSymbols.push({ file, name, kind, change });
+      }
+      nameSet.add(name);
+    };
+
+    // What the index already knew about the overlaid files tells us which of
+    // the PR's symbols are NEW rather than merely touched.
+    const preExisting = new Set<string>();
+    if (overlay) {
+      for (const s of await this.repo.getSymbolRows(repoId, overlay.filesRead)) {
+        preExisting.add(symbolKey(s.path, s.name));
+      }
+    }
+
+    if (overlay) {
+      // The overlay is authoritative for the files it read: it is the PR's
+      // actual code. Files it could not read (deleted, unparseable) still fall
+      // back to the index below.
+      for (const s of overlay.symbols) {
+        push(
+          s.file,
+          s.name,
+          s.kind,
+          preExisting.has(symbolKey(s.file, s.name)) ? 'modified' : 'added',
+        );
+      }
+    }
+    const overlaid = new Set(overlay?.filesRead ?? []);
+    const indexOnlyFiles = changedFiles.filter((f) => !overlaid.has(f));
+    const declRows = await this.repo.getSymbolRows(repoId, indexOnlyFiles);
     for (const s of declRows) {
       if (s.name.includes('.')) continue;
       // "Declared in a touched file" is not the same as "touched". When the
@@ -354,12 +415,8 @@ export class RepoIntelService implements RepoIntel {
       // actually overlaps — otherwise a one-line edit reports every symbol in
       // the file as changed.
       if (!touchedBy(opts?.touchedLines?.[s.path], s.line, s.endLine)) continue;
-      const key = `${s.name}:${s.path}`;
-      if (!seenSym.has(key)) {
-        seenSym.add(key);
-        changedSymbols.push({ file: s.path, name: s.name, kind: s.kind });
-      }
-      nameSet.add(s.name);
+      // Straight from the index, so by construction it pre-existed.
+      push(s.path, s.name, s.kind, 'modified');
     }
     if (nameSet.size === 0) {
       return {
@@ -368,6 +425,8 @@ export class RepoIntelService implements RepoIntel {
         impactedEndpoints: [],
         callerTotals: {},
         degraded: false,
+        headOverlay: overlay != null,
+        ...(overlayReason ? { headOverlayReason: overlayReason } : {}),
       };
     }
 
@@ -377,8 +436,34 @@ export class RepoIntelService implements RepoIntel {
     // same-named symbol from another changed file.
     const keptKeys = new Set(changedSymbols.map((s) => symbolKey(s.file, s.name)));
     const callerRows = (
-      await this.repo.getResolvedCallers(repoId, changedFiles, [...nameSet])
+      await this.repo.getResolvedCallers(repoId, indexOnlyFiles, [...nameSet])
     ).filter((c) => keptKeys.has(symbolKey(c.declFile, c.toSymbol)));
+
+    // Call sites the PR itself introduces. A refactor that moves 11 call sites
+    // onto a new helper edits those 11 files, so they are in the diff and the
+    // overlay sees them — the index never will until the branch merges.
+    // Resolution here is by NAME within the overlay: a full import resolution
+    // would need the whole branch parsed, and a same-named symbol in two
+    // changed files is rare next to the cost of missing every new call site.
+    const overlayCallers: typeof callerRows = [];
+    if (overlay) {
+      const declByName = new Map<string, string>();
+      for (const s of overlay.symbols) if (!declByName.has(s.name)) declByName.set(s.name, s.file);
+      for (const r of overlay.references) {
+        const declFile = declByName.get(r.toSymbol);
+        if (!declFile) continue;
+        if (declFile === r.fromPath) continue; // a symbol's own file is not a caller
+        if (!keptKeys.has(symbolKey(declFile, r.toSymbol))) continue;
+        overlayCallers.push({
+          fromPath: r.fromPath,
+          toSymbol: r.toSymbol,
+          declFile,
+          line: r.line,
+          rank: 0,
+        });
+      }
+    }
+    callerRows.push(...overlayCallers);
     const callerFiles = [...new Set(callerRows.map((c) => c.fromPath))];
 
     // Enclosing caller symbol from the callers' persistent symbol rows.
@@ -430,6 +515,9 @@ export class RepoIntelService implements RepoIntel {
     for (const sym of changedSymbols) {
       const k = symbolKey(sym.file, sym.name);
       const seed = new Set<string>([
+        // The declaring file itself, so a symbol that registers a route or a
+        // cron right where it lives is credited with it.
+        ...(overlay?.facts[sym.file] ? [sym.file] : []),
         ...(callerFilesBySymbol.get(k) ?? []),
         ...(await this.importersOf(repoId, [sym.file])),
       ]);
@@ -447,6 +535,14 @@ export class RepoIntelService implements RepoIntel {
     const factsByFile: Record<string, { endpoints: string[]; crons: string[] }> = {};
     for (const f of facts) {
       factsByFile[f.filePath] = { endpoints: f.endpoints, crons: f.crons };
+      for (const e of f.endpoints) endpoints.add(e);
+      for (const c of f.crons) crons.add(c);
+    }
+    // A route or cron the PR REGISTERS is in the changed file itself, not
+    // downstream of it — so overlay facts are folded in directly, and they win
+    // over the indexed version of the same file.
+    for (const [file, f] of Object.entries(overlay?.facts ?? {})) {
+      factsByFile[file] = f;
       for (const e of f.endpoints) endpoints.add(e);
       for (const c of f.crons) crons.add(c);
     }
@@ -477,6 +573,8 @@ export class RepoIntelService implements RepoIntel {
       factsByFile,
       degraded: false,
       ...(frontierClipped ? { frontierClipped: true } : {}),
+      headOverlay: overlay != null,
+      ...(overlayReason ? { headOverlayReason: overlayReason } : {}),
     };
   }
 

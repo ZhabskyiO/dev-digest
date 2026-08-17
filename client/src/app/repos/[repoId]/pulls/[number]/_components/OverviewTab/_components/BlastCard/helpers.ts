@@ -29,7 +29,8 @@ export function callerHref(
 
 export type GraphNode = {
   id: string;
-  label: string;
+  /** Pre-wrapped: one entry per rendered line. */
+  lines: string[];
   column: 0 | 1 | 2;
   x: number;
   y: number;
@@ -42,9 +43,45 @@ export type GraphLayout = {
   height: number;
 };
 
-const COL_X = [10, 250, 500] as const;
-const ROW_H = 30;
-const TOP = 22;
+const COL_X = [10, 204, 400] as const;
+const LINE_H = 13;
+const NODE_GAP = 11;
+/** Vertical space between one changed symbol's band and the next. */
+const BAND_GAP = 16;
+const TOP = 16;
+/** Chars per line at 11px in the mono stack, chosen so the widest wrapped
+    label lands inside a ~640px card without a horizontal scrollbar. */
+const MAX_CHARS = 26;
+const MAX_LINES = 3;
+const CHAR_W = 6.2;
+
+/**
+ * Break a label into at most MAX_LINES rendered lines.
+ *
+ * SVG `<text>` does not wrap — it draws one run and lets it overflow whatever
+ * is beside it. An endpoint like `POST /articles/${id}/publish` is well past
+ * the column width, so without this every long label collides with its
+ * neighbours into an unreadable smear.
+ *
+ * Breaks after `/` where possible so a route path splits at its segments and
+ * stays recognisable; falls back to a hard chunk for a long unbroken run.
+ */
+export function wrapLabel(label: string, maxChars = MAX_CHARS): string[] {
+  if (label.length <= maxChars) return [label];
+
+  const lines: string[] = [];
+  let rest = label;
+  while (rest.length > maxChars && lines.length < MAX_LINES - 1) {
+    // Prefer the last segment boundary inside the budget; `+ 1` keeps the `/`
+    // on the line it ends, which reads as "continues below".
+    const cut = rest.lastIndexOf("/", maxChars);
+    const at = cut > maxChars / 3 ? cut + 1 : maxChars;
+    lines.push(rest.slice(0, at));
+    rest = rest.slice(at);
+  }
+  lines.push(rest.length > maxChars ? `${rest.slice(0, maxChars - 1)}…` : rest);
+  return lines;
+}
 
 /**
  * Three fixed columns — changed symbol → caller file → endpoint — laid out
@@ -52,43 +89,77 @@ const TOP = 22;
  * a second reading of the same tree, so the same data must always draw the same
  * picture; a physics layout would move nodes between renders for no gain.
  *
- * Only symbols that actually have callers are drawn: an isolated node column
- * would say "no impact" in a view whose whole job is showing reach.
+ * Each symbol gets a horizontal BAND. Callers and endpoints advance their own
+ * cursors inside it, so every node owns its vertical space — placing a
+ * symbol's endpoints all on one row (as this did originally) draws them on top
+ * of each other. The symbol node is centred against the taller of its two
+ * columns. An endpoint reached by several symbols is placed once and gains
+ * another edge, so shared routes read as shared.
+ *
+ * Only symbols that actually have callers or endpoints are drawn: an isolated
+ * node column would say "no impact" in a view whose whole job is showing reach.
  */
 export function layoutGraph(symbols: BlastSymbol[]): GraphLayout {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  const seen = new Set<string>();
-  let row = 0;
+  const placed = new Map<string, GraphNode>();
+  let y = TOP;
 
-  const place = (id: string, label: string, column: 0 | 1 | 2, atRow: number) => {
-    if (seen.has(id)) return;
-    seen.add(id);
-    nodes.push({ id, label, column, x: COL_X[column], y: TOP + atRow * ROW_H });
+  const place = (id: string, label: string, column: 0 | 1 | 2, at: number): GraphNode => {
+    const existing = placed.get(id);
+    if (existing) return existing;
+    const node: GraphNode = { id, lines: wrapLabel(label), column, x: COL_X[column], y: at };
+    placed.set(id, node);
+    nodes.push(node);
+    return node;
   };
+  const heightOf = (label: string) => wrapLabel(label).length * LINE_H + NODE_GAP;
 
   for (const sym of symbols) {
-    if (sym.callers.length === 0) continue;
-    const symId = `s:${sym.name}`;
-    const symRow = row;
-    place(symId, `${sym.name}()`, 0, symRow);
+    if (sym.callers.length === 0 && sym.endpoints.length === 0) continue;
+    const bandTop = y;
+    let yCallers = bandTop;
+    let yEndpoints = bandTop;
+    const symId = `s:${sym.file}:${sym.name}`;
+    const childIds: string[] = [];
 
     for (const caller of sym.callers) {
-      const callerId = `c:${caller.file}`;
-      place(callerId, caller.file.split("/").pop() ?? caller.file, 1, row);
-      edges.push({ from: symId, to: callerId });
-      row += 1;
+      const id = `c:${caller.file}`;
+      const label = caller.file.split("/").pop() ?? caller.file;
+      if (!placed.has(id)) {
+        place(id, label, 1, yCallers);
+        yCallers += heightOf(label);
+      }
+      childIds.push(id);
     }
 
     for (const ep of sym.endpoints) {
-      const epId = `e:${ep.method} ${ep.path}`;
-      place(epId, `${ep.method} ${ep.path}`, 2, symRow);
-      // Attribute the endpoint to the symbol, not to a guessed caller: the
-      // index says which symbol reaches it, never through which caller.
-      edges.push({ from: symId, to: epId });
+      const label = `${ep.method} ${ep.path}`;
+      const id = `e:${label}`;
+      if (!placed.has(id)) {
+        place(id, label, 2, yEndpoints);
+        yEndpoints += heightOf(label);
+      }
+      childIds.push(id);
     }
+
+    const bandBottom = Math.max(yCallers, yEndpoints, bandTop + LINE_H + NODE_GAP);
+    const symLabel = `${sym.name}()`;
+    const symNode = place(
+      symId,
+      symLabel,
+      0,
+      // Centred on its band, but never above it — a one-caller symbol should
+      // sit level with that caller, not float half a row up.
+      Math.max(bandTop, (bandTop + bandBottom - heightOf(symLabel)) / 2),
+    );
+    for (const id of childIds) edges.push({ from: symNode.id, to: id });
+    y = bandBottom + BAND_GAP;
   }
 
-  const maxY = nodes.reduce((m, n) => Math.max(m, n.y), TOP);
-  return { nodes, edges, width: 760, height: maxY + TOP };
+  const widest = nodes.reduce(
+    (w, n) => Math.max(w, n.x + Math.max(...n.lines.map((l) => l.length)) * CHAR_W),
+    0,
+  );
+  return { nodes, edges, width: Math.ceil(widest) + 16, height: Math.max(y, TOP) };
 }

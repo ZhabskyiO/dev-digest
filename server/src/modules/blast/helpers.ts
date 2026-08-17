@@ -20,14 +20,15 @@ import { symbolKey } from '../repo-intel/types.js';
  * A pure add (count 0) still marks its insertion point so a symbol that gained
  * a body line counts as touched.
  */
-export function changedLineRanges(patch: string | null): LineRange[] {
+export function changedLineRanges(patch: string | null, side: 'base' | 'head' = 'base'): LineRange[] {
   if (!patch) return [];
   const ranges: LineRange[] = [];
-  const header = /^@@ -(\d+)(?:,(\d+))? \+/gm;
+  const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
   let m: RegExpExecArray | null;
   while ((m = header.exec(patch)) !== null) {
-    const start = Number(m[1]);
-    const count = m[2] === undefined ? 1 : Number(m[2]);
+    const [rawStart, rawCount] = side === 'base' ? [m[1], m[2]] : [m[3], m[4]];
+    const start = Number(rawStart);
+    const count = rawCount === undefined ? 1 : Number(rawCount);
     ranges.push({ start, end: count === 0 ? start : start + count - 1 });
   }
   return ranges;
@@ -90,12 +91,21 @@ export function buildStatus(
   // not exist in the index and cannot appear below. Reporting `ready` here is
   // the single most misleading thing this endpoint could do: the map would look
   // complete while missing exactly the code under review.
-  const stale = headSha != null && headSha !== '' && headSha !== indexState.lastIndexedSha;
+  // ...unless the PR's own code was parsed and merged in, which is exactly what
+  // the head overlay does. Then the added symbols ARE represented and the sha
+  // gap is no longer a hole in the answer.
+  const stale =
+    !blast.headOverlay &&
+    headSha != null &&
+    headSha !== '' &&
+    headSha !== indexState.lastIndexedSha;
   if (indexState.status === 'partial' || blast.frontierClipped || stale) {
     const parts: string[] = [];
     if (stale) {
       parts.push(
-        `the index is built from ${short(indexState.lastIndexedSha)}, but this PR is at ${short(headSha)} — symbols this PR ADDS are not indexed yet and cannot appear here`,
+        blast.headOverlayReason
+          ? `this PR's own code could not be read (${blast.headOverlayReason}), so only the index at ${short(indexState.lastIndexedSha)} was used — symbols this PR ADDS cannot appear here`
+          : `the index is built from ${short(indexState.lastIndexedSha)}, but this PR is at ${short(headSha)} — symbols this PR ADDS are not indexed yet and cannot appear here`,
       );
     }
     if (indexState.status === 'partial') {
@@ -150,7 +160,9 @@ export function buildSummary(
       : 'No indexed symbols are declared in the changed files.';
   }
   const parts = [
-    `${totals.symbols} changed symbol${totals.symbols === 1 ? '' : 's'}`,
+    totals.added > 0
+      ? `${totals.added} new symbol${totals.added === 1 ? '' : 's'} (+${totals.symbols - totals.added} touched)`
+      : `${totals.symbols} changed symbol${totals.symbols === 1 ? '' : 's'}`,
     `${totals.callers} caller${totals.callers === 1 ? '' : 's'}`,
   ];
   if (totals.endpoints > 0) {
@@ -196,6 +208,7 @@ export function toBlastDto(input: {
       name: s.name,
       kind: s.kind,
       file: s.file,
+      change: s.change,
       callers: callersBySymbol.get(k) ?? [],
       caller_count: blast.callerTotals[k] ?? 0,
       endpoints,
@@ -203,9 +216,12 @@ export function toBlastDto(input: {
     };
   });
 
-  // Symbols with the widest reach first — that is the order a reviewer wants to
-  // read them in, and it makes the collapsed rows below the fold the cheap ones.
-  symbols.sort((a, b) => b.caller_count - a.caller_count || a.name.localeCompare(b.name));
+  // What the PR ADDS first, then by reach. A reviewer opening this wants the
+  // new surface before the call sites a refactor happened to shift.
+  const rank = (s: BlastSymbol) => (s.change === 'added' ? 0 : 1);
+  symbols.sort(
+    (a, b) => rank(a) - rank(b) || b.caller_count - a.caller_count || a.name.localeCompare(b.name),
+  );
 
   // Union over the symbols we actually report — NOT `blast.impactedEndpoints`,
   // which is the facade's union over every symbol it considered. Those diverge
@@ -225,6 +241,7 @@ export function toBlastDto(input: {
 
   const totals = {
     symbols: symbols.length,
+    added: symbols.filter((s) => s.change === 'added').length,
     callers: symbols.reduce((n, s) => n + s.caller_count, 0),
     endpoints: endpoints.length,
     crons: crons.length,

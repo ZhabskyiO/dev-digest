@@ -178,18 +178,35 @@ export function extractReferences(content: string, symbol: string): ExtractedRef
  * Heuristic endpoint detector: HTTP route registrations in a file.
  * Catches Fastify/Express style `app.get('/path', ...)`, `router.post(...)`,
  * `app.get<...>('/path')`, and `route({ method, url })`. Returns "METHOD /path".
+ *
+ * Matched against the WHOLE source, not line by line. Any route with options —
+ * a schema, a preHandler, a type parameter — gets wrapped by every formatter in
+ * existence, putting the path on the line after the verb:
+ *
+ *     app.get(
+ *       '/pulls/:id/blast',
+ *       { schema: { params: IdParams } },
+ *
+ * A per-line scan sees `app.get(` with no quote after it and reports nothing,
+ * so a repo whose routes all take a schema — this one included — indexes as
+ * having no endpoints at all, while its test files (one-liner calls) index as
+ * if they were the API. `\s` spans newlines, so the same patterns work once
+ * they are not artificially confined to a line.
  */
 export function extractEndpoints(content: string): string[] {
   const out = new Set<string>();
-  const lines = content.split('\n');
   const verbRe =
-    /\b(?:app|router|fastify|server|api)\.(get|post|put|patch|delete|options|head)\s*(?:<[^>]*>)?\s*\(\s*(['"`])([^'"`]+)\2/i;
-  const routeObjRe = /method\s*:\s*['"`](GET|POST|PUT|PATCH|DELETE)['"`][\s\S]*?url\s*:\s*['"`]([^'"`]+)['"`]/i;
-  for (const raw of lines) {
-    const m = raw.match(verbRe);
-    if (m) out.add(`${m[1]!.toUpperCase()} ${m[3]}`);
-    const r = raw.match(routeObjRe);
-    if (r) out.add(`${r[1]!.toUpperCase()} ${r[2]}`);
+    /\b(?:app|router|fastify|server|api)\.(get|post|put|patch|delete|options|head)\s*(?:<[^>]*>)?\s*\(\s*(['"`])([^'"`]+)\2/gi;
+  // `[\s\S]*?` is lazy but unbounded, which across a whole file would pair a
+  // `method:` with a `url:` from an unrelated object several hundred lines
+  // away. Bounded to a plausible object literal.
+  const routeObjRe =
+    /method\s*:\s*['"`](GET|POST|PUT|PATCH|DELETE)['"`][\s\S]{0,400}?url\s*:\s*['"`]([^'"`]+)['"`]/gi;
+  for (const m of content.matchAll(verbRe)) {
+    out.add(`${m[1]!.toUpperCase()} ${m[3]}`);
+  }
+  for (const r of content.matchAll(routeObjRe)) {
+    out.add(`${r[1]!.toUpperCase()} ${r[2]}`);
   }
   return [...out];
 }
@@ -198,15 +215,32 @@ export function extractEndpoints(content: string): string[] {
  * Heuristic cron/scheduled-job detector. Catches cron expressions in
  * `schedule('* * * * *')`, `cron.schedule(...)`, `CronJob(...)`, and
  * `jobs.register('kind')` / `enqueue(ws, 'kind')` style background work.
+ *
+ * A cron expression is recognised BY ITS OWN GRAMMAR, not only by a keyword
+ * sitting next to it. Requiring an adjacent `cron`/`schedule` token misses
+ * every idiomatic way of hoisting the schedule out of the call — a
+ * `CRON_SCHEDULES` lookup table (`[JOB_KIND]: '0 3 * * *'`), a config default,
+ * a constant — because at the line with the literal on it the keyword is gone.
+ * Five or six whitespace-separated cron fields (digits plus the wildcard,
+ * step, list and range punctuation) are distinctive enough on their own —
+ * across ~500 files of this repo the grammar rule fires on nothing else.
  */
 export function extractCrons(content: string): string[] {
   const out = new Set<string>();
   const lines = content.split('\n');
-  const cronExprRe = /\b(?:cron|schedule|CronJob)\s*[.(]?\s*\(?\s*['"`]([^'"`]*(?:\*|\d+\s+\d+)[^'"`]*)['"`]/i;
-  const jobKindRe = /\b(?:register|enqueue)\s*\(\s*(?:[A-Za-z0-9_$.]+\s*,\s*)?['"`]([a-z][a-z0-9_]*)['"`]/i;
+  // Keyword-adjacent form. The separator class allows `:` and `=` so an object
+  // property or an assignment (`cron: '…'`, `schedule = '…'`) still matches.
+  const cronExprRe = /\b(?:cron|schedule|CronJob)\s*[.(:=]?\s*\(?\s*['"`]([^'"`]*(?:\*|\d+\s+\d+)[^'"`]*)['"`]/i;
+  // Standalone form: a quoted 5- or 6-field cron expression, keyword or not.
+  const cronGrammarRe = /['"`]((?:[\d*/,-]+\s+){4,5}[\d*/,-]+)['"`]/;
+  // Job kinds are routinely kebab-case (`stale-draft-digest`), so `-` belongs
+  // in the character class; without it every hyphenated kind was dropped.
+  const jobKindRe = /\b(?:register|enqueue|schedule)\s*\(\s*(?:[A-Za-z0-9_$.]+\s*,\s*)?['"`]([a-z][a-z0-9_-]*)['"`]/i;
   for (const raw of lines) {
     const m = raw.match(cronExprRe);
     if (m) out.add(m[1]!.trim());
+    const g = raw.match(cronGrammarRe);
+    if (g) out.add(g[1]!.trim());
     const j = raw.match(jobKindRe);
     if (j && /poll|index|clone|digest|cron|sync|schedule|job/i.test(raw)) out.add(`job:${j[1]}`);
   }

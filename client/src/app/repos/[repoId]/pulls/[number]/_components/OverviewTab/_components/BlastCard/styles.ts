@@ -24,14 +24,17 @@ export const s = {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
-    gap: 18,
+    gap: 16,
     fontSize: 13,
     color: "var(--text-secondary)",
   } satisfies CSSProperties,
+  /* `nowrap` so a stat breaks to the next line whole rather than splitting its
+     number from its label — five of these have to read as one row. */
   stat: {
     display: "inline-flex",
     alignItems: "center",
-    gap: 7,
+    gap: 6,
+    whiteSpace: "nowrap",
   } satisfies CSSProperties,
   statNum: {
     fontWeight: 600,
@@ -103,6 +106,17 @@ export const s = {
     fontSize: 14,
     fontWeight: 600,
   } satisfies CSSProperties,
+  /* Marks a symbol the PR introduces, as opposed to one it merely touches. */
+  addedBadge: {
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "var(--ok)",
+    border: "1px solid var(--ok)",
+    borderRadius: 4,
+    padding: "1px 5px",
+  } satisfies CSSProperties,
   symbolCount: {
     marginLeft: "auto",
     fontSize: 12,
@@ -152,8 +166,16 @@ export const s = {
     fontWeight: 700,
   } satisfies CSSProperties,
 
+  /* The graph is as tall as the diff is wide — a 30-symbol PR lays out well
+     past 2000px, which would leave the card towering over Intent beside it.
+     Scroll it in place instead; the tree view remains the one that grows the
+     page. */
   graphWrap: {
-    overflowX: "auto",
+    overflow: "auto",
+    maxHeight: 520,
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    padding: 8,
   } satisfies CSSProperties,
 
   priorSection: {

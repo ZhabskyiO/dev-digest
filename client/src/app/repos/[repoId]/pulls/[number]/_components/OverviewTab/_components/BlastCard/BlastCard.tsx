@@ -103,7 +103,16 @@ export function BlastCard({ prId, repoFullName, defaultBranch }: BlastCardProps)
 
       <div style={s.box}>
         <div style={s.statRow}>
-          <Stat icon="Code" n={data.totals.symbols} label={t("stat.symbols")} />
+          {/* New surface first: a refactor's touched-symbol count dwarfs it,
+              and the new surface is what a reviewer is actually here for. */}
+          {data.totals.added > 0 && (
+            <Stat icon="Plus" n={data.totals.added} label={t("stat.added")} />
+          )}
+          <Stat
+            icon="Code"
+            n={data.totals.symbols - data.totals.added}
+            label={data.totals.added > 0 ? t("stat.touched") : t("stat.symbols")}
+          />
           <Stat icon="CornerDownRight" n={data.totals.callers} label={t("stat.callers")} />
           <Stat icon="Globe" n={data.totals.endpoints} label={t("stat.endpoints")} />
           <Stat icon="Clock" n={data.totals.crons} label={t("stat.crons")} />
@@ -199,6 +208,7 @@ function SymbolRow({
         <span className="mono" style={s.symbolName}>
           {symbol.name}()
         </span>
+        {symbol.change === "added" && <span style={s.addedBadge}>{t("addedBadge")}</span>}
         <span className="tnum" style={s.symbolCount}>
           {truncated
             ? t("callerCountCapped", { shown: symbol.callers.length, count: symbol.caller_count })
@@ -270,12 +280,17 @@ function GraphView({ symbols }: { symbols: BlastSymbol[] }) {
               y2={to.y}
               stroke="var(--border-strong)"
               strokeWidth={1}
+              /* A wide diff draws hundreds of edges through the same corridor;
+                 at full strength they wash out the labels they connect. */
+              strokeOpacity={0.35}
             />
           );
         })}
         {nodes.map((n) => (
           <g key={n.id}>
             <circle cx={n.x} cy={n.y} r={3.5} fill={tone[n.column]} />
+            {/* One tspan per wrapped line — SVG text has no wrapping of its
+                own, and a single overflowing run collides with its neighbours. */}
             <text
               x={n.x + 9}
               y={n.y + 4}
@@ -283,7 +298,11 @@ function GraphView({ symbols }: { symbols: BlastSymbol[] }) {
               fill="var(--text-secondary)"
               fontFamily="var(--font-mono, monospace)"
             >
-              {n.label}
+              {n.lines.map((line, i) => (
+                <tspan key={line + i} x={n.x + 9} dy={i === 0 ? 0 : 13}>
+                  {line}
+                </tspan>
+              ))}
             </text>
           </g>
         ))}

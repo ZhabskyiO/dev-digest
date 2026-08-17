@@ -250,6 +250,8 @@ export class MockGitHubClient implements GitHubClient {
 export interface MockGitOptions {
   diff?: string;
   files?: Record<string, string>;
+  /** Per-ref file contents for `readFileAt` — `filesAtRef[sha][path]`. */
+  filesAtRef?: Record<string, Record<string, string>>;
   /** Name-only diff result (drives the incremental indexer's "changed files since X" path). */
   diffNameOnly?: string[];
   /** Override `currentHead()` so tests can simulate "sha unchanged since last index". */
@@ -299,6 +301,18 @@ export class MockGitClient implements GitClient {
   }
   async readFile(_repo: RepoRef, path: string): Promise<string> {
     return this.opts.files?.[path] ?? '';
+  }
+  /**
+   * `filesAtRef[ref][path]` when the test supplies it, else the working-tree
+   * fixture. Rejects on a miss so callers exercise the same "absent at this
+   * ref" branch they hit against real git.
+   */
+  async readFileAt(_repo: RepoRef, ref: string, path: string): Promise<string> {
+    const atRef = this.opts.filesAtRef?.[ref]?.[path];
+    if (atRef !== undefined) return atRef;
+    const wt = this.opts.files?.[path];
+    if (wt !== undefined) return wt;
+    throw new Error(`path '${path}' does not exist in '${ref}'`);
   }
 }
 

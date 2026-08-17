@@ -66,6 +66,17 @@ export interface BlastChangedSymbol {
   file: string;
   name: string;
   kind: string;
+  /**
+   * `added` when the symbol exists at the PR head but not at the indexed
+   * revision; `modified` when it pre-existed and the diff merely touches it.
+   *
+   * A refactor legitimately touches dozens of symbols, so a flat "changed
+   * symbols" count is dominated by call sites that only shifted a line. The
+   * distinction is what lets a reader find the handful of things the PR is
+   * actually ABOUT. Always `modified` without a head overlay — there is
+   * nothing to compare against.
+   */
+  change: 'added' | 'modified';
 }
 
 export interface BlastCallerRow {
@@ -92,6 +103,21 @@ export interface LineRange {
   end: number;
 }
 
+/**
+ * Identify the PR so the facade can look at its code, not just the indexed
+ * default branch. Without this the map can only ever describe pre-existing
+ * symbols: everything the PR ADDS is invisible, which is exactly the code the
+ * reviewer came to look at.
+ */
+export interface BlastHead {
+  /** PR number — used to fetch `pull/<n>/head` into the clone. */
+  prNumber: number;
+  /** Head commit; every head-side line number below refers to it. */
+  sha: string;
+  /** Per-file line spans the diff touches, on the HEAD side of the patch. */
+  touchedLines?: Record<string, LineRange[]>;
+}
+
 export interface BlastOptions {
   /**
    * Per-file line spans the diff actually touches, measured against the BASE
@@ -105,6 +131,8 @@ export interface BlastOptions {
    * revision is to the diff's base.
    */
   touchedLines?: Record<string, LineRange[]>;
+  /** When set, overlay the PR's own code on top of the persistent index. */
+  head?: BlastHead;
 }
 
 export interface BlastResult {
@@ -145,6 +173,14 @@ export interface BlastResult {
    * early — the endpoint list is then a subset, not the full picture.
    */
   frontierClipped?: boolean;
+  /**
+   * True when the PR's own code was parsed and merged in, so symbols the PR
+   * ADDS are represented. False/absent means the answer describes only the
+   * indexed revision — the consumer must say so.
+   */
+  headOverlay?: boolean;
+  /** Why the overlay could not run, when one was requested but didn't happen. */
+  headOverlayReason?: string;
 }
 
 // ---------------------------------------------------------------------------

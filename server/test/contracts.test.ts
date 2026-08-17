@@ -247,6 +247,7 @@ describe('BlastRadiusResult (GET /pulls/:id/blast)', () => {
         name: 'rateLimit',
         kind: 'function',
         file: 'src/limit.ts',
+        change: 'added',
         callers: [{ file: 'src/api/index.ts', line: 23, symbol: 'publicRouter', rank: 0.9 }],
         caller_count: 4,
         endpoints: [{ method: 'GET', path: '/api/public/items', file: 'src/api/index.ts' }],
@@ -255,7 +256,7 @@ describe('BlastRadiusResult (GET /pulls/:id/blast)', () => {
     ],
     endpoints: [{ method: 'GET', path: '/api/public/items', file: 'src/api/index.ts' }],
     crons: ['reset-rate-buckets (hourly)'],
-    totals: { symbols: 1, callers: 4, endpoints: 1, crons: 1 },
+    totals: { symbols: 1, added: 1, callers: 4, endpoints: 1, crons: 1 },
     prior_prs: [
       {
         id: 'x',

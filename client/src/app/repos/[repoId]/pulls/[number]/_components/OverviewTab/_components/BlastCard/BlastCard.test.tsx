@@ -27,6 +27,7 @@ const DATA: BlastRadiusResult = {
       name: "rateLimit",
       kind: "function",
       file: "src/middleware/ratelimit.ts",
+      change: "added",
       callers: [
         { file: "src/api/public/index.ts", line: 23, symbol: "publicRouter", rank: 0.9 },
         { file: "src/api/public/webhooks.ts", line: 45, symbol: "webhooks", rank: 0.7 },
@@ -39,6 +40,7 @@ const DATA: BlastRadiusResult = {
       name: "bucketKey",
       kind: "function",
       file: "src/middleware/ratelimit.ts",
+      change: "modified",
       callers: [],
       caller_count: 2,
       endpoints: [],
@@ -47,7 +49,7 @@ const DATA: BlastRadiusResult = {
   ],
   endpoints: [{ method: "GET", path: "/api/public/items", file: "src/api/public/index.ts" }],
   crons: ["reset-rate-buckets (hourly)"],
-  totals: { symbols: 2, callers: 14, endpoints: 3, crons: 1 },
+  totals: { symbols: 2, added: 1, callers: 14, endpoints: 3, crons: 1 },
   prior_prs: [
     {
       id: "old1",
@@ -90,7 +92,10 @@ describe("BlastCard", () => {
     mockBlast(DATA);
     renderCard();
 
-    expect(screen.getByText("symbols")).toBeInTheDocument();
+    // with new symbols present the row reads "1 new · 1 touched", not "2 symbols"
+    // ("new" appears twice: the stat label and the badge on the added row)
+    expect(screen.getAllByText("new").length).toBeGreaterThan(0);
+    expect(screen.getByText("touched")).toBeInTheDocument();
     expect(screen.getByText("14")).toBeInTheDocument();
 
     expect(screen.getByText("rateLimit()")).toBeInTheDocument();
@@ -198,14 +203,14 @@ describe("BlastCard", () => {
       degraded: true,
       reason: "This repo has not been indexed yet.",
       symbols: [],
-      totals: { symbols: 0, callers: 0, endpoints: 0, crons: 0 },
+      totals: { symbols: 0, added: 0, callers: 0, endpoints: 0, crons: 0 },
     });
     renderCard();
 
     expect(screen.getByText("No impact map yet")).toBeInTheDocument();
     expect(screen.getByText("This repo has not been indexed yet.")).toBeInTheDocument();
     // crucially NOT a zeroed stat row, which would read as "nothing is affected"
-    expect(screen.queryByText("symbols")).not.toBeInTheDocument();
+    expect(screen.queryByText("callers")).not.toBeInTheDocument();
   });
 
   it("renders an inline error with a retry, never a full-screen one", () => {
@@ -222,5 +227,25 @@ describe("BlastCard", () => {
 
     expect(screen.queryByText("rateLimit()")).not.toBeInTheDocument();
     expect(container.querySelectorAll("div").length).toBeGreaterThan(0);
+  });
+});
+
+describe("BlastCard — added vs touched", () => {
+  it("badges the symbols the PR introduces", () => {
+    mockBlast(DATA);
+    renderCard();
+    // exactly one badge: rateLimit is `added`, bucketKey is `modified`
+    expect(screen.getAllByText("new")).toHaveLength(2); // stat label + row badge
+  });
+
+  it("shows a plain symbol count when nothing is new", () => {
+    mockBlast({
+      ...DATA,
+      symbols: DATA.symbols.map((s) => ({ ...s, change: "modified" as const })),
+      totals: { ...DATA.totals, added: 0 },
+    });
+    renderCard();
+    expect(screen.getByText("symbols")).toBeInTheDocument();
+    expect(screen.queryByText("touched")).not.toBeInTheDocument();
   });
 });

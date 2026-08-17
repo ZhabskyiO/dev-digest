@@ -90,6 +90,35 @@ app.get<{ Params: { id: string } }>('/pulls/:id/blast', blast);
     expect(eps).toContain('GET /pulls/:id/blast');
   });
 
+  it('detects a route whose path sits on the line after the verb', () => {
+    // Every formatter wraps a route that takes options, so this is the normal
+    // shape in any real codebase — a per-line scan finds nothing here.
+    const src = [
+      'app.get(',
+      "  '/pulls/:id/blast',",
+      '  { schema: { params: IdParams } },',
+      '  async (req) => service.blastForPull(req.params.id),',
+      ');',
+      'app.post(',
+      "  '/articles',",
+      '  { schema: { body: CreateArticle } },',
+      '  handler,',
+      ');',
+    ].join('\n');
+    const eps = extractEndpoints(src);
+    expect(eps).toContain('GET /pulls/:id/blast');
+    expect(eps).toContain('POST /articles');
+  });
+
+  it('does not pair a `method:` with a `url:` from an unrelated object', () => {
+    const src = [
+      "const a = { method: 'GET' };",
+      'const filler = 1;'.repeat(120),
+      "const b = { url: '/somewhere-else' };",
+    ].join('\n');
+    expect(extractEndpoints(src)).toEqual([]);
+  });
+
   it('detects cron expressions and background job kinds', () => {
     const src = `
 cron.schedule('*/5 * * * *', poll);
@@ -98,5 +127,39 @@ jobs.register('poll_repo', handler);
     const crons = extractCrons(src);
     expect(crons.some((c) => c.includes('*/5'))).toBe(true);
     expect(crons).toContain('job:poll_repo');
+  });
+
+  it('finds a cron expression hoisted away from its scheduler call', () => {
+    // The idiomatic shape: a schedule-of-record table, the call site taking a
+    // variable. On the line that HAS the literal there is no cron/schedule
+    // keyword at all, so keyword-adjacency alone finds nothing here.
+    const src = [
+      'export const CRON_SCHEDULES = {',
+      "  [STALE_DRAFT_DIGEST]: '0 3 * * *',",
+      '} as const;',
+      'container.scheduler.schedule(STALE_DRAFT_DIGEST, schedule, run);',
+    ].join('\n');
+    expect(extractCrons(src)).toContain('0 3 * * *');
+  });
+
+  it('matches a cron expression after `:` or `=`, not only after `.`/`(`', () => {
+    expect(extractCrons("const schedule = '0 4 * * 1';")).toContain('0 4 * * 1');
+    expect(extractCrons("{ cron: '15 2 * * *' }")).toContain('15 2 * * *');
+  });
+
+  it('keeps kebab-case job kinds instead of dropping them', () => {
+    expect(extractCrons("jobs.register('stale-draft-digest', run);")).toContain(
+      'job:stale-draft-digest',
+    );
+  });
+
+  it('does not invent crons from ordinary code', () => {
+    const src = [
+      "const version = '1.2.3';",
+      "const label = 'GET /articles';",
+      'const nums = [1, 2, 3, 4, 5];',
+      "log('processed 4 of 5 files');",
+    ].join('\n');
+    expect(extractCrons(src)).toEqual([]);
   });
 });

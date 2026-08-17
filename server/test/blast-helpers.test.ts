@@ -133,7 +133,7 @@ describe('toBlastDto', () => {
     const dto = toBlastDto({
       ...base,
       blast: blast({
-        changedSymbols: [{ file: 'src/limit.ts', name: 'rateLimit', kind: 'function' }],
+        changedSymbols: [{ file: 'src/limit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const }],
         callers: [
           { file: 'src/api/index.ts', symbol: 'publicRouter', viaSymbol: 'rateLimit', viaFile: 'src/limit.ts', line: 23, rank: 0.9 },
           { file: 'src/server.ts', symbol: 'boot', viaSymbol: 'rateLimit', viaFile: 'src/limit.ts', line: 88, rank: 0.4 },
@@ -160,14 +160,14 @@ describe('toBlastDto', () => {
       { method: 'GET', path: '/api/public/items', file: 'src/api/index.ts' },
     ]);
     expect(dto.symbols[0]?.crons).toEqual(['reset-rate-buckets (hourly)']);
-    expect(dto.totals).toEqual({ symbols: 1, callers: 2, endpoints: 1, crons: 1 });
+    expect(dto.totals).toEqual({ symbols: 1, added: 0, callers: 2, endpoints: 1, crons: 1 });
   });
 
   it('reports the PRE-CAP caller total, so a truncated list is not read as the whole story', () => {
     const dto = toBlastDto({
       ...base,
       blast: blast({
-        changedSymbols: [{ file: 'src/limit.ts', name: 'rateLimit', kind: 'function' }],
+        changedSymbols: [{ file: 'src/limit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const }],
         // the facade already capped this at 20; the total says there were 63
         callers: Array.from({ length: 20 }, (_, i) => ({
           file: `src/c${i}.ts`,
@@ -190,8 +190,8 @@ describe('toBlastDto', () => {
       ...base,
       blast: blast({
         changedSymbols: [
-          { file: 'src/limit.ts', name: 'bucketKey', kind: 'function' },
-          { file: 'src/limit.ts', name: 'rateLimit', kind: 'function' },
+          { file: 'src/limit.ts', name: 'bucketKey', kind: 'function', change: 'modified' as const },
+          { file: 'src/limit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const },
         ],
         callerTotals: {
           [K('src/limit.ts', 'bucketKey')]: 2,
@@ -272,8 +272,8 @@ describe('toBlastDto — same name in two files', () => {
       priorPrs: [],
       blast: blast({
         changedSymbols: [
-          { file: 'src/a/repo.ts', name: 'getById', kind: 'method' },
-          { file: 'src/a/service.ts', name: 'getById', kind: 'method' },
+          { file: 'src/a/repo.ts', name: 'getById', kind: 'method', change: 'modified' as const },
+          { file: 'src/a/service.ts', name: 'getById', kind: 'method', change: 'modified' as const },
         ],
         callers: [
           { file: 'src/a/service.ts', symbol: 'svc', viaSymbol: 'getById', viaFile: 'src/a/repo.ts', line: 10, rank: 0.9 },
@@ -292,5 +292,35 @@ describe('toBlastDto — same name in two files', () => {
     expect(service?.callers.map((c) => c.file)).toEqual(['src/a/routes.ts']);
     // and the total is 2, not 4 — keying on the bare name double-counted both
     expect(dto.totals.callers).toBe(2);
+  });
+});
+
+describe('toBlastDto — added vs merely touched', () => {
+  it('puts what the PR ADDS first and counts it separately', () => {
+    // A refactor touches many symbols; only a couple are new. Sorting by reach
+    // alone buries the new surface under call sites that shifted a line.
+    const dto = toBlastDto({
+      pullId: 'p1',
+      headSha: 'abc',
+      changedFiles: ['src/scope.ts', 'src/repo.ts'],
+      indexState: readyState,
+      priorPrs: [],
+      blast: blast({
+        changedSymbols: [
+          { file: 'src/repo.ts', name: 'list', kind: 'method', change: 'modified' },
+          { file: 'src/scope.ts', name: 'workspaceScope', kind: 'function', change: 'added' },
+        ],
+        callerTotals: {
+          [K('src/repo.ts', 'list')]: 40,
+          [K('src/scope.ts', 'workspaceScope')]: 11,
+        },
+      }),
+    });
+
+    expect(dto.symbols.map((s) => s.name)).toEqual(['workspaceScope', 'list']);
+    expect(dto.totals.symbols).toBe(2);
+    expect(dto.totals.added).toBe(1);
+    expect(dto.summary).toContain('1 new symbol (+1 touched)');
+    expect(BlastRadiusResult.parse(dto)).toBeTruthy();
   });
 });

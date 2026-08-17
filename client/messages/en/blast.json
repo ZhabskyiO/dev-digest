@@ -3,7 +3,9 @@
     "symbols": "symbols",
     "callers": "callers",
     "endpoints": "endpoints",
-    "crons": "cron/jobs"
+    "crons": "cron/jobs",
+    "added": "new",
+    "touched": "touched"
   },
   "view": {
     "tree": "tree",
@@ -25,5 +27,6 @@
   "priorPrOverlap": "{count} shared file(s)",
   "declaredIn": "declared in",
   "expandSymbol": "Show callers of {name}",
-  "collapseSymbol": "Hide callers of {name}"
+  "collapseSymbol": "Hide callers of {name}",
+  "addedBadge": "new"
 }

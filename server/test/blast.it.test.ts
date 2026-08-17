@@ -83,7 +83,7 @@ d('blast routes', () => {
   it('serves the indexed impact map for the PR', async () => {
     const res = await get({
       changedSymbols: [
-        { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function' },
+        { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const },
       ],
       callers: [
         {
@@ -132,7 +132,7 @@ d('blast routes', () => {
   it('reports the true caller count when the list is capped', async () => {
     const res = await get({
       changedSymbols: [
-        { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function' },
+        { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const },
       ],
       // the facade already capped these; the total says there were 63
       callers: Array.from({ length: MAX_CALLERS_PER_SYMBOL }, (_, i) => ({
@@ -179,7 +179,7 @@ d('blast routes', () => {
     const res = await get(
       {
         changedSymbols: [
-          { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function' },
+          { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const },
         ],
         callers: [],
         impactedEndpoints: [],
@@ -202,7 +202,7 @@ d('blast routes', () => {
     const res = await get(
       {
         changedSymbols: [
-          { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function' },
+          { file: 'src/middleware/ratelimit.ts', name: 'rateLimit', kind: 'function', change: 'modified' as const },
         ],
         callers: [],
         impactedEndpoints: [],

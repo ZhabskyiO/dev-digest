@@ -38,14 +38,28 @@ export class BlastService {
     // Scope "changed symbols" to the lines the diff actually touches. Without
     // this, editing one line of a repository file reports every symbol in that
     // file as changed — which is how a 5-symbol PR renders as 56.
+    // Two sets of spans for two sets of line numbers: the index measured its
+    // symbols against the diff's BASE, the head overlay parses the PR's own
+    // files, so each is filtered with the side it belongs to. Crossing them
+    // silently drops the wrong symbols.
     const touchedLines: Record<string, LineRange[]> = {};
+    const touchedLinesHead: Record<string, LineRange[]> = {};
     for (const f of files) {
-      const ranges = changedLineRanges(f.patch);
-      if (ranges.length > 0) touchedLines[f.path] = ranges;
+      const base = changedLineRanges(f.patch, 'base');
+      if (base.length > 0) touchedLines[f.path] = base;
+      const head = changedLineRanges(f.patch, 'head');
+      if (head.length > 0) touchedLinesHead[f.path] = head;
     }
 
     const [blast, indexState, priorPrs] = await Promise.all([
-      this.container.repoIntel.getBlastRadius(pull.repoId, changedFiles, { touchedLines }),
+      this.container.repoIntel.getBlastRadius(pull.repoId, changedFiles, {
+        touchedLines,
+        head: {
+          prNumber: pull.number,
+          sha: pull.headSha,
+          touchedLines: touchedLinesHead,
+        },
+      }),
       this.container.repoIntel.getIndexState(pull.repoId),
       this.repo.priorPrsTouching(pull.repoId, pull.id, changedFiles),
     ]);
