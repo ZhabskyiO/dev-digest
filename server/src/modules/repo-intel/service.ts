@@ -32,7 +32,9 @@ import { RepoIntelRepository, type FullSymbolRow } from './repository.js';
 import type {
   BlastCallerRow,
   BlastChangedSymbol,
+  BlastOptions,
   BlastResult,
+  LineRange,
   FileRankRow,
   IndexResult,
   IndexState,
@@ -42,11 +44,15 @@ import type {
   SignatureRow,
   SymbolRow,
 } from './types.js';
+import { symbolKey } from './types.js';
+import { buildHeadOverlay, type HeadOverlay } from './head-overlay.js';
+import { isTestFile } from './helpers.js';
 import {
   BFS_DEPTH,
   DEFAULT_REPO_MAP_TOKEN_BUDGET,
   INDEX_JOB_KIND,
   INDEXER_VERSION,
+  MAX_BLAST_FRONTIER_FILES,
   MAX_CALLERS_PER_SYMBOL,
   REFRESH_JOB_KIND,
   RESYNC_JOB_KIND,
@@ -217,11 +223,15 @@ export class RepoIntelService implements RepoIntel {
    * every caller gets `rank: 0` and HTTP impact is detected by re-reading the
    * clone (not the index). T2 promotes this path to the persistent layer.
    */
-  async getBlastRadius(repoId: string, changedFiles: string[]): Promise<BlastResult> {
+  async getBlastRadius(
+    repoId: string,
+    changedFiles: string[],
+    opts?: BlastOptions,
+  ): Promise<BlastResult> {
     // T3: serve from the persistent index when it's built. Falls through to the
     // ripgrep best-effort below when the flag is off / index is absent.
     if (this.container.config.repoIntelEnabled && changedFiles.length > 0) {
-      const persistent = await this.tryPersistentBlast(repoId, changedFiles);
+      const persistent = await this.tryPersistentBlast(repoId, changedFiles, opts);
       if (persistent) return persistent;
     }
 
@@ -229,6 +239,7 @@ export class RepoIntelService implements RepoIntel {
       changedSymbols: [],
       callers: [],
       impactedEndpoints: [],
+      callerTotals: {},
       degraded: true,
       reason: 'no_data',
     };
@@ -254,11 +265,12 @@ export class RepoIntelService implements RepoIntel {
       const key = `${s.name}:${s.path}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      changedSymbols.push({ file: s.path, name: s.name, kind: s.kind });
+      changedSymbols.push({ file: s.path, name: s.name, kind: s.kind, change: 'modified' });
     }
 
     const callerRows: BlastCallerRow[] = [];
     const endpoints = new Set<string>();
+    const endpointsBySymbol: Record<string, string[]> = {};
     const callerSeen = new Set<string>();
 
     for (const sym of changedSymbols) {
@@ -279,6 +291,7 @@ export class RepoIntelService implements RepoIntel {
           file: r.fromPath,
           symbol: callerName,
           viaSymbol: sym.name,
+          viaFile: sym.file,
           line: r.line,
           rank: 0, // ripgrep/degraded path has no persistent rank
         });
@@ -286,18 +299,28 @@ export class RepoIntelService implements RepoIntel {
       }
 
       // Detect HTTP routes reachable from any caller file (best-effort, just
-      // like the legacy blast service).
+      // like the legacy blast service). No graph on this path, so the walk is
+      // one hop deep by construction — direct caller files only.
+      const perSymbol = new Set<string>();
       for (const file of callerFiles) {
         const content = await readClone(repo.clonePath, file);
         if (!content) continue;
-        for (const e of extractEndpoints(content)) endpoints.add(e);
+        for (const e of extractEndpoints(content)) {
+          endpoints.add(e);
+          perSymbol.add(e);
+        }
       }
+      if (perSymbol.size > 0) endpointsBySymbol[symbolKey(sym.file, sym.name)] = [...perSymbol];
     }
+
+    const capped = capCallersPerSymbol(callerRows);
 
     return {
       changedSymbols,
-      callers: callerRows,
+      callers: capped.callers,
       impactedEndpoints: [...endpoints],
+      callerTotals: capped.callerTotals,
+      endpointsBySymbol,
       degraded: true,
       reason: 'no_data',
     };
@@ -315,31 +338,132 @@ export class RepoIntelService implements RepoIntel {
   private async tryPersistentBlast(
     repoId: string,
     changedFiles: string[],
+    opts?: BlastOptions,
   ): Promise<BlastResult | null> {
     const state = await this.repo.tryGetIndexState(repoId);
     if (!state || (state.status !== 'full' && state.status !== 'partial')) return null;
 
     // Changed symbols = declared in a changed file. Skip the qualified
     // `Class.method` dual-emit (the bare form already covers the name).
-    const declRows = await this.repo.getSymbolRows(repoId, changedFiles);
+    // Overlay the PR's own code when asked. Symbols this PR ADDS exist only
+    // there — the index is built from the default branch — so without it the
+    // map silently omits the code under review.
+    let overlay: HeadOverlay | null = null;
+    let overlayReason: string | undefined;
+    if (opts?.head) {
+      const repo = await this.repo.getRepoBasics(repoId);
+      if (!repo) {
+        overlayReason = 'repo not found';
+      } else {
+        const built = await buildHeadOverlay(
+          this.container,
+          { owner: repo.owner, name: repo.name },
+          changedFiles,
+          opts.head,
+        );
+        if ('overlay' in built) overlay = built.overlay;
+        else overlayReason = built.reason;
+      }
+    }
+
     const changedSymbols: BlastChangedSymbol[] = [];
     const nameSet = new Set<string>();
     const seenSym = new Set<string>();
-    for (const s of declRows) {
-      if (s.name.includes('.')) continue;
-      const key = `${s.name}:${s.path}`;
+    const push = (file: string, name: string, kind: string, change: 'added' | 'modified') => {
+      // A helper declared in a test file has no blast radius — nothing ships
+      // downstream of it. Tests still appear as CALLERS of production symbols,
+      // which is real impact ("this change reaches 4 suites"); it is only the
+      // declaration side that is noise.
+      if (isTestFile(file)) return;
+      const key = `${name}:${file}`;
       if (!seenSym.has(key)) {
         seenSym.add(key);
-        changedSymbols.push({ file: s.path, name: s.name, kind: s.kind });
+        changedSymbols.push({ file, name, kind, change });
       }
-      nameSet.add(s.name);
+      nameSet.add(name);
+    };
+
+    // What the index already knew about the overlaid files tells us which of
+    // the PR's symbols are NEW rather than merely touched.
+    const preExisting = new Set<string>();
+    if (overlay) {
+      for (const s of await this.repo.getSymbolRows(repoId, overlay.filesRead)) {
+        preExisting.add(symbolKey(s.path, s.name));
+      }
+    }
+
+    if (overlay) {
+      // The overlay is authoritative for the files it read: it is the PR's
+      // actual code. Files it could not read (deleted, unparseable) still fall
+      // back to the index below.
+      for (const s of overlay.symbols) {
+        push(
+          s.file,
+          s.name,
+          s.kind,
+          preExisting.has(symbolKey(s.file, s.name)) ? 'modified' : 'added',
+        );
+      }
+    }
+    const overlaid = new Set(overlay?.filesRead ?? []);
+    const indexOnlyFiles = changedFiles.filter((f) => !overlaid.has(f));
+    const declRows = await this.repo.getSymbolRows(repoId, indexOnlyFiles);
+    for (const s of declRows) {
+      if (s.name.includes('.')) continue;
+      // "Declared in a touched file" is not the same as "touched". When the
+      // caller supplies the diff's line spans, keep only symbols the diff
+      // actually overlaps — otherwise a one-line edit reports every symbol in
+      // the file as changed.
+      if (!touchedBy(opts?.touchedLines?.[s.path], s.line, s.endLine)) continue;
+      // Straight from the index, so by construction it pre-existed.
+      push(s.path, s.name, s.kind, 'modified');
     }
     if (nameSet.size === 0) {
-      return { changedSymbols, callers: [], impactedEndpoints: [], degraded: false };
+      return {
+        changedSymbols,
+        callers: [],
+        impactedEndpoints: [],
+        callerTotals: {},
+        degraded: false,
+        headOverlay: overlay != null,
+        ...(overlayReason ? { headOverlayReason: overlayReason } : {}),
+      };
     }
 
     // Resolved cross-file callers.
-    const callerRows = await this.repo.getResolvedCallers(repoId, changedFiles, [...nameSet]);
+    // Restrict to (declFile, name) pairs we actually kept: `toSymbol` is a bare
+    // name, so a name surviving the line filter in one file must not drag in a
+    // same-named symbol from another changed file.
+    const keptKeys = new Set(changedSymbols.map((s) => symbolKey(s.file, s.name)));
+    const callerRows = (
+      await this.repo.getResolvedCallers(repoId, indexOnlyFiles, [...nameSet])
+    ).filter((c) => keptKeys.has(symbolKey(c.declFile, c.toSymbol)));
+
+    // Call sites the PR itself introduces. A refactor that moves 11 call sites
+    // onto a new helper edits those 11 files, so they are in the diff and the
+    // overlay sees them — the index never will until the branch merges.
+    // Resolution here is by NAME within the overlay: a full import resolution
+    // would need the whole branch parsed, and a same-named symbol in two
+    // changed files is rare next to the cost of missing every new call site.
+    const overlayCallers: typeof callerRows = [];
+    if (overlay) {
+      const declByName = new Map<string, string>();
+      for (const s of overlay.symbols) if (!declByName.has(s.name)) declByName.set(s.name, s.file);
+      for (const r of overlay.references) {
+        const declFile = declByName.get(r.toSymbol);
+        if (!declFile) continue;
+        if (declFile === r.fromPath) continue; // a symbol's own file is not a caller
+        if (!keptKeys.has(symbolKey(declFile, r.toSymbol))) continue;
+        overlayCallers.push({
+          fromPath: r.fromPath,
+          toSymbol: r.toSymbol,
+          declFile,
+          line: r.line,
+          rank: 0,
+        });
+      }
+    }
+    callerRows.push(...overlayCallers);
     const callerFiles = [...new Set(callerRows.map((c) => c.fromPath))];
 
     // Enclosing caller symbol from the callers' persistent symbol rows.
@@ -358,36 +482,137 @@ export class RepoIntelService implements RepoIntel {
         enclosingFromRows(symsByFile.get(c.fromPath) ?? [], c.line) ??
         c.fromPath.split('/').pop() ??
         c.fromPath;
-      const key = `${c.fromPath}|${enclosing}|${c.toSymbol}`;
+      const key = `${c.fromPath}|${enclosing}|${c.declFile}|${c.toSymbol}`;
       if (seenCaller.has(key)) continue;
       seenCaller.add(key);
       callers.push({
         file: c.fromPath,
         symbol: enclosing,
         viaSymbol: c.toSymbol,
+        viaFile: c.declFile,
         line: c.line,
         rank: c.rank,
       });
     }
     callers.sort((a, b) => b.rank - a.rank);
+    const capped = capCallersPerSymbol(callers);
 
-    // Precomputed facts per caller file (endpoints + crons), so consumers can
-    // attribute them to the changed symbol whose callers live in that file.
-    const facts = await this.repo.getFileFacts(repoId, callerFiles);
+    // Downstream frontier per changed symbol: walk the reverse import graph
+    // BFS_DEPTH hops out from the symbol's declaring file, seeded also with its
+    // direct caller files. An endpoint two modules downstream is exactly the
+    // "what else can this touch?" answer the direct-callers-only view misses.
+    const callerFilesBySymbol = new Map<string, Set<string>>();
+    for (const c of callers) {
+      const k = symbolKey(c.viaFile, c.viaSymbol);
+      const set = callerFilesBySymbol.get(k);
+      if (set) set.add(c.file);
+      else callerFilesBySymbol.set(k, new Set([c.file]));
+    }
+
+    const frontierBySymbol = new Map<string, Set<string>>();
+    const allFrontier = new Set<string>();
+    let frontierClipped = false;
+    for (const sym of changedSymbols) {
+      const k = symbolKey(sym.file, sym.name);
+      const seed = new Set<string>([
+        // The declaring file itself, so a symbol that registers a route or a
+        // cron right where it lives is credited with it.
+        ...(overlay?.facts[sym.file] ? [sym.file] : []),
+        ...(callerFilesBySymbol.get(k) ?? []),
+        ...(await this.importersOf(repoId, [sym.file])),
+      ]);
+      const reached = await this.walkDownstream(repoId, seed);
+      if (reached.clipped) frontierClipped = true;
+      frontierBySymbol.set(k, reached.files);
+      for (const f of reached.files) allFrontier.add(f);
+    }
+
+    // Precomputed facts over the whole frontier (endpoints + crons), attributed
+    // back to the changed symbol that reaches them.
+    const facts = await this.repo.getFileFacts(repoId, [...allFrontier]);
     const endpoints = new Set<string>();
+    const crons = new Set<string>();
     const factsByFile: Record<string, { endpoints: string[]; crons: string[] }> = {};
     for (const f of facts) {
       factsByFile[f.filePath] = { endpoints: f.endpoints, crons: f.crons };
       for (const e of f.endpoints) endpoints.add(e);
+      for (const c of f.crons) crons.add(c);
+    }
+    // A route or cron the PR REGISTERS is in the changed file itself, not
+    // downstream of it — so overlay facts are folded in directly, and they win
+    // over the indexed version of the same file.
+    for (const [file, f] of Object.entries(overlay?.facts ?? {})) {
+      factsByFile[file] = f;
+      for (const e of f.endpoints) endpoints.add(e);
+      for (const c of f.crons) crons.add(c);
+    }
+
+    const endpointsBySymbol: Record<string, string[]> = {};
+    const cronsBySymbol: Record<string, string[]> = {};
+    for (const sym of changedSymbols) {
+      const k = symbolKey(sym.file, sym.name);
+      const symEndpoints = new Set<string>();
+      const symCrons = new Set<string>();
+      for (const file of frontierBySymbol.get(k) ?? []) {
+        const f = factsByFile[file];
+        if (!f) continue;
+        for (const e of f.endpoints) symEndpoints.add(e);
+        for (const c of f.crons) symCrons.add(c);
+      }
+      if (symEndpoints.size > 0) endpointsBySymbol[k] = [...symEndpoints];
+      if (symCrons.size > 0) cronsBySymbol[k] = [...symCrons];
     }
 
     return {
       changedSymbols,
-      callers: callers.slice(0, MAX_CALLERS_PER_SYMBOL),
+      callers: capped.callers,
       impactedEndpoints: [...endpoints],
+      callerTotals: capped.callerTotals,
+      endpointsBySymbol,
+      cronsBySymbol,
       factsByFile,
       degraded: false,
+      ...(frontierClipped ? { frontierClipped: true } : {}),
+      headOverlay: overlay != null,
+      ...(overlayReason ? { headOverlayReason: overlayReason } : {}),
     };
+  }
+
+  /** One reverse-edge hop: the set of files importing any of `files`. */
+  private async importersOf(repoId: string, files: string[]): Promise<string[]> {
+    const edges = await this.repo.getImporters(repoId, files);
+    return [...new Set(edges.map((e) => e.fromFile))];
+  }
+
+  /**
+   * BFS out along reverse import edges from `seed`, BFS_DEPTH hops, bounded by
+   * MAX_BLAST_FRONTIER_FILES. The seed itself is part of the frontier — it is
+   * already one hop downstream of the changed file.
+   */
+  private async walkDownstream(
+    repoId: string,
+    seed: Set<string>,
+  ): Promise<{ files: Set<string>; clipped: boolean }> {
+    const clippedSeed = [...seed].slice(0, MAX_BLAST_FRONTIER_FILES);
+    const visited = new Set(clippedSeed);
+    let clipped = visited.size < seed.size;
+    let level = clippedSeed;
+
+    for (let depth = 1; depth < BFS_DEPTH && level.length > 0 && !clipped; depth++) {
+      const next: string[] = [];
+      for (const file of await this.importersOf(repoId, level)) {
+        if (visited.has(file)) continue;
+        if (visited.size >= MAX_BLAST_FRONTIER_FILES) {
+          clipped = true;
+          break;
+        }
+        visited.add(file);
+        next.push(file);
+      }
+      level = next;
+    }
+
+    return { files: visited, clipped };
   }
 
   /**
@@ -743,6 +968,53 @@ function enclosingFromRows(rows: FullSymbolRow[], line: number): string | null {
 // ---------------------------------------------------------------------------
 // helpers — local to T1, replaced when blast/onboarding migrate to the facade.
 // ---------------------------------------------------------------------------
+
+/**
+ * Cap callers at MAX_CALLERS_PER_SYMBOL **per changed symbol**, keeping the
+ * highest-ranked ones, and report the pre-cap total for each.
+ *
+ * The obvious `callers.slice(0, N)` on the flat list is wrong: sorted by rank,
+ * a diff touching five symbols can spend the whole budget on the first one and
+ * render the other four as having no callers at all — which reads as "safe to
+ * change" when the truth is "we stopped looking".
+ *
+ * Input order is preserved within each symbol, so callers must already be
+ * sorted by rank DESC (they are on both paths; the ripgrep path has no rank,
+ * so there the order is discovery order).
+ */
+function capCallersPerSymbol(callers: BlastCallerRow[]): {
+  callers: BlastCallerRow[];
+  callerTotals: Record<string, number>;
+} {
+  const kept: BlastCallerRow[] = [];
+  const callerTotals: Record<string, number> = {};
+  for (const c of callers) {
+    const k = symbolKey(c.viaFile, c.viaSymbol);
+    const seen = (callerTotals[k] ?? 0) + 1;
+    callerTotals[k] = seen;
+    if (seen <= MAX_CALLERS_PER_SYMBOL) kept.push(c);
+  }
+  return { callers: kept, callerTotals };
+}
+
+/**
+ * Does a symbol's [start,end] span overlap any line the diff touched?
+ *
+ * `undefined` ranges mean the caller gave us no diff scope — then every symbol
+ * counts, which is the pre-existing (over-broad) behaviour. A symbol with no
+ * recorded start line also counts: we cannot rule it out, and silently dropping
+ * it would under-report the blast radius, which is the worse error.
+ */
+function touchedBy(
+  ranges: LineRange[] | undefined,
+  start: number | null,
+  end: number | null,
+): boolean {
+  if (!ranges) return true;
+  if (start == null) return true;
+  const last = end ?? start;
+  return ranges.some((r) => r.start <= last && start <= r.end);
+}
 
 /**
  * Best-effort: name the enclosing top-level symbol of a reference line. Mirrors

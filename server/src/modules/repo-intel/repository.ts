@@ -126,6 +126,14 @@ export interface FullSymbolRow {
 export interface ResolvedCallerRow {
   fromPath: string;
   toSymbol: string;
+  /**
+   * The file the referenced symbol is DECLARED in. Required, not decorative:
+   * `to_symbol` is a bare name, and one repo routinely declares `getById` /
+   * `list` / `remove` in several files. Attributing a caller by name alone
+   * merges them into one bucket, so every same-named symbol shows every other
+   * one's callers. Always resolved (the query filters `decl_file IN declFiles`).
+   */
+  declFile: string;
   line: number;
   rank: number;
 }
@@ -510,6 +518,7 @@ export class RepoIntelRepository {
       .select({
         fromPath: t.references.fromPath,
         toSymbol: t.references.toSymbol,
+        declFile: sql<string>`${t.references.declFile}`,
         line: t.references.line,
         rank: t.fileRank.rank,
       })
@@ -528,6 +537,25 @@ export class RepoIntelRepository {
           inArray(t.references.toSymbol, names),
         ),
       );
+  }
+
+  /**
+   * Reverse import edges: which files import any of `toFiles`.
+   *
+   * This is the "who depends on this?" direction, served by the
+   * `file_edges_repo_to_idx` index on (repoId, toFile) — the reason that index
+   * exists. Used by the blast walk to reach endpoints that sit one or two
+   * modules downstream of a changed file rather than in a direct caller.
+   */
+  async getImporters(
+    repoId: string,
+    toFiles: string[],
+  ): Promise<{ fromFile: string; toFile: string }[]> {
+    if (toFiles.length === 0) return [];
+    return this.db
+      .select({ fromFile: t.fileEdges.fromFile, toFile: t.fileEdges.toFile })
+      .from(t.fileEdges)
+      .where(and(eq(t.fileEdges.repoId, repoId), inArray(t.fileEdges.toFile, toFiles)));
   }
 
   /** Per-file facts (endpoints/crons) for the given files. */

@@ -30,13 +30,35 @@ export const EXCLUDED_DIRS = [
 export const MAX_CALLERS_PER_SYMBOL = 20;
 
 /**
+ * Ceiling on the downstream-file frontier the blast walk may visit per repo.
+ * A hub file (a barrel, a shared util) is imported by hundreds of modules, and
+ * two hops out from one of those is most of the repo — without this cap a
+ * single PR touching `index.ts` turns one request into a full-graph scan.
+ * When the walk clips, `BlastResult.frontierClipped` says so instead of
+ * pretending the shorter endpoint list is complete.
+ */
+export const MAX_BLAST_FRONTIER_FILES = 300;
+
+/**
  * [T1] Bumped whenever the AST extractor or symbol schema changes. A mismatch
  * with `repo_index_state.indexer_version` forces a full reindex.
  *
  * v2 (T3): graph + decl_file resolution + file_rank + repo-map landed, so every
  * T2 `partial` index must be rebuilt to gain the rank-driven data.
+ *
+ * v3 (blast): `file_facts` no longer records endpoints/crons found in TEST
+ * files, and `extractCrons` now recognises a cron expression by its own
+ * grammar rather than only next to a `cron`/`schedule` keyword. Both change
+ * what a given file yields, so every v2 index carries stale facts — a test
+ * suite's `api.get('/articles?limit=1000')` sitting in the endpoint list, and
+ * a hoisted `CRON_SCHEDULES` table missing from it — until it is rebuilt.
+ *
+ * v4 (blast): `extractEndpoints` matches the whole source instead of one line
+ * at a time, so a route whose path sits on the line after the verb — i.e. any
+ * route with a schema, which in practice is all of them — is finally seen.
+ * Every earlier index recorded almost no real endpoints.
  */
-export const INDEXER_VERSION = 2;
+export const INDEXER_VERSION = 4;
 
 // --- [T2] Full-index limits (documented now, enforced in the pipeline) ------
 export const MAX_INDEXED_FILES = 5000;

@@ -52,6 +52,18 @@ Quirks of dependencies, tooling, and the local environment.
   `gh run list --branch <b> --json headSha,status,conclusion` and loop until no
   run for that sha has `status != "completed"`. An until-loop over the rollup
   exits instantly on the empty array and tells you nothing.
+- 2026-08-14 — Under tsx's in-process loader (`import { register } from
+  'tsx/esm/api'`, used by `mcp-server/bin/devdigest.mjs`), the `.js` → `.ts`
+  specifier remap applies to STATIC imports only. A **dynamic** `await
+  import('../http/client.js')` from a `.ts` module dies with
+  `ERR_MODULE_NOT_FOUND … client.js imported from …/cli/index.ts`, even though
+  the identical static import resolves. Do not "fix" it by importing
+  `'../http/client.ts'` — `tsc` then fails without
+  `allowImportingTsExtensions`. Restructure so the import can stay static; if
+  the dynamic import existed to control module-load ORDER (e.g. setting an env
+  var before a config module snapshots it), make the config read lazily
+  (a getter) instead — `mcp-server/src/config.ts:17` does this so `--api-url`
+  works with static imports.
 
 ## Recurring Errors & Fixes
 

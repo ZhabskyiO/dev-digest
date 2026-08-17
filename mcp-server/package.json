@@ -1,0 +1,24 @@
+{
+  "name": "@devdigest/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "devdigest": "./bin/devdigest.mjs"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "review": "tsx src/cli/index.ts review",
+    "typecheck": "tsc --noEmit",
+    "inspect": "npx @modelcontextprotocol/inspector tsx src/index.ts",
+    "call": "node scripts/call.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

@@ -129,6 +129,13 @@ export class SimpleGitClient implements GitClient {
   async readFile(repo: RepoRef, path: string): Promise<string> {
     return readFile(join(this.clonePathFor(repo), path), 'utf8');
   }
+
+  async readFileAt(repo: RepoRef, ref: string, path: string): Promise<string> {
+    // `show` writes the blob to stdout; simple-git surfaces a non-zero exit
+    // (unknown ref / path absent at that ref) as a rejection, which callers
+    // treat as "this file isn't there" rather than a hard failure.
+    return this.git(repo).show([`${ref}:${path}`]);
+  }
 }
 
 function parseBlamePorcelain(raw: string): BlameLine[] {

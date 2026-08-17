@@ -37,6 +37,10 @@ const EnvSchema = z.object({
   // opt-in only, unlike the other two flags above.
   INTENT_EXTERNAL_EVIDENCE: z.string().optional(),
   API_PORT: z.coerce.number().int().default(3001),
+  // Loopback by default: the API is unauthenticated, so binding it to 0.0.0.0
+  // would expose every route to the local network. Override only when the API
+  // itself runs in a container and must accept traffic from outside it.
+  API_HOST: z.string().min(1).default('127.0.0.1'),
   WEB_PORT: z.coerce.number().int().default(3000),
   DEVDIGEST_CLONE_DIR: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -51,6 +55,8 @@ const EnvSchema = z.object({
 export type AppConfig = {
   databaseUrl: string;
   apiPort: number;
+  /** Interface the API binds to. Loopback by default — see API_HOST. */
+  apiHost: string;
   webPort: number;
   /** Absolute path where repos are cloned (~/.devdigest/workspace by default). */
   cloneDir: string;
@@ -90,6 +96,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     databaseUrl: parsed.DATABASE_URL,
     apiPort: parsed.API_PORT,
+    apiHost: parsed.API_HOST,
     webPort: parsed.WEB_PORT,
     cloneDir,
     secretsPath: join(homedir(), '.devdigest', 'secrets.json'),

@@ -1,11 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { RunRequest, PrIntentDetail, SmartDiff } from '@devdigest/shared';
+import {
+  RunRequest,
+  PrIntentDetail,
+  SmartDiff,
+  LocalReviewRequest,
+  LocalReviewResult,
+} from '@devdigest/shared';
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
+import { LocalReviewService } from './local-review.js';
 
 /**
  * reviews module.
@@ -23,6 +30,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
   const service = new ReviewService(container);
+  const localReviews = new LocalReviewService(container);
 
   // ---- Run a review (manual trigger) -------------------------------
   // Tight per-route limit: each call can fan out to expensive LLM runs.
@@ -45,6 +53,26 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     );
     return { pr_id: req.params.id, runs, reviews };
   });
+
+  // ---- Review a LOCAL diff (no PR) ---------------------------------------
+  // The pre-push path: `devdigest review --mode working` posts the working
+  // tree's `git diff HEAD` and gets the same grounded findings a PR review
+  // returns. Synchronous by design — the caller is a CLI that must exit with a
+  // verdict, not a UI that can subscribe to a run — so there is no run id, no
+  // SSE stream, and nothing persisted (see LocalReviewService).
+  //
+  // Same 10/min limit as /pulls/:id/review: one call, one LLM review.
+  app.post(
+    '/reviews/local',
+    {
+      schema: { body: LocalReviewRequest, response: { 200: LocalReviewResult } },
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return localReviews.review(workspaceId, req.body, req.log);
+    },
+  );
 
   // ---- SSE: live run events (replay buffer first, then live; ends on done) -
   // No rate limit: SSE is one long-lived connection, not burst traffic.

@@ -58,6 +58,65 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-11 — The repo-intel index is built from the repo's DEFAULT BRANCH
+  only — `repo_index_state` is one row per repo with no sha dimension, and
+  `resyncRepo` fetches `origin/<defaultBranch>`. So NOTHING a pull request adds
+  (new functions, new routes, a new cron) exists in the index, and any
+  PR-scoped read served purely from it silently omits exactly the code under
+  review. `modules/repo-intel/head-overlay.ts` is the workaround: fetch
+  `pull/<n>/head`, read only the changed files at that sha via
+  `git.readFileAt`, parse in-memory, merge. Two limits worth knowing — it sees
+  callers only in files the diff touches, and it resolves overlay references by
+  NAME (a full import resolution would need the whole branch parsed).
+
+- 2026-08-11 — NEVER apply a per-line regex to detect route registrations.
+  `extractEndpoints` did, and any route whose path sits on the line after the
+  verb — i.e. every route that takes a schema/options object, which in practice
+  is all of them — was invisible. The visible symptom is inverted and very
+  easy to misread: `file_facts` fills up with a repo's TEST files (one-liner
+  `api.get('/x?limit=1000')` calls do fit on one line) while its real
+  `routes.ts` files record nothing, so the endpoint list looks populated and is
+  entirely wrong. Fixed by matching the whole source (`\s` spans newlines) and
+  by excluding test files from `file_facts` (`repo-intel/helpers.ts`
+  `isTestFile`) — a test calls INTO an API, it does not register one.
+
+- 2026-08-11 — `extractCrons` only matched a cron literal sitting next to a
+  `cron`/`schedule`/`CronJob` token, which misses every idiomatic way of
+  hoisting the schedule out of the call — a `CRON_SCHEDULES` lookup table, a
+  config default, a constant — because on the line holding the literal the
+  keyword is gone. It now also recognises a quoted 5/6-field cron expression by
+  its own grammar; across ~500 files of this repo that rule fired on nothing
+  else. Job kinds are routinely kebab-case, so `[a-z][a-z0-9_]*` silently
+  dropped every hyphenated one.
+
+- 2026-08-11 — ALWAYS bump `INDEXER_VERSION` when changing what the extractors
+  WRITE, not just when changing the symbol schema. `POST /repos/:id/resync` on
+  an unchanged sha takes the incremental no-op path and never rewrites
+  `file_facts`, so an extractor fix appears to do nothing; the version mismatch
+  is the only thing that forces the full rebuild.
+
+- 2026-08-11 — `references.to_symbol` is a BARE NAME, so `(file, name)` — not
+  the name — is a symbol's identity anywhere blast-style attribution happens.
+  Keying per-symbol maps on the name alone made `getById` in
+  `articles/repository.ts` and `articles/service.ts` share one bucket: each
+  rendered the union of both callers, and the totals double-counted. Carry
+  `references.decl_file` through and key with `symbolKey(file, name)`.
+
+- 2026-08-11 — ALWAYS pin a code link built from repo-intel data to
+  `repo_index_state.last_indexed_sha`, **never** to the repo's default branch or
+  the PR head sha. Every `file:line` the index emits (`symbols.line`,
+  `references.line`, and so anything downstream like `BlastCallerRow.line`) is
+  measured against the commit the indexer walked, and the index lags `main` by
+  however many commits have landed since — so a `blob/main/...#L146` link drifts
+  by however many lines were inserted above. Verified concretely: for the
+  `deriveReviewStatus` caller in `server/src/modules/pulls/routes.ts`, line 146
+  at the indexed sha is the real call site, while line 146 on `main` is an
+  unrelated `.where(and(eq(...)))`. The PR head sha is wrong too — index callers
+  mostly live in files the PR never touched. This is why
+  `BlastRadiusResult.indexed_sha` exists
+  (`server/src/vendor/shared/contracts/blast.ts`); any new surface over index
+  data needs the same field rather than reusing `repo.default_branch`.
+
 - 2026-08-07 — `server/src/prompts/intent.extract.md` (T3) has exactly seven
   placeholders (`title`, `branch`, `commits`, `paths`, `body`, `ticket`,
   `docs`) with **no dedicated slot for evidence tiers (d) external URLs or

@@ -4,6 +4,7 @@ import {
   Finding,
   Intent,
   BlastRadius,
+  BlastRadiusResult,
   Risks,
   PrHistory,
   SmartDiff,
@@ -225,5 +226,65 @@ describe('platform DTOs', () => {
         commits: [],
       }),
     ).not.toThrow();
+  });
+});
+
+/**
+ * `BlastRadiusResult` is the API/UI/MCP shape of GET /pulls/:id/blast — it is
+ * NOT the brief's `BlastRadius` block above. It doubles as the route's response
+ * schema, so a missing key here is a 500 at serialization time, not a type error.
+ */
+describe('BlastRadiusResult (GET /pulls/:id/blast)', () => {
+  const valid = {
+    pull_id: 'p1',
+    status: 'ready' as const,
+    reason: null,
+    degraded: false,
+    indexed_sha: '6c415f1d0745c6e1416d799cfb2803b895dcbfec',
+    changed_files: ['src/limit.ts'],
+    symbols: [
+      {
+        name: 'rateLimit',
+        kind: 'function',
+        file: 'src/limit.ts',
+        change: 'added',
+        callers: [{ file: 'src/api/index.ts', line: 23, symbol: 'publicRouter', rank: 0.9 }],
+        caller_count: 4,
+        endpoints: [{ method: 'GET', path: '/api/public/items', file: 'src/api/index.ts' }],
+        crons: ['reset-rate-buckets (hourly)'],
+      },
+    ],
+    endpoints: [{ method: 'GET', path: '/api/public/items', file: 'src/api/index.ts' }],
+    crons: ['reset-rate-buckets (hourly)'],
+    totals: { symbols: 1, added: 1, callers: 4, endpoints: 1, crons: 1 },
+    prior_prs: [
+      {
+        id: 'x',
+        number: 470,
+        title: 'earlier',
+        author: 'a',
+        updated_at: '2026-08-01T00:00:00.000Z',
+        overlapping_files: 2,
+      },
+    ],
+    summary: '1 changed symbol · 4 callers · 1 endpoint · 1 cron/job',
+  };
+
+  it('round-trips a full payload', () => {
+    expect(() => BlastRadiusResult.parse(valid)).not.toThrow();
+  });
+
+  it('rejects an unknown status — degraded/partial/ready is a closed set', () => {
+    expect(() => BlastRadiusResult.parse({ ...valid, status: 'unknown' })).toThrow();
+  });
+
+  it('requires reason to be present (nullable, not optional)', () => {
+    const { reason: _omitted, ...withoutReason } = valid;
+    expect(() => BlastRadiusResult.parse(withoutReason)).toThrow();
+  });
+
+  it('carries no .default() — an omitted array must fail, not be silently filled', () => {
+    const { symbols: _omitted, ...withoutSymbols } = valid;
+    expect(() => BlastRadiusResult.parse(withoutSymbols)).toThrow();
   });
 });

@@ -28,6 +28,7 @@ import type { Container } from '../../../platform/container.js';
 import { withTimeout } from '../../../platform/resilience.js';
 import { parseSymbols, parseReferences, langForFile } from '../../../adapters/astgrep/index.js';
 import { extractEndpoints, extractCrons } from '../../../adapters/codeindex/extract.js';
+import { isTestFile } from '../helpers.js';
 import {
   DEFAULT_REPO_MAP_TOKEN_BUDGET,
   INDEX_SOFT_BUDGET_MS,
@@ -182,11 +183,16 @@ export async function runFullIndex(
           });
         }
         // Per-file facts (endpoints/crons) so blast reads from file_facts
-        // instead of re-parsing the clone (T3 blast migration).
-        const endpoints = extractEndpoints(source);
-        const crons = extractCrons(source);
-        if (endpoints.length > 0 || crons.length > 0) {
-          factsBuf.push({ filePath: relPath, endpoints, crons });
+        // instead of re-parsing the clone. Tests are excluded on purpose: a
+        // suite is full of `api.get('/articles?limit=1000')` calls, and
+        // extractEndpoints cannot tell a call INTO an API from a registration
+        // OF one — indexing them fills the endpoint list with assertions.
+        if (!isTestFile(relPath)) {
+          const endpoints = extractEndpoints(source);
+          const crons = extractCrons(source);
+          if (endpoints.length > 0 || crons.length > 0) {
+            factsBuf.push({ filePath: relPath, endpoints, crons });
+          }
         }
         filesIndexed += 1;
       } catch (err) {

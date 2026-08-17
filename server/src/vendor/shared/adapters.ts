@@ -249,6 +249,16 @@ export interface GitClient {
   blame(repo: RepoRef, path: string): Promise<BlameLine[]>;
   log(repo: RepoRef, path?: string): Promise<GitCommit[]>;
   readFile(repo: RepoRef, path: string): Promise<string>;
+  /**
+   * File contents at an arbitrary ref (`git show <ref>:<path>`).
+   *
+   * `readFile` reads the WORKING TREE, which is pinned to the default branch —
+   * so it cannot see a pull request's code at all. Anything that needs to look
+   * at a PR (whose ref must be fetched first, see `fetchPullHead`) goes through
+   * here. Rejects when the path does not exist at that ref, e.g. a file the
+   * PR adds when read at base, or one it deletes when read at head.
+   */
+  readFileAt(repo: RepoRef, ref: string, path: string): Promise<string>;
   clonePathFor(repo: RepoRef): string;
 }
 
