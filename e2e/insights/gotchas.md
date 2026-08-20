@@ -36,7 +36,21 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
-_None yet._
+- 2026-08-20 — `agent-browser wait --url <pattern>` does **NOT** support glob
+  wildcards in the installed CLI (`agent-browser --version` → `0.27.0`),
+  despite both the packaged skill (`agent-browser skills get core --full`) and
+  the upstream README documenting `wait --url "**/dashboard"` as a working
+  example. Confirmed empirically with `AGENT_BROWSER_DEFAULT_TIMEOUT=6000` set
+  to fail fast: a literal substring (`wait --url "repos/abc123/onboarding"`)
+  resolves instantly, but every variant containing `*` or `**` — leading,
+  trailing, both, with or without an explicit protocol/host prefix — times out
+  every time, because `*` is matched as a literal character that never occurs
+  in a real URL. Do not reach for a `**/repos/*/onboarding`-style pattern to
+  disambiguate a repo-scoped route from an unscoped one with the same suffix
+  (e.g. `/repos/:repoId/onboarding` vs plain `/onboarding`) — it will hang the
+  flow until the step timeout. Use a plain literal substring instead, and lean
+  on a `wait --text` for page-specific content immediately after to rule out
+  a false-positive route match; see `e2e/specs/09-onboarding-tour.flow.json`.
 
 ## Recurring Errors & Fixes
 

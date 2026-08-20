@@ -149,6 +149,11 @@ describe('AI contracts parse fixtures', () => {
     expect(() =>
       Onboarding.parse({
         sections: [{ kind: 'architecture', title: 'T', body: 'b', links: [] }],
+        generated_at: '2026-08-19T00:00:00.000Z',
+        indexed_revision: 'abc123',
+        indexed_file_count: 42,
+        provider: 'openrouter',
+        model: 'deepseek/deepseek-v4-flash',
       }),
     ).not.toThrow();
     expect(() =>

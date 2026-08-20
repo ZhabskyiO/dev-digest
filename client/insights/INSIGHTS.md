@@ -36,6 +36,20 @@ Approaches and solutions that worked here and are worth reusing.
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-20 — A component folder MUST carry its own `index.ts` re-export
+  (`export { Thing } from "./Thing";`) the moment a SIBLING component folder
+  imports it as `"../Thing"` rather than `"../Thing/Thing"` — Vite/vitest's
+  resolver treats a bare directory specifier as a package import and needs
+  that `index.ts` as its entry point; without it, `"../Thing"` fails at
+  transform time with `Failed to resolve import "../Thing"` even though the
+  file `Thing/Thing.tsx` plainly exists. `ConventionCard/index.ts` and
+  `SkillCard/index.ts` already do this; six new sibling card folders under
+  `onboarding/.../SectionCards/*Card/` needed the same `index.ts` added
+  before their `"../SectionCard"` imports (and `SectionCards/index.ts`'s own
+  barrel re-exports) would resolve. When scaffolding a new colocated
+  component folder that another folder at the same level will import,
+  add its `index.ts` in the same pass — don't wait for the resolver error.
+
 - 2026-08-19 — A tab bar's `?tab=` allowlist must be DERIVED from the tab
   array, never restated. `SkillDetail/constants.ts` does it right
   (`export const TAB_KEYS = TABS.map((t) => t.key)`); `agents/[id]/page.tsx`
@@ -121,3 +135,20 @@ Unresolved, worth investigating.
     Context tab's `DriftTarget` pattern exactly (repo-scoped `repoId` comes from
     the page's own route param instead of a selector, since this page — unlike
     the agent tab — is already pinned to one repo).
+
+- 2026-08-20 — Every onboarding tour section carries `links:
+  OnboardingLink[] | null` (`{label, path}`, ungrounded links stripped
+  server-side — `server/insights/INSIGHTS.md` 2026-08-20) but **no card in
+  `SectionCards/**` renders it** — confirmed with
+  `grep -rn "\.links" app/repos/[repoId]/onboarding` returning nothing.
+  AC-45 ("every link produced by a tour" renders only as an http(s) target
+  from a grounded path, any other scheme is never activatable) is therefore
+  satisfied today only because there is no rendering surface for `links` to
+  violate it on — the sole href-producing control in the whole feature is
+  `CriticalPathsCard`'s `Open`, which is safe by construction (`githubBlobUrl`
+  hardcodes the `https://github.com/...` host; `item.path` is only ever
+  inserted as a per-segment `encodeURIComponent`-ed path component, so it can
+  never become a URL scheme regardless of its content). If a future task adds
+  a "related links" affordance per section, `groundLinks()`'s existence check
+  is not itself a scheme guard — that new render site will need its own
+  http(s)-only check before treating `link.path` as an `href`.

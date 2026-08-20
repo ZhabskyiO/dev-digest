@@ -1,17 +1,65 @@
 {
   "title": "Onboarding Tour",
-  "sections": "Sections",
-  "sectionCount": "{count} sections",
+  "headingPrefix": "Onboarding for ",
+  "subtitle": "Generated from index of {count} files · last refreshed {time}",
+  "onThisPage": "On this page",
   "regenerate": "Regenerate",
   "regenerating": "Regenerating…",
+  "shareLink": "Share link",
+  "shareCopied": "Link copied",
   "unknownError": "Unknown error",
+  "open": "Open",
+  "openFile": "Open {path} on GitHub",
+  "copyCommand": "Copy command: {command}",
+  "copied": "Copied",
+  "collapseSection": "Toggle {section} section",
+  "notice": {
+    "stale": "This tour was generated before the latest repository index update and may be out of date.",
+    "degraded": "This tour was generated from a partial index: {reason}",
+    "generating": "Regenerating this tour in the background — the previous version is shown below.",
+    "failed": "The last regeneration failed: {reason}"
+  },
+  "notIndexed": {
+    "title": "This repository has not been indexed yet",
+    "body": "The onboarding tour needs a repo-intel index to generate from. Re-sync the repository, then try again."
+  },
   "generate": {
     "title": "Generate onboarding tour",
-    "body": "DevDigest indexes the repo and specs, then writes a 5-section guided tour: overview, architecture, key modules, getting started, and conventions & gotchas.",
+    "body": "DevDigest reads the repository's index and its cloned source, then writes a six-section guided tour: Architecture overview, Critical paths, Routes & APIs, How to run locally, Guided reading path, and First tasks.",
     "cta": "Generate onboarding tour",
     "generating": "Generating…"
   },
   "loadError": {
     "title": "Couldn’t load the onboarding tour"
+  },
+  "sections": {
+    "architecture": "Architecture overview",
+    "critical_paths": "Critical paths",
+    "routes_and_apis": "Routes & APIs",
+    "local_setup": "How to run locally",
+    "reading_path": "Guided reading path",
+    "first_tasks": "First tasks"
+  },
+  "empty": {
+    "architecture": "No architecture overview was found in this repository.",
+    "critical_paths": "No critical paths were found in this repository.",
+    "routes_and_apis": "No frontend routes or API endpoints were found in this repository.",
+    "local_setup": "No runnable commands were found in this repository.",
+    "reading_path": "No guided reading path was found in this repository.",
+    "first_tasks": "No first tasks were found in this repository."
+  },
+  "emptyReason": {
+    "insufficient_grounding": "Not enough grounded evidence was found to fill this section.",
+    "facts_unavailable": "The index has no extracted endpoint facts for this repository, so entries are shown on file evidence alone."
+  },
+  "routes": {
+    "frontend": "Frontend routes",
+    "api": "API endpoints",
+    "itemsCapped": "Showing only the first matches found in this repository."
+  },
+  "complexity": {
+    "low": "Low complexity",
+    "medium": "Medium complexity",
+    "high": "High complexity"
   }
 }

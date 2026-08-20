@@ -1,0 +1,71 @@
+/**
+ * Onboarding HTTP module (T12) — the transport layer over T10's
+ * `OnboardingService`.
+ *
+ *   GET  /repos/:id/onboarding           → OnboardingTourResponse (AC-6,7,11,
+ *                                           24,25,29,30,41,48,52 — zero model
+ *                                           calls, see service.ts)
+ *   POST /repos/:id/onboarding/generate  → 202 OnboardingGenerateResponse
+ *                                           (AC-26, AC-27, AC-28, AC-31)
+ *
+ * Job-handler registration lives here: this plugin runs once at app boot and
+ * calls `OnboardingService.registerJobHandlers()` so the `onboarding.generate`
+ * job enqueued by `requestGeneration` has a handler to run against. Mirrors
+ * `repo-intel/routes.ts`'s `RepoIntelService.registerIndexJobHandlers()`
+ * pattern exactly.
+ */
+import type { FastifyInstance } from 'fastify';
+import type { ZodTypeProvider } from 'fastify-type-provider-zod';
+import { OnboardingTourResponse, OnboardingGenerateResponse } from '@devdigest/shared';
+import { getContext } from '../_shared/context.js';
+import { IdParams } from '../_shared/schemas.js';
+import { OnboardingService } from './service.js';
+
+export default async function onboardingRoutes(appBase: FastifyInstance) {
+  const app = appBase.withTypeProvider<ZodTypeProvider>();
+  const { container } = app;
+  // Register the onboarding.generate handler exactly once at module load.
+  // Using a local service here (instead of `container.onboarding`) is fine —
+  // the JobRunner stores the handler closure, not the service instance, and
+  // the lazy `container.onboarding` getter constructs its own service for
+  // request-time calls. Both share the same DB, so behaviour is identical.
+  const service = new OnboardingService(container);
+  service.registerJobHandlers();
+
+  app.get(
+    '/repos/:id/onboarding',
+    { schema: { params: IdParams, response: { 200: OnboardingTourResponse } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return container.onboarding.getTour(workspaceId, req.params.id);
+    },
+  );
+
+  app.post(
+    '/repos/:id/onboarding/generate',
+    {
+      schema: { params: IdParams, response: { 202: OnboardingGenerateResponse } },
+      // Defence in depth only — `app.inject()` skips @fastify/rate-limit in
+      // test mode (app.ts:95, server insight 2026-08-09), so this is never
+      // the correctness fence. The real fence is the service's in-flight
+      // dedupe (AC-27).
+      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    },
+    async (req, reply) => {
+      const { workspaceId } = await getContext(container, req);
+      reply.code(202);
+      // Unlike resync's POST /repos/:id/resync (repo-intel/routes.ts:43-65),
+      // whose response carries no zod `response` schema and so can degrade
+      // to an untyped `{status:'accepted', degraded:true, ...}` shape when
+      // its own inline `jobs.enqueue` call fails, `OnboardingGenerateResponse`
+      // is a strict `{state: 'generating', job: {id: string}}` literal with
+      // no degraded variant, and the enqueue call lives inside
+      // `OnboardingService.requestGeneration` (T10), not here. There is
+      // therefore no honest job id to fabricate on an enqueue failure — the
+      // handler is always registered at module load above, so the one
+      // realistic failure mode (a DB hiccup on the `jobs` insert) is a
+      // genuine error surfaced as-is rather than masked behind a fake 202.
+      return container.onboarding.requestGeneration(workspaceId, req.params.id);
+    },
+  );
+}

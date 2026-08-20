@@ -24,6 +24,22 @@ _None yet._
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-20 — In an RTL test asserting a `MermaidDiagram` rendered (or
+  didn't), NEVER assert on `container.querySelector("svg")` alone — every
+  `@devdigest/ui`/`vendor/ui/icons.tsx` lucide icon is *also* an `<svg>`, so a
+  card frame with a header icon (`GitBranch`, `Boxes`, `ChevronDown`, …)
+  always has at least one `svg` in the container regardless of whether the
+  diagram rendered. Mock `"mermaid"`'s `render` to resolve a string
+  containing a unique marker (e.g. `'<svg data-testid="mock-svg"></svg>'`)
+  and assert on `container.querySelector('[data-testid="mock-svg"]')`
+  instead — see `SectionCards/ArchitectureCard/ArchitectureCard.test.tsx`
+  and `SectionCards/RoutesAndApisCard/RoutesAndApisCard.test.tsx`'s
+  diagram-independence test. Also note: an INVALID chart string never
+  triggers `MermaidDiagram`'s dynamic `import("mermaid")` at all — the
+  `looksLikeMermaid()` regex check runs synchronously in the effect first —
+  so an "invalid diagram" assertion needs no `waitFor`/mock, only a VALID one
+  does (the dynamic import + `parse`/`render` resolve on a later microtask).
+
 - 2026-07-30 — `@testing-library/user-event` is **not** a dependency here (only
   `@testing-library/react` + `jest-dom`). Reaching for `userEvent.setup()` fails
   at import with `Failed to resolve import "@testing-library/user-event"`. Use
@@ -62,6 +78,39 @@ Quirks of dependencies, tooling, and the local environment.
   Relevant to any component that previews third-party markdown: don't assume
   "no `rehype-raw`" means the raw tag vanishes from the page — it means it
   never becomes a real DOM element or executes, not that it's invisible.
+
+- 2026-08-20 — jsdom implements neither `IntersectionObserver` nor
+  `Element.prototype.scrollIntoView` — a component that mounts an
+  `IntersectionObserver` for scrollspy (e.g. an "on this page" active-section
+  marker) throws `ReferenceError: IntersectionObserver is not defined` the
+  moment it renders in a `*.test.tsx`, before any assertion runs. Stub both at
+  module scope before the component under test is imported: a minimal
+  `class MockIntersectionObserver { observe = vi.fn(); disconnect = vi.fn(); … }`
+  assigned to `global.IntersectionObserver`, and `Element.prototype.scrollIntoView
+  = vi.fn()`. The mock's `observe` is intentionally a no-op — nothing in jsdom
+  ever fires a real intersection callback, so an "active section" driven purely
+  by the observer stays stuck at its initial value for the whole test. Design
+  the click-to-navigate handler to set the active state directly (not only via
+  the observer callback) so "activating a TOC entry moves the marker" is
+  provable without simulating scroll — see
+  `app/repos/[repoId]/onboarding/_components/OnboardingTourView/_components/TableOfContents/TableOfContents.tsx`'s
+  `onActivate` (sets state immediately, then calls `scrollIntoView`) and its
+  test file's `vi.spyOn(target, "scrollIntoView")` pattern.
+
+- 2026-08-20 — The literal grep an implementation task's Acceptance section
+  hands you (e.g. `grep -rn "\"Onboarding for\|ON THIS PAGE" client/src/app/repos`
+  to prove AC-42's catalogue-only rule) matches **comments and test-assertion
+  literals**, not just live JSX — a docstring reading `the "Onboarding for
+  <repo>" title` or a test's `expect(x).toBe("Onboarding for payments-api")`
+  both trip it, even though neither is a hardcoded user-facing string in the
+  sense AC-42 cares about. Fix by rephrasing the comment to avoid the exact
+  substring, and by building the test's expected value from the imported
+  messages fixture (`` `${messages.headingPrefix}payments-api` ``) instead of
+  restating the English text — the same "sourced from the catalogue, not
+  restated" pattern T9's `LocalSetupCard.test.tsx` already uses for its empty-
+  reason assertion. Run the grep against your own owned files before calling
+  the task done; don't assume passing tests means the literal verification
+  command also passes.
 
 ## Recurring Errors & Fixes
 

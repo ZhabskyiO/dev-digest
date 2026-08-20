@@ -74,6 +74,42 @@ const EnvSchema = z.object({
   // Character cap applied when rendering a document preview in the UI (not
   // the run-time injection cap above, which is PROJECT_CONTEXT_DOC_CHAR_CAP).
   PROJECT_CONTEXT_PREVIEW_CHARS: z.coerce.number().int().positive().default(16000),
+
+  // Onboarding tour generation — the single structured model call that builds
+  // a repo's onboarding tour (AC-5: at most one call plus one repair
+  // re-prompt). All defaulted; no consumer may hardcode these numbers.
+  // Token budget for the assembled generation prompt (repo skeleton +
+  // excerpts + endpoint facts, etc.).
+  ONBOARDING_PROMPT_TOKEN_BUDGET: z.coerce.number().int().positive().default(28000),
+  // Per-file character cap applied to a key-file excerpt before injection.
+  ONBOARDING_EXCERPT_CHAR_CAP: z.coerce.number().int().positive().default(4000),
+  // Max number of key-file excerpts included in the generation prompt.
+  ONBOARDING_MAX_EXCERPT_FILES: z.coerce.number().int().positive().default(10),
+  // Max number of endpoint facts (from repo-intel) included in the prompt.
+  ONBOARDING_MAX_ENDPOINT_FACTS: z.coerce.number().int().positive().default(200),
+  // AC-10's threshold: a section with fewer grounded items than this after
+  // dropping ungrounded ones is stored empty with an `insufficient_grounding`
+  // reason instead of being backfilled.
+  ONBOARDING_MIN_SECTION_ITEMS: z.coerce.number().int().positive().default(1),
+  // Max number of critical-path entries in the generated tour.
+  ONBOARDING_MAX_CRITICAL_PATHS: z.coerce.number().int().positive().default(8),
+  // Max number of command attestations (from package.json scripts, etc.).
+  ONBOARDING_MAX_COMMANDS: z.coerce.number().int().positive().default(12),
+  // Max number of entries in the suggested reading path.
+  ONBOARDING_MAX_READING_PATH: z.coerce.number().int().positive().default(7),
+  // Max number of suggested first tasks.
+  ONBOARDING_MAX_FIRST_TASKS: z.coerce.number().int().positive().default(5),
+  // Max number of frontend routes listed in the tour.
+  ONBOARDING_MAX_FRONTEND_ROUTES: z.coerce.number().int().positive().default(12),
+  // Max number of API endpoints listed in the tour.
+  ONBOARDING_MAX_API_ENDPOINTS: z.coerce.number().int().positive().default(24),
+  // Timeout for the structured generation model call. Kept comfortably below
+  // JobRunner's own 120s job timeout (platform/jobs.ts) — a generation
+  // allowed to run longer than the job would be aborted by JobRunner and then
+  // retried, doubling cost. Never raise this above the job timeout.
+  ONBOARDING_GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+  // Language the generated tour is written in.
+  ONBOARDING_LANGUAGE: z.string().min(1).default('English'),
 });
 
 export type AppConfig = {
@@ -146,6 +182,41 @@ export type AppConfig = {
    * injection. See PROJECT_CONTEXT_PREVIEW_CHARS default.
    */
   projectContextPreviewChars: number;
+  /** Token budget for the onboarding-tour generation prompt. See ONBOARDING_PROMPT_TOKEN_BUDGET default. */
+  onboardingPromptTokenBudget: number;
+  /** Per-file character cap applied to a key-file excerpt. See ONBOARDING_EXCERPT_CHAR_CAP default. */
+  onboardingExcerptCharCap: number;
+  /** Max number of key-file excerpts in the generation prompt. See ONBOARDING_MAX_EXCERPT_FILES default. */
+  onboardingMaxExcerptFiles: number;
+  /** Max number of endpoint facts included in the generation prompt. See ONBOARDING_MAX_ENDPOINT_FACTS default. */
+  onboardingMaxEndpointFacts: number;
+  /**
+   * AC-10's minimum-items threshold: a section left with fewer grounded
+   * items than this after dropping ungrounded ones is stored empty with an
+   * `insufficient_grounding` reason rather than backfilled. See
+   * ONBOARDING_MIN_SECTION_ITEMS default.
+   */
+  onboardingMinSectionItems: number;
+  /** Max number of critical-path entries in the generated tour. See ONBOARDING_MAX_CRITICAL_PATHS default. */
+  onboardingMaxCriticalPaths: number;
+  /** Max number of command attestations in the generated tour. See ONBOARDING_MAX_COMMANDS default. */
+  onboardingMaxCommands: number;
+  /** Max number of entries in the suggested reading path. See ONBOARDING_MAX_READING_PATH default. */
+  onboardingMaxReadingPath: number;
+  /** Max number of suggested first tasks. See ONBOARDING_MAX_FIRST_TASKS default. */
+  onboardingMaxFirstTasks: number;
+  /** Max number of frontend routes listed in the tour. See ONBOARDING_MAX_FRONTEND_ROUTES default. */
+  onboardingMaxFrontendRoutes: number;
+  /** Max number of API endpoints listed in the tour. See ONBOARDING_MAX_API_ENDPOINTS default. */
+  onboardingMaxApiEndpoints: number;
+  /**
+   * Timeout for the onboarding-tour structured generation model call.
+   * Deliberately below JobRunner's 120s job timeout (platform/jobs.ts) — see
+   * ONBOARDING_GENERATION_TIMEOUT_MS default and its doc comment above.
+   */
+  onboardingGenerationTimeoutMs: number;
+  /** Language the generated onboarding tour is written in. See ONBOARDING_LANGUAGE default. */
+  onboardingLanguage: string;
 };
 
 /**
@@ -187,5 +258,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     projectContextMaxDocs: parsed.PROJECT_CONTEXT_MAX_DOCS,
     projectContextMaxFileBytes: parsed.PROJECT_CONTEXT_MAX_FILE_BYTES,
     projectContextPreviewChars: parsed.PROJECT_CONTEXT_PREVIEW_CHARS,
+    onboardingPromptTokenBudget: parsed.ONBOARDING_PROMPT_TOKEN_BUDGET,
+    onboardingExcerptCharCap: parsed.ONBOARDING_EXCERPT_CHAR_CAP,
+    onboardingMaxExcerptFiles: parsed.ONBOARDING_MAX_EXCERPT_FILES,
+    onboardingMaxEndpointFacts: parsed.ONBOARDING_MAX_ENDPOINT_FACTS,
+    onboardingMinSectionItems: parsed.ONBOARDING_MIN_SECTION_ITEMS,
+    onboardingMaxCriticalPaths: parsed.ONBOARDING_MAX_CRITICAL_PATHS,
+    onboardingMaxCommands: parsed.ONBOARDING_MAX_COMMANDS,
+    onboardingMaxReadingPath: parsed.ONBOARDING_MAX_READING_PATH,
+    onboardingMaxFirstTasks: parsed.ONBOARDING_MAX_FIRST_TASKS,
+    onboardingMaxFrontendRoutes: parsed.ONBOARDING_MAX_FRONTEND_ROUTES,
+    onboardingMaxApiEndpoints: parsed.ONBOARDING_MAX_API_ENDPOINTS,
+    onboardingGenerationTimeoutMs: parsed.ONBOARDING_GENERATION_TIMEOUT_MS,
+    onboardingLanguage: parsed.ONBOARDING_LANGUAGE,
   };
 }

@@ -34,6 +34,7 @@ import type {
   BlastChangedSymbol,
   BlastOptions,
   BlastResult,
+  EndpointFactRow,
   LineRange,
   FileRankRow,
   IndexResult,
@@ -924,6 +925,20 @@ export class RepoIntelService implements RepoIntel {
       paths.push(chain);
     }
     return paths;
+  }
+
+  /**
+   * Repository-wide endpoint facts — T4 (onboarding tour generation input,
+   * AC-52/AC-3). Degraded array contract: `[]` when the flag is off; the
+   * repository itself already returns `[]` for a repo with no indexed
+   * endpoint facts (an unindexed clone, or one that genuinely registers no
+   * routes), which is the `facts_unavailable` case downstream, not a bug
+   * here.
+   */
+  async getEndpointFacts(repoId: string, limit: number = 500): Promise<EndpointFactRow[]> {
+    if (!this.container.config.repoIntelEnabled) return [];
+    const rows = await this.repo.listFileFacts(repoId, limit);
+    return rows.map((r) => ({ file: r.filePath, endpoints: r.endpoints }));
   }
 }
 

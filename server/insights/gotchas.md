@@ -30,6 +30,42 @@ most-skipped and most-valuable section: if something failed, record it here.**
   rephrase to avoid the sequence entirely. Same class of footgun as the
   unescaped-backtick-in-template-literal entry below (2026-08-04), different
   trigger character.
+- 2026-08-20 — `repo-intel/routes.ts`'s "return 202 even when `enqueue`
+  fails" resync precedent (`repo-intel/routes.ts:43-65`) does NOT transplant
+  to a route whose 202 body has a strict zod `response` schema. Resync's
+  `POST /repos/:id/resync` gets away with degrading to an untyped
+  `{status:'accepted', degraded:true, reason:'no_handler'}` because that
+  route declares no `response` schema at all AND calls `jobs.enqueue`
+  directly in the route handler, where the try/catch can live. Onboarding's
+  `POST /repos/:id/onboarding/generate` (`modules/onboarding/routes.ts`, T12)
+  has neither: `OnboardingGenerateResponse` is a strict
+  `{state: z.literal('generating'), job: {id: z.string()}}` literal with no
+  degraded variant, and its `jobs.enqueue` call lives inside
+  `OnboardingService.requestGeneration` (T10, a separate task's owned file),
+  not the route. There is no honest `job.id` to fabricate on an enqueue
+  failure without either violating the contract or lying to the client, so
+  the route lets that (in practice near-unreachable, since the handler is
+  always registered at module load first) failure surface as a genuine
+  error instead. General lesson: before copying a "return success anyway"
+  precedent from one route to another, check whether the target route's
+  response is contract-typed (no degraded shape available) and whether the
+  fallible call is even reachable from the route file at all.
+- 2026-08-20 — When a `z.discriminatedUnion('kind', [...])` arm shares a field
+  (e.g. `links`) across every arm and a spec's acceptance test parses a
+  *minimal* fixture that omits that shared field, the shared field must be
+  `.nullish()` — not required — even though the test is really targeting a
+  different field (e.g. proving `diagram` isn't representable on a non-diagram
+  kind). Making the shared field required makes that same minimal fixture fail
+  with a misleading `links: Required` error that has nothing to do with what
+  the test is checking, and the failure only shows up when you actually run
+  the acceptance one-liner, not from reading the schema. Hit building
+  `OnboardingSection` (`server/src/vendor/shared/contracts/knowledge.ts`) for
+  the onboarding-tour plan's AC-13 check
+  (`OnboardingSection.parse({kind:'first_tasks', title:'T', items:[]})` must
+  parse) — `links: z.array(OnboardingLink)` on every arm broke it until
+  changed to `.nullish()`. General rule: when an acceptance criterion supplies
+  an exact literal fixture, treat every field the fixture omits as needing
+  `.nullish()`/`.optional()`, not just the field the AC text names.
 - 2026-08-08 — NEVER give a field a Zod `.default([])` in a contract that is
   passed as `schema:` to `llm.completeStructured`. `toJsonSchema`
   (`platform/structured.ts` → reviewer-core `llm/structured.ts`, which wraps

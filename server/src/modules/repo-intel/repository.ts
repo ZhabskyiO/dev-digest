@@ -576,6 +576,43 @@ export class RepoIntelRepository {
     }));
   }
 
+  /**
+   * Repository-wide file facts carrying at least one endpoint — T4
+   * (onboarding tour). Unlike `getFileFacts` (scoped to a caller-supplied
+   * file list, reachable only via `getBlastRadius`'s changed-file set), this
+   * reads across the WHOLE repo with no file filter, ordered by `file_path`
+   * for deterministic output and capped by `limit`.
+   *
+   * `endpoints`/`crons` are jsonb, so the selected value is `unknown` at the
+   * type level — cast the same way `getFileFacts` above does. `file_facts`
+   * is written only for rows with at least one endpoint or cron
+   * (see pipeline persistence), so filtering to a non-empty `endpoints`
+   * array here is a real filter, not a no-op.
+   */
+  async listFileFacts(
+    repoId: string,
+    limit: number,
+  ): Promise<{ filePath: string; endpoints: string[] }[]> {
+    const rows = await this.db
+      .select({
+        filePath: t.fileFacts.filePath,
+        endpoints: t.fileFacts.endpoints,
+      })
+      .from(t.fileFacts)
+      .where(
+        and(
+          eq(t.fileFacts.repoId, repoId),
+          sql`jsonb_array_length(${t.fileFacts.endpoints}) > 0`,
+        ),
+      )
+      .orderBy(asc(t.fileFacts.filePath))
+      .limit(limit);
+    return rows.map((r) => ({
+      filePath: r.filePath,
+      endpoints: (r.endpoints as string[]) ?? [],
+    }));
+  }
+
   /** Repo-map cache read by PK. */
   async getRepoMapCache(
     repoId: string,

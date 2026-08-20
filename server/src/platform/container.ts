@@ -35,6 +35,7 @@ import { JiraTicketProvider } from '../adapters/tickets/jira.js';
 import { LinearTicketProvider } from '../adapters/tickets/linear.js';
 import { ProjectContextService } from '../modules/project-context/service.js';
 import { ProjectContextRepository } from '../modules/project-context/repository.js';
+import { OnboardingService } from '../modules/onboarding/service.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -78,6 +79,10 @@ export interface ContainerOverrides {
    *  comparison) — tests of that builder inject a fake here instead of a
    *  real Postgres. */
   projectContextRepo?: ProjectContextRepository;
+  /** T12 (onboarding routes) — tests inject a fake `OnboardingService` so
+   *  route-smoke tests stay hermetic (no DB, no clone on disk, no model
+   *  call), mirroring `ContainerOverrides.projectContext`. */
+  onboarding?: OnboardingService;
 }
 
 export class Container {
@@ -107,6 +112,7 @@ export class Container {
   private _tickets?: TicketProvider;
   private _projectContext?: ProjectContextService;
   private _projectContextRepo?: ProjectContextRepository;
+  private _onboarding?: OnboardingService;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -164,6 +170,16 @@ export class Container {
   get projectContextRepo(): ProjectContextRepository {
     if (this.overrides.projectContextRepo) return this.overrides.projectContextRepo;
     return (this._projectContextRepo ??= new ProjectContextRepository(this.db));
+  }
+
+  /**
+   * Onboarding-tour application service (T12 wiring for T10's
+   * `OnboardingService`). Tests inject a fake via
+   * `ContainerOverrides.onboarding`.
+   */
+  get onboarding(): OnboardingService {
+    if (this.overrides.onboarding) return this.overrides.onboarding;
+    return (this._onboarding ??= new OnboardingService(this));
   }
 
   get codeIndex(): CodeIndex {

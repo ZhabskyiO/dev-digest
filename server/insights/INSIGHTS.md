@@ -38,6 +38,21 @@ Approaches and solutions that worked here and are worth reusing.
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-20 — `JobRunner`'s `JobHandler` signature (`platform/jobs.ts:16`,
+  `(payload, ctx: { jobId }) => Promise<void>`) never receives the
+  `workspaceId` passed to `enqueue(workspaceId, kind, payload)` — it is
+  written to the `jobs` row but NOT forwarded to the handler. A handler that
+  needs it (e.g. `resolveFeatureModel(container, workspaceId, ...)`, which is
+  workspace-scoped) must recover it another way. `modules/onboarding/
+  service.ts`'s job handler does this by fetching the repo row via
+  `container.reviewRepo.getRepo(repoId)` first (needed anyway for
+  `fullName`/`clonePath`) and reading `.workspaceId` off it — this also kept
+  the job's enqueue payload exactly `{ repoId }` as the plan specified,
+  instead of duplicating `workspaceId` into the payload. `container.reviewRepo
+  .getRepo(repoId)` (unlike `getRepoByFullName`, which IS workspace-scoped) is
+  the established cross-module way to read a `repos` row by id without
+  touching `db/schema` directly — `modules/project-context/service.ts:44`
+  (`getWorkspaceRepo`) is the other precedent.
 - 2026-08-11 — The repo-intel index is built from the repo's DEFAULT BRANCH
   only — `repo_index_state` is one row per repo with no sha dimension, and
   `resyncRepo` fetches `origin/<defaultBranch>`. So NOTHING a pull request adds
@@ -307,6 +322,64 @@ Conventions and architectural decisions specific to this repo.
   rule: when a service method is reachable from more than one route/module,
   a security check belongs on the method itself — a route-level guard only
   protects the route that happens to have one.
+
+- 2026-08-20 — `groundTour`'s `critical_paths` grounding (`modules/onboarding/
+  helpers.ts`, T8) checks membership in the `rank` argument ONLY — it never
+  falls back to `evidence.fileExists` the way `reading_path`/`first_tasks` do.
+  This is deliberate: AC-16 requires the STORED order to be derived from rank
+  (never the model's order), and a path present in the clone but absent from
+  `rank` has no legitimate derived position, so keeping it would mean silently
+  falling back to the model's order for that one item — exactly what AC-16
+  forbids. The consequence for T10 (the facade that builds `rank` from
+  `repoIntel.getTopFilesByRank`/`getCriticalPaths`): a `rank` list that's too
+  narrow (e.g. only the top 5 files) will make otherwise-legitimate,
+  real critical-path candidates the model cites vanish from the tour
+  entirely, with no `empty_reason` explaining why beyond the generic
+  `insufficient_grounding` if too few survive. Pass a `rank` that reasonably
+  covers the repo, not a minimal top-N.
+
+- 2026-08-20 — `groundTour`'s AC-52 endpoint-fact check (`modules/onboarding/
+  helpers.ts`, T8) applies ONLY to `routes_and_apis` items with
+  `surface === 'api'`. `frontend` entries are grounded on declaring-file
+  existence alone (AC-51) and are NEVER checked against `endpointFacts` —
+  those facts are backend "METHOD /path" strings extracted from Fastify-style
+  route registrations and would never match a frontend route regardless of
+  its validity. Reading AC-52's "API entry" as "any `routes_and_apis` entry"
+  would incorrectly drop every frontend route whenever the repo has ANY
+  endpoint facts at all.
+
+- 2026-08-20 — `groundTour`'s AC-22 complexity check (`modules/onboarding/
+  helpers.ts`, T8) re-validates `item.complexity` against the permitted enum
+  at RUNTIME (`PERMITTED_COMPLEXITY.has(item.complexity as string)`) despite
+  `OnboardingFirstTask.complexity` being statically typed as the closed union
+  `'low' | 'medium' | 'high'` — because the value reaching `groundTour` is
+  ultimately LLM structured output, which is not guaranteed to actually
+  respect the schema it was asked to follow at runtime even though the
+  TypeScript type (correctly, for a well-formed caller) says otherwise. Same
+  general lesson as the `.default([])`-in-structured-output gotcha
+  (`gotchas.md`, 2026-08-08): a zod-inferred type describes the INTENDED
+  shape of model output, not a runtime guarantee — any grounding/validation
+  layer sitting between a structured-output call and storage needs its own
+  runtime check for the exact things its acceptance criteria care about, cast
+  or no cast.
+
+- 2026-08-20 — `OnboardingLink` (`{label, path}`) sits on EVERY onboarding
+  section, including `architecture` (which has no item array at all), and is
+  a "cited file path" just like `critical_paths`/`reading_path` entries — AC-8
+  ("drop any cited file path neither indexed nor resolvable in the clone") is
+  written broadly enough to cover it, even though the T8 task brief's ordered
+  bullet list for `groundTour` only enumerated the five typed item arrays and
+  never mentioned `links`. `groundTour` (`modules/onboarding/helpers.ts`) now
+  grounds `links` on all six kinds via a shared `groundLinks()` (rank OR
+  file/dir-exists, directory allowed like AC-23) — deliberately NOT wired
+  into `emptyReasonFor`/AC-10, since losing every link on an otherwise
+  well-grounded section must not mark it `insufficient_grounding`. General
+  lesson: when a plan enumerates specific fields to ground/validate but the
+  underlying AC text is written in terms of a broader category ("any cited
+  file path", not "any item in these five arrays"), check the full contract
+  for every field of that shape before treating the enumerated list as
+  exhaustive — an omission in the plan's bullet list is not evidence of a
+  deliberate carve-out.
 
 ## Session Notes
 
