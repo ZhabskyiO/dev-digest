@@ -44,6 +44,37 @@ most-skipped and most-valuable section: if something failed, record it here.**
   `unknown as ProjectContextRepository`/`unknown as \{ repo:` across `test/`
   for every file that overrides it, not just the one this task's Acceptance
   names.
+  └ 2026-08-20 recurrence, one layer up: adding a required call
+    (`this.container.projectContext.skillContext(id)`) to `SkillsService.update`
+    (Finding 3's rollback snapshot, pre-PR gate) broke `test/skills-routes.test.ts`
+    the same way — a `{ setSkillContext } as unknown as ProjectContextService`
+    override with no `skillContext` field. Same rule, one type up the chain:
+    before adding a call the SERVICE makes on `container.projectContext`, grep
+    `unknown as ProjectContextService` across `test/` too, not just
+    `unknown as ProjectContextRepository`.
+- 2026-08-20 — Fixing the "`routes.ts` constructs its own service instead of
+  using `container.<x>`" DI smell (swapping `new OnboardingService(container);
+  service.registerJobHandlers();` for `container.onboarding
+  .registerJobHandlers();` in `modules/onboarding/routes.ts`) breaks EVERY
+  test in `test/onboarding-routes.test.ts` at `buildApp()` time, not just the
+  ones exercising the job path — `registerJobHandlers()` now runs
+  synchronously during plugin *registration* (boot), against whatever
+  `ContainerOverrides.onboarding` double the test supplied, and every one of
+  those doubles was a bare `{ getTour }` / `{ requestGeneration }` object
+  cast `as unknown as OnboardingService` with no `registerJobHandlers`
+  method — `TypeError: registerJobHandlers is not a function` on the very
+  first `buildApp()` call. Same root cause as the entry directly above
+  (an `as unknown as X` cast suppresses the missing-method check), but a
+  distinct trigger worth naming on its own: this class of fix touches EVERY
+  call site that overrides the service via `ContainerOverrides`, not just the
+  test the acceptance criteria names, because the newly-added call fires at
+  boot for literally every test that builds the app with that override. Fix:
+  add a `registerJobHandlers: vi.fn()` (or equivalent) to every override
+  object in the file, then grep `ContainerOverrides.<name>` across `test/`
+  for any other file doing the same partial-object override before calling
+  the task done. Generalizes to any module whose `routes.ts` registers a job
+  handler via `container.<x>` at plugin load (`repo-intel/routes.ts` has the
+  identical shape and would hit this the moment it's fixed the same way).
 - 2026-08-20 — `repo-intel/routes.ts`'s "return 202 even when `enqueue`
   fails" resync precedent (`repo-intel/routes.ts:43-65`) does NOT transplant
   to a route whose 202 body has a strict zod `response` schema. Resync's

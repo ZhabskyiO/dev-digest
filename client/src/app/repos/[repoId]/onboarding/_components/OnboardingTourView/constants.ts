@@ -7,14 +7,14 @@ import type { OnboardingSectionKind } from "@devdigest/shared";
  * tour, but the client re-asserts it defensively here rather than trusting
  * `tour.sections`' own array order (see `orderedSections` in ./helpers).
  */
-export const SECTION_ORDER: OnboardingSectionKind[] = [
+export const SECTION_ORDER: readonly OnboardingSectionKind[] = [
   "architecture",
   "critical_paths",
   "routes_and_apis",
   "local_setup",
   "reading_path",
   "first_tasks",
-];
+] as const;
 
 /**
  * The reading column caps at the same width the other repo-scoped pages use
@@ -26,5 +26,8 @@ export const CONTENT_MAX_WIDTH = 1240;
 /** Skeleton rows shown while the tour is loading. */
 export const SKELETON_CARD_COUNT = 3;
 
-/** How long the "copied" confirmation shows on Share link before reverting. */
-export const SHARE_COPIED_RESET_MS = 1500;
+/** How long a "copied"/"copied to clipboard" confirmation shows before
+ *  reverting — shared by Share link (TourHeader) and each LocalSetupCard row
+ *  so the two independent copy affordances don't carry two separately
+ *  hand-tuned literals for the same UX timing. */
+export const COPY_RESET_MS = 1500;

@@ -36,7 +36,7 @@ export function DriftCompare({
       <div style={s.lines}>
         {lines
           ? lines.map((line, i) => (
-              <div key={i} style={s.lineFor(line.type)}>
+              <div key={`${line.type}-${i}-${line.text.slice(0, 32)}`} style={s.lineFor(line.type)}>
                 <span className="mono" style={s.signFor(line.type)}>
                   {line.type === "added" ? "+" : line.type === "removed" ? "−" : ""}
                 </span>
@@ -46,7 +46,7 @@ export function DriftCompare({
               </div>
             ))
           : current.split("\n").map((text, i) => (
-              <div key={i} style={s.lineFor("context")}>
+              <div key={`context-${i}-${text.slice(0, 32)}`} style={s.lineFor("context")}>
                 <span className="mono" style={s.signFor("context")} />
                 <span className="mono" style={s.text}>
                   {text || " "}

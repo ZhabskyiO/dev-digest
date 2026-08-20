@@ -69,4 +69,23 @@ describe("SectionCard", () => {
       screen.getByText("Not enough grounded evidence was found to fill this section."),
     ).toBeInTheDocument();
   });
+
+  it("falls back to the section's own default reason line for an unrecognized empty_reason code (M5)", () => {
+    renderWithIntl(
+      <SectionCard kind="critical_paths" icon="Activity" isEmpty emptyReasonCode="some_future_server_code">
+        <p>never shown</p>
+      </SectionCard>,
+    );
+    expect(screen.getByText("No critical paths were found in this repository.")).toBeInTheDocument();
+    expect(screen.queryByText(/onboarding\.emptyReason\./)).not.toBeInTheDocument();
+  });
+
+  it("exposes the section title as a real heading, reachable independently of the toggle button's own label (M7)", () => {
+    renderWithIntl(
+      <SectionCard kind="architecture" icon="GitBranch" isEmpty={false}>
+        <p>body content</p>
+      </SectionCard>,
+    );
+    expect(screen.getByRole("heading", { name: "Architecture overview" })).toBeInTheDocument();
+  });
 });

@@ -13,6 +13,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assemblePrompt } from '@devdigest/reviewer-core';
 import { resolveProjectContext, type StepLog } from '../src/modules/reviews/prompt-context.js';
+import { planBudget } from '../src/modules/_shared/context-budget.js';
 import { MockLLMProvider } from '../src/adapters/mocks.js';
 import type { Container } from '../src/platform/container.js';
 import type { EffectiveProjectContext, EffectiveProjectContextDoc } from '@devdigest/shared';
@@ -234,5 +235,60 @@ describe('resolveProjectContext (T15)', () => {
     const result = await resolveProjectContext(container, AGENT_ID, REPO_ID, log);
     expect(result.bodies).toEqual([]);
     expect(result.details).toEqual([{ path: 'specs/a.md', tokens: 10, outcome: 'missing' }]);
+  });
+
+  describe('Finding 1 (pre-PR gate, medium): budget agreement with a mixed-repo set', () => {
+    // Regression for: this function used to filter wrong_repo/missing OUT of
+    // the candidate list BEFORE budgeting, while
+    // `ProjectContextService.effectiveContext`'s own `dropped_paths` preview
+    // (AC-40) budgets over the FULL effective set. That let a wrong-repo
+    // document's tokens silently "free up" budget space at run time that the
+    // preview had already counted as spent — so a document the UI showed as
+    // "would be dropped" could actually get injected, or vice versa.
+    //
+    // Fixture: A(repo, 5 tok) then B(OTHER repo, 4 tok) then C(repo, 2 tok),
+    // budget 7. A fits (used=5). B pushes 5+4=9 > 7 — from `planBudget`'s
+    // "stop at first overflow" rule (AC-23), B AND everything after it
+    // (i.e. C too) are dropped — even though C's own 2 tokens would have fit
+    // in the 2 tokens A left free. That is the load-bearing assertion: a
+    // pre-fix implementation that excluded B (wrong_repo) from the budget
+    // input before planning would find 5 + 2 = 7 <= 7 and inject C instead.
+    it('budgets over the FULL effective set — a wrong-repo document does not free up budget for one after it', async () => {
+      await writeFile(path.join(clone, 'specs', 'a.md'), 'body-a', 'utf8');
+      await writeFile(path.join(clone, 'specs', 'c.md'), 'body-c', 'utf8');
+      const documents = [
+        doc({ path: 'specs/a.md', tokens: 5 }),
+        doc({ repo_id: OTHER_REPO_ID, path: 'specs/wrong.md', tokens: 4 }),
+        doc({ path: 'specs/c.md', tokens: 2 }),
+      ];
+      const container = fakeContainer({ documents, clonePath: clone, budgetTokens: 7 });
+
+      // The AC-40 preview: the exact same `planBudget` call
+      // `ProjectContextService.effectiveContext` makes over the full
+      // (unfiltered) effective set.
+      const preview = planBudget(documents, 7);
+      expect(preview.dropped.map((d) => d.path)).toEqual(['specs/wrong.md', 'specs/c.md']);
+
+      const result = await resolveProjectContext(container, AGENT_ID, REPO_ID, log);
+
+      expect(result.bodies).toEqual(['body-a']);
+      expect(result.specsRead).toEqual(['specs/a.md']);
+      expect(result.details).toEqual([
+        { path: 'specs/a.md', tokens: 5, outcome: 'injected' },
+        { path: 'specs/wrong.md', tokens: 4, outcome: 'wrong_repo' },
+        { path: 'specs/c.md', tokens: 2, outcome: 'dropped_over_budget' },
+      ]);
+
+      // The load-bearing agreement check: every document this run marks
+      // `dropped_over_budget` is also in the preview's `dropped` list for
+      // the identical input — the two can never name different documents.
+      const runDroppedOverBudget = result.details
+        .filter((d) => d.outcome === 'dropped_over_budget')
+        .map((d) => d.path);
+      const previewDropped = preview.dropped.map((d) => d.path);
+      for (const path of runDroppedOverBudget) {
+        expect(previewDropped).toContain(path);
+      }
+    });
   });
 });

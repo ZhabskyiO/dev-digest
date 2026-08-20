@@ -30,7 +30,7 @@ import {
 } from "./_components/SectionCards";
 import { TourHeader } from "./_components/TourHeader";
 import { TableOfContents } from "./_components/TableOfContents";
-import { SHARE_COPIED_RESET_MS, SKELETON_CARD_COUNT } from "./constants";
+import { COPY_RESET_MS, SKELETON_CARD_COUNT } from "./constants";
 import { buildShareUrl, orderedSections } from "./helpers";
 import { s } from "./styles";
 
@@ -43,7 +43,14 @@ import { s } from "./styles";
  * without waiting on the next observer tick.
  */
 function useActiveSection(kinds: OnboardingSectionKind[]) {
-  const [active, setActive] = React.useState<OnboardingSectionKind | null>(kinds[0] ?? null);
+  // `kinds` is always `[]` on the render that mounts this hook (the tour is
+  // still loading), so a one-shot `useState(kinds[0] ?? null)` initializer
+  // can never see a real first section — it locks in `null` forever unless
+  // an IntersectionObserver tick later lands inside the narrow scrollspy
+  // band. Track only the observer/click-driven override in state and derive
+  // the "default to the first section" fallback at READ time instead, so it
+  // re-evaluates once `kinds` is actually populated.
+  const [active, setActive] = React.useState<OnboardingSectionKind | null>(null);
   const kindsKey = kinds.join("|");
 
   React.useEffect(() => {
@@ -70,7 +77,8 @@ function useActiveSection(kinds: OnboardingSectionKind[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kindsKey]);
 
-  return [active, setActive] as const;
+  const activeKind = active ?? kinds[0] ?? null;
+  return [activeKind, setActive] as const;
 }
 
 export function OnboardingTourView({ repoId }: { repoId: string }) {
@@ -89,8 +97,15 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
 
   const [failedDismissed, setFailedDismissed] = React.useState(false);
   const [shareCopied, setShareCopied] = React.useState(false);
+  const shareResetTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const crumb = [{ label: activeRepo?.full_name ?? repoId }, { label: t("title") }];
+  React.useEffect(() => {
+    return () => {
+      if (shareResetTimeout.current !== null) clearTimeout(shareResetTimeout.current);
+    };
+  }, []);
+
+  const crumb = [{ label: activeRepo?.full_name ?? repoId, mono: true }, { label: t("title") }];
 
   if (repoNotFound) {
     return (
@@ -100,11 +115,25 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
     );
   }
 
+  // `navigator.clipboard` is `undefined` over plain HTTP / a document that
+  // isn't focused, and `writeText` can reject (permission denied) even when
+  // it exists — either case must never flip the button to "Link copied"
+  // when nothing actually reached the clipboard, and a rejection must never
+  // become an unhandled promise rejection.
   async function handleShare() {
+    if (!navigator.clipboard) return;
     const url = buildShareUrl(window.location.origin, pathname ?? "", activeKind);
-    await navigator.clipboard?.writeText(url);
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      return;
+    }
     setShareCopied(true);
-    window.setTimeout(() => setShareCopied(false), SHARE_COPIED_RESET_MS);
+    if (shareResetTimeout.current !== null) clearTimeout(shareResetTimeout.current);
+    shareResetTimeout.current = setTimeout(() => {
+      setShareCopied(false);
+      shareResetTimeout.current = null;
+    }, COPY_RESET_MS);
   }
 
   // A new generation attempt must always be able to surface its own failure
@@ -138,7 +167,7 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
         ) : isError ? (
           <ErrorState
             title={t("loadError.title")}
-            body={error instanceof ApiError ? error.message : undefined}
+            body={error instanceof ApiError ? error.message : t("unknownError")}
             onRetry={() => refetch()}
           />
         ) : tour ? (
@@ -194,7 +223,11 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
         ) : data?.state === "not_indexed" ? (
           <EmptyState icon="GitBranch" title={t("notIndexed.title")} body={t("notIndexed.body")} />
         ) : data?.state === "generating" ? (
-          <EmptyState icon="RefreshCw" title={t("generate.generating")} body={t("notice.generating")} />
+          // No stored tour exists yet — this is a FIRST generation, not a
+          // regeneration, so `notice.generating` ("the previous version is
+          // shown below") would be describing a previous version that does
+          // not exist and nothing that renders underneath it.
+          <EmptyState icon="RefreshCw" title={t("generate.generating")} body={t("generate.generatingBody")} />
         ) : (
           <EmptyState
             icon="Sparkles"

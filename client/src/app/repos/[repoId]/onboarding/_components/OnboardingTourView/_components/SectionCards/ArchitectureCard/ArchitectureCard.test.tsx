@@ -74,4 +74,16 @@ describe("ArchitectureCard", () => {
       screen.getByText("No architecture overview was found in this repository."),
     ).toBeInTheDocument();
   });
+
+  it("never renders a model-written markdown link as a live <a> (M6)", () => {
+    const { container } = renderWithIntl(
+      <ArchitectureCard
+        section={architectureSection({
+          body: "See [click me](https://attacker.example) for docs.",
+        })}
+      />,
+    );
+    expect(container.querySelector("a")).toBeNull();
+    expect(screen.getByText(/click me/)).toBeInTheDocument();
+  });
 });

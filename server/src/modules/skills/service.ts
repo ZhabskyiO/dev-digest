@@ -127,28 +127,68 @@ export class SkillsService {
    * `workspaceId` through. Then `repo.update` decides — from body AND
    * attachment-set change together — whether to bump the version and write
    * exactly one `skill_versions` snapshot (AC-39, AC-42).
+   *
+   * `setSkillContext` and `repo.update` run in TWO SEPARATE transactions
+   * (`context_attachments` lives in `project-context`'s repository, `skills`/
+   * `skill_versions` in this one — see `SkillsRepository.update`'s own doc
+   * comment for why the latter alone must be one transaction). If
+   * `repo.update` then throws, or returns `undefined` (the skill was deleted
+   * between the `getById` check above and `repo.update`'s own re-check), the
+   * new attachment set would otherwise be left committed with no matching
+   * version bump/snapshot — exactly the split state `SkillsRepository`'s
+   * single-transaction comment exists to prevent, just one repository over.
+   * The fix here is a compensating write, not a shared transaction (the two
+   * repositories don't share one): snapshot the skill's CURRENT attachment
+   * refs before overwriting them, and if `repo.update` doesn't succeed,
+   * replay `setSkillContext` with that snapshot to restore exactly the prior
+   * `(repo_id, path)` set (`replaceAttachments` is a full delete-then-insert,
+   * so this leaves no row for a ref that was only ever in the failed new
+   * set). A ref present in BOTH the old and new sets keeps its ORIGINAL
+   * attach-time hash/size/revision through the round trip (`buildAttachmentRows`
+   * always prefers a currently-persisted row's recorded values over a fresh
+   * read) — only a ref that was dropped by the failed update and needed
+   * restoring picks up a fresh attach-time snapshot instead of its original
+   * one, since deleting it mid-round-trip erases the row that carried that
+   * original value. That is a narrow imperfection confined to an already-rare
+   * failure path, not a correctness issue for the common case.
    */
   async update(
     workspaceId: string,
     id: string,
     patch: UpdateSkillInput,
   ): Promise<Skill | undefined> {
+    let previousContext: ProjectContextRef[] | undefined;
     if (patch.context !== undefined) {
       const owned = await this.repo.getById(workspaceId, id);
       if (!owned) return undefined;
+      const previous = await this.container.projectContext.skillContext(id);
+      previousContext = previous.map((a) => ({ repo_id: a.repo_id, path: a.path }));
       await this.container.projectContext.setSkillContext(workspaceId, id, patch.context);
     }
 
-    const row = await this.repo.update(workspaceId, id, {
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.description !== undefined ? { description: patch.description } : {}),
-      ...(patch.type !== undefined ? { type: patch.type } : {}),
-      ...(patch.source !== undefined ? { source: patch.source } : {}),
-      ...(patch.body !== undefined ? { body: patch.body } : {}),
-      ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-      ...(patch.context !== undefined ? { context: patch.context } : {}),
-      ...(patch.versionLabel !== undefined ? { versionLabel: patch.versionLabel } : {}),
-    });
+    let row: Awaited<ReturnType<SkillsRepository['update']>>;
+    try {
+      row = await this.repo.update(workspaceId, id, {
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.source !== undefined ? { source: patch.source } : {}),
+        ...(patch.body !== undefined ? { body: patch.body } : {}),
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+        ...(patch.context !== undefined ? { context: patch.context } : {}),
+        ...(patch.versionLabel !== undefined ? { versionLabel: patch.versionLabel } : {}),
+      });
+    } catch (err) {
+      if (previousContext !== undefined) {
+        await this.container.projectContext.setSkillContext(workspaceId, id, previousContext);
+      }
+      throw err;
+    }
+
+    if (row === undefined && previousContext !== undefined) {
+      await this.container.projectContext.setSkillContext(workspaceId, id, previousContext);
+    }
+
     return row ? toSkillDto(row) : undefined;
   }
 

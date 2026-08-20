@@ -142,7 +142,12 @@ describe('PUT /skills/:id — context ref validation (route-level, no DB)', () =
   it('still succeeds with a well-formed context array', async () => {
     const db = makeFakeDb(makeSkillRow());
     const setSkillContext = vi.fn(async () => undefined);
-    const projectContext = { setSkillContext } as unknown as ProjectContextService;
+    // `SkillsService.update` now reads the skill's CURRENT attachment set
+    // (`skillContext`, Finding 3's rollback snapshot) before overwriting it —
+    // stub it too, or the call throws a TypeError before `setSkillContext`
+    // is ever reached.
+    const skillContext = vi.fn(async () => []);
+    const projectContext = { setSkillContext, skillContext } as unknown as ProjectContextService;
     const app = await buildApp({ config, db, overrides: { auth: AUTH, projectContext } });
 
     const res = await app.inject({

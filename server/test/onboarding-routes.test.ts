@@ -53,7 +53,7 @@ describe('onboarding routes (no DB)', () => {
       job_id: null,
     };
     const getTour = vi.fn(async () => response);
-    const onboarding = { getTour } as unknown as OnboardingService;
+    const onboarding = { getTour, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const res = await app.inject({ method: 'GET', url: `/repos/${REPO_ID}/onboarding` });
@@ -70,7 +70,7 @@ describe('onboarding routes (no DB)', () => {
       job: { id: 'job-1' },
     };
     const requestGeneration = vi.fn(async () => generateResponse);
-    const onboarding = { requestGeneration } as unknown as OnboardingService;
+    const onboarding = { requestGeneration, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const first = await app.inject({ method: 'POST', url: `/repos/${REPO_ID}/onboarding/generate` });
@@ -89,7 +89,7 @@ describe('onboarding routes (no DB)', () => {
   it('rejects a malformed :id with 422 before the handler runs', async () => {
     const getTour = vi.fn();
     const requestGeneration = vi.fn();
-    const onboarding = { getTour, requestGeneration } as unknown as OnboardingService;
+    const onboarding = { getTour, requestGeneration, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding } });
 
     const getRes = await app.inject({ method: 'GET', url: '/repos/not-a-uuid/onboarding' });
@@ -104,7 +104,7 @@ describe('onboarding routes (no DB)', () => {
 
   it('GET /repos/:id/onboarding returns 404 for a repo belonging to a different workspace and calls no service read (tenancy)', async () => {
     const getTour = vi.fn();
-    const onboarding = { getTour } as unknown as OnboardingService;
+    const onboarding = { getTour, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const res = await app.inject({ method: 'GET', url: `/repos/${OTHER_WORKSPACE_REPO_ID}/onboarding` });
@@ -116,7 +116,7 @@ describe('onboarding routes (no DB)', () => {
 
   it('POST /repos/:id/onboarding/generate returns 404 for a repo belonging to a different workspace and enqueues nothing (tenancy)', async () => {
     const requestGeneration = vi.fn();
-    const onboarding = { requestGeneration } as unknown as OnboardingService;
+    const onboarding = { requestGeneration, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const res = await app.inject({ method: 'POST', url: `/repos/${OTHER_WORKSPACE_REPO_ID}/onboarding/generate` });
@@ -128,7 +128,7 @@ describe('onboarding routes (no DB)', () => {
 
   it('GET /repos/:id/onboarding returns 404 for a repo id that does not exist at all (tenancy guard doubles as existence check)', async () => {
     const getTour = vi.fn();
-    const onboarding = { getTour } as unknown as OnboardingService;
+    const onboarding = { getTour, registerJobHandlers: vi.fn() } as unknown as OnboardingService;
     const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const missingId = '33333333-3333-3333-3333-333333333333';
@@ -136,6 +136,31 @@ describe('onboarding routes (no DB)', () => {
 
     expect(res.statusCode).toBe(404);
     expect(getTour).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('registers the onboarding.generate job handler against the SAME instance a ContainerOverrides.onboarding double provides to the route handlers, not a locally-constructed one (DI regression guard)', async () => {
+    const getTour = vi.fn(async () => ({
+      tour: null,
+      state: 'not_indexed' as const,
+      stale: false,
+      failure_reason: null,
+      job_id: null,
+    }));
+    const registerJobHandlers = vi.fn();
+    const onboarding = { getTour, registerJobHandlers } as unknown as OnboardingService;
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
+
+    // `registerJobHandlers` must have been called at plugin-registration time
+    // (boot), against the exact double injected via `ContainerOverrides.onboarding` —
+    // proving `routes.ts` resolves the job-handler registration and the route
+    // handlers below through the same `container.onboarding` getter rather
+    // than constructing its own `new OnboardingService(container)`.
+    expect(registerJobHandlers).toHaveBeenCalledTimes(1);
+
+    await app.inject({ method: 'GET', url: `/repos/${REPO_ID}/onboarding` });
+    expect(getTour).toHaveBeenCalledWith('ws-1', REPO_ID);
+
     await app.close();
   });
 });

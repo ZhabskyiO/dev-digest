@@ -28,24 +28,37 @@ import {
   DocumentPreview,
   DriftBadge,
   DriftCompare,
+  TokenBudgetBar,
   type AttachmentListItem,
-} from "../../../../../../components/project-context";
-import { useActiveRepo } from "../../../../../../lib/repo-context";
+} from "@/components/project-context";
+import { useActiveRepo } from "@/lib/repo-context";
 import {
   useConfirmDrift,
   useDocumentDrift,
   useDocumentPreview,
   useProjectContextDocuments,
   useSkillContext,
-} from "../../../../../../lib/hooks/project-context";
-import { useUpdateSkill } from "../../../../../../lib/hooks/skills";
-import { useToast } from "../../../../../../lib/toast";
+  useUpdateSkill,
+} from "@/lib/hooks";
+import { useToast } from "@/lib/toast";
 import { refsEqual, reorderDraft } from "./helpers";
 import { s } from "./styles";
 
 /** Which drift detail is open — the skill is always the owner here, so only
  *  the repo/path the marker was clicked on needs tracking (AC-37, AC-38). */
 interface DriftTarget {
+  repoId: string;
+  path: string;
+}
+
+/** Which document the preview drawer is open for — the row's OWN repo, not
+ *  necessarily the currently active one. `attachedItems`/`browseItems` here
+ *  are both already scoped to `selectedRepoId` (this tab has no cross-repo
+ *  list, unlike the agent Context tab's "Attached documents"), but tracking
+ *  the row's own `repo_id` rather than reusing the tab's active-repo state
+ *  keeps this tab's preview resolution consistent with the agent tab's and
+ *  correct even if that scoping assumption ever changes. */
+interface PreviewTarget {
   repoId: string;
   path: string;
 }
@@ -60,26 +73,48 @@ export function ContextTab({ skill }: { skill: Skill }) {
 
   const [filter, setFilter] = React.useState("");
   const [draft, setDraft] = React.useState<ProjectContextRef[]>([]);
-  const [previewPath, setPreviewPath] = React.useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = React.useState<PreviewTarget | null>(null);
 
-  // Seed the editable draft from the persisted attachment set whenever a
-  // different skill loads, or a save lands and the query refetches — the
-  // same reset-on-load pattern ConfigTab uses for `body` (client/insights/
-  // has no entry against it; it is this codebase's established way to give
-  // an edit form a local draft seeded from server state).
+  const originalRefs = (attachments ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((a): ProjectContextRef => ({ repo_id: a.repo_id, path: a.path }));
+  const isDirty = !refsEqual(draft, originalRefs);
+
+  // Seed the editable draft from the persisted attachment set on first load
+  // (or when a different skill is opened), and on any LATER refetch of
+  // `['skill-context', id]` only while the draft has no unsaved edits.
+  //
+  // This is deliberately NOT the same "reseed on every change of query data"
+  // pattern ConfigTab uses for `body` — ConfigTab's effect deps are the
+  // individual `skill.*` fields plus `skill.version`, which only change
+  // after a real server-side save. `attachments` here is query DATA, not a
+  // versioned field: React Query hands back a fresh array identity on every
+  // refetch/invalidation (e.g. another tab's save, a focus refetch, this
+  // tab's own drift-confirm) even when the content is unchanged, so keying
+  // the reset on that identity discarded an in-progress toggle/reorder the
+  // moment any such background refetch landed. `seededForSkillRef` tracks
+  // which skill.id has already been seeded so the FIRST load for a skill
+  // always seeds (even before any edit exists, so `isDirty` can't gate it
+  // away), while every later refetch for the SAME skill only reseeds when
+  // `!isDirty`.
+  const seededForSkillRef = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!attachments) return;
+    const isFirstLoadForThisSkill = seededForSkillRef.current !== skill.id;
+    if (!isFirstLoadForThisSkill && isDirty) return;
+    seededForSkillRef.current = skill.id;
     setDraft(
       [...attachments]
         .sort((a, b) => a.order - b.order)
         .map((a) => ({ repo_id: a.repo_id, path: a.path })),
     );
-  }, [skill.id, attachments]);
+  }, [skill.id, attachments, isDirty]);
 
   const selectedRepoId = activeRepo?.id ?? null;
 
   const { data: docsResponse, isLoading: docsLoading } = useProjectContextDocuments(selectedRepoId);
-  const { data: preview } = useDocumentPreview(selectedRepoId, previewPath);
+  const { data: preview } = useDocumentPreview(previewTarget?.repoId, previewTarget?.path);
 
   const documents = docsResponse?.documents ?? [];
   const needle = filter.trim().toLowerCase();
@@ -128,11 +163,29 @@ export function ContextTab({ skill }: { skill: Skill }) {
   const hiddenAttachments = draft.length - attachedRefs.length +
     attachedRefs.filter((ref) => !docByPath.has(ref.path)).length;
 
-  const originalRefs = (attachments ?? [])
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((a): ProjectContextRef => ({ repo_id: a.repo_id, path: a.path }));
-  const isDirty = !refsEqual(draft, originalRefs);
+  // Token budget for THIS skill's own attachment set (L1/AC-40, AC-41) —
+  // the agent Context tab gets this for free from `useAgentContext`'s
+  // server-computed `total_tokens`/`over_budget`/`dropped_paths`, but a
+  // skill has no "effective context" endpoint of its own, so the same
+  // cumulative-tally-against-budget rule the server applies at run time is
+  // reproduced here over `attachedRefs` (the active repo's attachment
+  // order — the same set `attachedItems` renders, unfiltered by the text
+  // filter so the total always reflects the whole set, not just what's
+  // currently visible). Refs the latest scan can't resolve are excluded,
+  // same as `attachedItems`.
+  const budgetTokens = docsResponse?.budget_tokens ?? 0;
+  const resolvedAttachedRefs = attachedRefs.filter((ref) => docByPath.has(ref.path));
+  const contextDroppedPaths: string[] = [];
+  let contextTotalTokens = 0;
+  for (const ref of resolvedAttachedRefs) {
+    const tokens = docByPath.get(ref.path)!.tokens;
+    if (contextTotalTokens + tokens > budgetTokens) {
+      contextDroppedPaths.push(ref.path);
+    } else {
+      contextTotalTokens += tokens;
+    }
+  }
+  const contextOverBudget = contextDroppedPaths.length > 0;
 
   // Drift detail (AC-37, AC-38) — scoped to this skill's own persisted
   // attachments, not the local `draft`, since drift is about what's actually
@@ -155,8 +208,15 @@ export function ContextTab({ skill }: { skill: Skill }) {
     );
   }
 
-  function toggle(path: string) {
+  function toggle(item: AttachmentListItem) {
     if (!selectedRepoId) return;
+    // `attachedItems`/`browseItems` below are both already scoped to
+    // `selectedRepoId` (the tab has no cross-repo list, unlike the agent
+    // Context tab's "Attached documents"), so the toggled row's own path is
+    // enough here — `selectedRepoId` is the row's repo either way. Still
+    // takes the full `AttachmentListItem` (not a bare path) to match
+    // `AttachmentList`'s single callback contract.
+    const path = item.path;
     setDraft((prev) => {
       const exists = prev.some((r) => r.repo_id === selectedRepoId && r.path === path);
       if (exists) return prev.filter((r) => !(r.repo_id === selectedRepoId && r.path === path));
@@ -214,6 +274,15 @@ export function ContextTab({ skill }: { skill: Skill }) {
       <p style={s.hint}>{t("skillSection.inheritHint")}</p>
       <p style={s.repoHint}>{t("skillSection.repoHint", { repo: activeRepo.full_name })}</p>
 
+      {!docsLoading && (
+        <TokenBudgetBar
+          totalTokens={contextTotalTokens}
+          budgetTokens={budgetTokens}
+          overBudget={contextOverBudget}
+          droppedPaths={contextDroppedPaths}
+        />
+      )}
+
       {docsLoading ? (
         <Skeleton height={220} />
       ) : (
@@ -223,7 +292,7 @@ export function ContextTab({ skill }: { skill: Skill }) {
             items={attachedItems}
             onToggle={toggle}
             onReorder={reorder}
-            onPreview={setPreviewPath}
+            onPreview={(item) => setPreviewTarget({ repoId: item.repo_id ?? activeRepo.id, path: item.path })}
           />
           {hiddenAttachments > 0 && (
             <p style={s.repoHint}>{t("skillSection.hiddenAttachments", { count: hiddenAttachments })}</p>
@@ -232,7 +301,11 @@ export function ContextTab({ skill }: { skill: Skill }) {
           <div style={s.sectionLabel}>
             {t("skillSection.browseTitle", { repo: activeRepo.full_name })}
           </div>
-          <AttachmentList items={browseItems} onToggle={toggle} onPreview={setPreviewPath} />
+          <AttachmentList
+            items={browseItems}
+            onToggle={toggle}
+            onPreview={(item) => setPreviewTarget({ repoId: item.repo_id ?? activeRepo.id, path: item.path })}
+          />
         </>
       )}
 
@@ -269,12 +342,12 @@ export function ContextTab({ skill }: { skill: Skill }) {
         </div>
       )}
 
-      {previewPath && (
+      {previewTarget && (
         <Drawer
           width={640}
           title={t("preview.drawerTitle")}
-          subtitle={previewPath}
-          onClose={() => setPreviewPath(null)}
+          subtitle={previewTarget.path}
+          onClose={() => setPreviewTarget(null)}
         >
           {preview ? (
             <DocumentPreview

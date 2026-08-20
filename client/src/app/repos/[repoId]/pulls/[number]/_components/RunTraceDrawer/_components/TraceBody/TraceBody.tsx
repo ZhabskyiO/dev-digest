@@ -27,6 +27,13 @@ const PROJECT_CONTEXT_OUTCOME_TONE: Record<ProjectContextOutcome, { color: strin
   changed_unconfirmed: { color: "var(--crit)", bg: "var(--crit-bg)" },
 };
 
+/** Fallback tone for a persisted `outcome` string outside the known union —
+ *  an older trace, or one written by a future server (AC-33). Looking this
+ *  up must never throw: an unrecognised value degrades to this neutral tone
+ *  (the badge's label falls back to next-intl's own missing-message
+ *  handling, which never throws either) rather than blanking the drawer. */
+const UNKNOWN_OUTCOME_TONE = PROJECT_CONTEXT_OUTCOME_TONE.missing;
+
 export function TraceBody({ trace, findings }: { trace: RunTrace; findings: FindingRecord[] }) {
   const t = useTranslations("runs");
   const stats = trace.stats;
@@ -68,10 +75,17 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
                 {trace.project_context.length === 0 ? (
                   <span style={s.specsNone}>{t("trace.config.none")}</span>
                 ) : (
-                  trace.project_context.map((doc, i) => {
-                    const tone = PROJECT_CONTEXT_OUTCOME_TONE[doc.outcome];
+                  trace.project_context.map((doc) => {
+                    // `doc` comes from persisted, client-unvalidated trace JSON — an
+                    // `outcome` outside the known union (an older trace, or one written
+                    // by a future server) must degrade to a neutral tone rather than
+                    // throw on `undefined.color` and blank the whole drawer (AC-33).
+                    const tone =
+                      (PROJECT_CONTEXT_OUTCOME_TONE as Partial<Record<string, { color: string; bg: string }>>)[
+                        doc.outcome
+                      ] ?? UNKNOWN_OUTCOME_TONE;
                     return (
-                      <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span key={doc.path} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span className="mono" style={s.spec}>
                           {doc.path}
                         </span>

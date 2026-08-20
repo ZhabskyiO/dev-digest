@@ -1,10 +1,13 @@
 /**
- * `resolveInClone` (`server/src/modules/project-context/path-guard.ts`) — the
+ * `resolveInClone` (`server/src/modules/_shared/clone-path-guard.ts`) — the
  * single shared symlink-escape containment guard used by BOTH
  * `ProjectContextService` (`modules/project-context/service.ts`) and
- * `resolveProjectContext` (`modules/reviews/prompt-context.ts`). Promoted out
- * of two separately-maintained copies (architecture finding: duplicated
- * untrusted-input containment guard) — this test proves the guard itself,
+ * `resolveProjectContext` (`modules/reviews/prompt-context.ts`). Originally
+ * promoted out of two separately-maintained copies into
+ * `modules/project-context/path-guard.ts` (architecture finding: duplicated
+ * untrusted-input containment guard), then relocated again into
+ * `modules/_shared/` (a later architecture-review finding: a module reaching
+ * into another module's internal file) — this test proves the guard itself,
  * plus that both call sites still reject through it.
  *
  * Hermetic: real filesystem, throwaway temp directories, no DB, no Docker.
@@ -13,7 +16,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveInClone } from '../src/modules/project-context/path-guard.js';
+import { resolveInClone } from '../src/modules/_shared/clone-path-guard.js';
 import { ProjectContextService } from '../src/modules/project-context/service.js';
 import { resolveProjectContext, type StepLog } from '../src/modules/reviews/prompt-context.js';
 import type { Container } from '../src/platform/container.js';

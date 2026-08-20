@@ -1,17 +1,24 @@
 /**
- * project-context — shared symlink-escape containment guard (AC-3, AC-22).
+ * Shared symlink-escape containment guard (AC-3, AC-22).
  *
  * This is the ONE place that decides whether a clone-relative path is safe to
- * read. Both `ProjectContextService` (`service.ts`) and `resolveProjectContext`
- * (`../reviews/prompt-context.ts`) delegate here rather than keeping their own
- * copy — the whole feature's threat model rests on this check, and two copies
- * could silently drift apart on the next edit.
+ * read. Both `ProjectContextService` (`modules/project-context/service.ts`)
+ * and `resolveProjectContext` (`modules/reviews/prompt-context.ts`) delegate
+ * here rather than keeping their own copy — the whole feature's threat model
+ * rests on this check, and two copies could silently drift apart on the next
+ * edit.
+ *
+ * Moved out of `modules/project-context/path-guard.ts` into `_shared` (an
+ * architecture-review finding) so `modules/reviews/prompt-context.ts` can
+ * reuse it without a module→module internal import — mirrors the precedent
+ * `_shared/net-guards.ts` and `_shared/context-ref.ts` already document:
+ * `isDisallowedIp`/`looksLikeHtml` moved here for the identical reason.
  *
  * Deliberately pure and side-effect-free beyond the filesystem reads the check
- * itself requires: no DB, no container, no logging. `reader.ts` has its own
- * inline containment check for a different purpose (scanning a whole tree,
- * not resolving one path) and is NOT a duplicate of this guard — it stays as
- * is.
+ * itself requires: no DB, no container, no logging. `project-context/reader.ts`
+ * has its own inline containment check for a different purpose (scanning a
+ * whole tree, not resolving one path) and is NOT a duplicate of this guard —
+ * it stays as is.
  */
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';

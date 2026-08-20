@@ -10,23 +10,39 @@ import { useTranslations } from "next-intl";
 import type { OnboardingSection } from "@devdigest/shared";
 import { IconBtn } from "@devdigest/ui";
 import { SectionCard } from "../SectionCard";
+import { COPY_RESET_MS } from "../../../constants";
 import { s } from "./styles";
 
 type LocalSetupSection = Extract<OnboardingSection, { kind: "local_setup" }>;
-
-const COPIED_RESET_MS = 1500;
 
 export function LocalSetupCard({ section }: { section: LocalSetupSection }) {
   const t = useTranslations("onboarding");
   const isEmpty = section.items.length === 0;
   const [copiedIndex, setCopiedIndex] = React.useState<number | null>(null);
+  const resetTimeout = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function handleCopy(index: number, command: string) {
-    void navigator.clipboard?.writeText(command);
+  React.useEffect(() => {
+    return () => {
+      if (resetTimeout.current !== null) clearTimeout(resetTimeout.current);
+    };
+  }, []);
+
+  // Same guarantee as the Share link (M2): never show "Copied" unless the
+  // write actually resolved. `navigator.clipboard` is `undefined` over plain
+  // HTTP, and `writeText` can still reject even when it exists.
+  async function handleCopy(index: number, command: string) {
+    if (!navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      return;
+    }
     setCopiedIndex(index);
-    window.setTimeout(() => {
+    if (resetTimeout.current !== null) clearTimeout(resetTimeout.current);
+    resetTimeout.current = setTimeout(() => {
       setCopiedIndex((cur) => (cur === index ? null : cur));
-    }, COPIED_RESET_MS);
+      resetTimeout.current = null;
+    }, COPY_RESET_MS);
   }
 
   return (

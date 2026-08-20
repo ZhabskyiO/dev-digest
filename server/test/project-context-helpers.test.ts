@@ -1,14 +1,15 @@
 /**
- * T9 — project-context pure helpers (`planBudget`, `mergeEffectiveSet`,
+ * T9 — project-context pure helpers (`mergeEffectiveSet`,
  * `outcomePrecedence`/`resolveOutcome`). No I/O, no DB — see helpers.ts.
+ *
+ * `planBudget` moved to `../src/modules/_shared/context-budget.js` (an
+ * architecture-review finding: it has a genuine second consumer,
+ * `modules/reviews/prompt-context.ts`) — imported from there below, still
+ * tested in this file since its behaviour is project-context's concern.
  */
 import { describe, it, expect } from 'vitest';
-import {
-  mergeEffectiveSet,
-  outcomePrecedence,
-  planBudget,
-  resolveOutcome,
-} from '../src/modules/project-context/helpers.js';
+import { mergeEffectiveSet, outcomePrecedence, resolveOutcome } from '../src/modules/project-context/helpers.js';
+import { planBudget } from '../src/modules/_shared/context-budget.js';
 
 describe('planBudget', () => {
   it('injects everything when the whole set fits (AC-23/AC-40 happy path)', () => {

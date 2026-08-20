@@ -11,7 +11,7 @@
  * user-controlled repo contents, so trusting a stored path without
  * re-checking it would reopen exactly the symlink-escape hole the reader
  * (AC-3) already closes once. The actual check lives in the shared
- * `./path-guard.js` (`resolveInClone`), also used by
+ * `../_shared/clone-path-guard.js` (`resolveInClone`), also used by
  * `../reviews/prompt-context.js` — see `readClonePath` below, which mirrors
  * the two-guard shape of `modules/reviews/intent/docs.ts`.
  */
@@ -30,13 +30,15 @@ import type {
 } from '@devdigest/shared';
 import type { Container } from '../../platform/container.js';
 import { NotFoundError } from '../../platform/errors.js';
-import { mergeEffectiveSet, planBudget } from './helpers.js';
-import { resolveInClone } from './path-guard.js';
+import { planBudget } from '../_shared/context-budget.js';
+import { resolveInClone } from '../_shared/clone-path-guard.js';
+import { mergeEffectiveSet } from './helpers.js';
 import { scanDocuments } from './reader.js';
 import {
   ProjectContextRepository,
   type AttachmentOwnerRef,
   type ContextAttachmentRow,
+  type ProjectContextDocumentRow,
   type ReplaceAttachmentInput,
   type UpsertDocumentInput,
 } from './repository.js';
@@ -62,18 +64,38 @@ export class ProjectContextService {
    *  Returns `{documents: [], reason: 'not_cloned'}` with no error when the
    *  repo has no clone yet (AC-4).
    *
-   *  Read-only with respect to the clone: this is the page-load path, so it
-   *  walks whatever is already on disk and never touches the network. Use
-   *  `rescan()` for the user-triggered refresh that fetches first. */
+   *  Serves from `project_context_documents` once a scan has happened at
+   *  least once for this repo — a plain DB read, no filesystem walk, no
+   *  tokenizer calls, no upsert/delete — and only falls back to the full
+   *  walk (`scanAndBuildResponse`, same as `rescan()` minus the fetch) when
+   *  that table is empty for this repo (never scanned yet), so a first-ever
+   *  page load is byte-identical to before this change. This route has no
+   *  rate limit (unlike `rescan()`'s 6/min — a git fetch is worth limiting,
+   *  a cached DB read is not) precisely because it no longer does the
+   *  expensive work the limit was protecting: an unlimited GET that ran a
+   *  recursive tree walk plus upserts on every call was the actual
+   *  amplification path, not the limited `rescan()` POST. A file that
+   *  changed on disk WITHOUT going through `rescan()` (e.g. some other
+   *  process touched the clone) will not be reflected here until the user
+   *  clicks rescan — this endpoint is deliberately no longer "walk on every
+   *  load"; `preview()` already reads live content on demand for the one
+   *  document actually being viewed, so staleness here is bounded by that. */
   async list(workspaceId: string, repoId: string): Promise<ProjectContextListResponse> {
     const repo = await this.getWorkspaceRepo(workspaceId, repoId);
+    if (repo.clonePath !== null) {
+      const existing = await this.repo.listDocuments(repo.id);
+      if (existing.length > 0) return this.buildCachedResponse(repo, existing);
+    }
     return this.scanAndBuildResponse(repo, { resync: false });
   }
 
   /**
-   * User-triggered rescan (AC-6). Same walk as `list()` — the ONLY caching in
-   * this feature is per-document (AC-8: reuse a token estimate while its
-   * content hash is unchanged), never "skip the walk" — but it FIRST advances
+   * User-triggered rescan (AC-6). ALWAYS walks (never serves `list()`'s
+   * cached persisted-rows response, whatever the state of
+   * `project_context_documents`) — this is the one explicit "go look at the
+   * clone again" action, so it must never answer from a stale table. Per
+   * document it still only recomputes what changed (AC-8: reuse a token
+   * estimate while its content hash is unchanged) — but it FIRST advances
    * the clone to `origin/<defaultBranch>`.
    *
    * That fetch is the whole point of the button. The walk reads the checkout
@@ -215,6 +237,60 @@ export class ProjectContextService {
       omitted,
       clone_head: cloneHead,
       ...(syncError !== undefined ? { sync_error: syncError } : {}),
+    };
+  }
+
+  /**
+   * Builds `list()`'s response straight from already-persisted
+   * `project_context_documents` rows — no walk, no tokenizer, no
+   * upsert/delete. `existing` is assumed non-empty (the caller only takes
+   * this path once a scan has happened at least once for this repo).
+   *
+   * `scanned_at` is the MOST RECENT row's `scannedAt` rather than "now" — it
+   * genuinely describes when the underlying data was last produced by a
+   * walk, which for a cached response is not this call. `omitted` (the
+   * discovery caps counter) has no persisted equivalent — a scan's
+   * dropped-by-cap counts are a property of that one walk, not of any row —
+   * so it is simply absent here; a `rescan()` recomputes it.
+   */
+  private async buildCachedResponse(
+    repo: RepoRow,
+    existing: ProjectContextDocumentRow[],
+  ): Promise<ProjectContextListResponse> {
+    const roots = this.container.config.projectContextRoots;
+    const conventionalFilenames = this.container.config.projectContextFilenames;
+    const budgetTokens = this.container.config.projectContextBudgetTokens;
+
+    const ref = { owner: repo.owner, name: repo.name };
+    const cloneHead = await this.container.git.currentHead(ref).catch(() => null);
+
+    const usedByCounts = await this.repo.usedByAgentCounts(repo.id);
+    const driftedSet = new Set(await this.repo.driftedPaths(repo.id));
+    const driftedForMap = await this.repo.driftedFor(repo.id);
+
+    const documents: ProjectContextDocument[] = existing.map((doc) => ({
+      path: doc.path,
+      type: doc.type as ProjectContextDocType,
+      size_bytes: doc.sizeBytes,
+      content_hash: doc.contentHash,
+      tokens: doc.tokens,
+      used_by_agents: usedByCounts.get(doc.path) ?? 0,
+      drift: driftedSet.has(doc.path) ? true : undefined,
+      drifted_for: driftedForMap.get(doc.path) ?? [],
+    }));
+
+    const scannedAt = existing.reduce(
+      (latest, doc) => (doc.scannedAt > latest ? doc.scannedAt : latest),
+      existing[0]!.scannedAt,
+    );
+
+    return {
+      documents,
+      scanned_at: scannedAt.toISOString(),
+      roots,
+      conventional_filenames: conventionalFilenames,
+      budget_tokens: budgetTokens,
+      clone_head: cloneHead,
     };
   }
 
@@ -579,7 +655,7 @@ export class ProjectContextService {
   /** Realpath-resolves `clonePath` (the clone root itself — on macOS a
    *  `/tmp` clone realpaths to `/private/tmp`, so this must happen before any
    *  comparison) and delegates the actual containment check to the shared
-   *  `resolveInClone` guard (`./path-guard.js`), also used by
+   *  `resolveInClone` guard (`../_shared/clone-path-guard.js`), also used by
    *  `../reviews/prompt-context.js`. Returns null (never throws) for
    *  anything that fails any check. */
   private async readClonePath(clonePath: string, relPath: string): Promise<Buffer | null> {

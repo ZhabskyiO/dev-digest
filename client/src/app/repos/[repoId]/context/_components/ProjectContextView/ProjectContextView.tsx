@@ -17,7 +17,7 @@
 "use client";
 
 import React from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { Button, EmptyState, ErrorState, Icon, IconBtn, Skeleton } from "@devdigest/ui";
 import type { ProjectContextDriftOwner } from "@devdigest/shared";
 import { DocumentFilter, DocumentPreview, DriftBadge, DriftCompare } from "@/components/project-context";
@@ -49,6 +49,7 @@ interface DriftTarget {
 
 export function ProjectContextView({ repoId }: { repoId: string }) {
   const t = useTranslations("context");
+  const locale = useLocale();
   const { activeRepo } = useActiveRepo();
   const repoNotFound = useRepoNotFound(repoId);
 
@@ -153,8 +154,8 @@ export function ProjectContextView({ repoId }: { repoId: string }) {
             icon="FileText"
             title={t("page.empty.noDocuments.title")}
             body={t("page.empty.noDocuments.body", {
-              roots: joinList(data?.roots ?? []),
-              filenames: joinList(data?.conventional_filenames ?? []),
+              roots: joinList(data?.roots ?? [], locale),
+              filenames: joinList(data?.conventional_filenames ?? [], locale),
               repo: repoName,
             })}
           />

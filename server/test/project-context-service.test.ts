@@ -301,7 +301,7 @@ describe('ProjectContextService.list', () => {
       expect(b?.drifted_for).toEqual([]);
     });
 
-    it('invokes the tokenizer once per document on the first scan, zero times on an unmodified second scan, and exactly once after editing one file', async () => {
+    it('invokes the tokenizer once per document on the first scan, zero times on every subsequent list() — even after editing a file on disk (Finding 2: list() serves cached rows, never re-walks)', async () => {
       const { service, calls } = makeService({
         repos: [
           { id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath },
@@ -310,18 +310,52 @@ describe('ProjectContextService.list', () => {
 
       const first = await service.list('ws-1', 'r1');
       expect(first.documents).toHaveLength(2);
-      expect(calls).toHaveLength(2); // one tokenizer call per new document
+      expect(calls).toHaveLength(2); // one tokenizer call per new document — first-ever load still walks
 
       calls.length = 0;
       const second = await service.list('ws-1', 'r1');
       expect(second.documents).toHaveLength(2);
-      expect(calls).toHaveLength(0); // unchanged content hash — cache reused
+      expect(calls).toHaveLength(0); // served from the persisted rows — no walk at all
 
       calls.length = 0;
       await writeFileAt(clonePath, 'specs/a.md', '# spec a, edited');
       const third = await service.list('ws-1', 'r1');
       expect(third.documents).toHaveLength(2);
+      // list() no longer re-walks once a repo has been scanned at least once
+      // (Finding 2: a full recursive scan + tokenizer counts + upserts on
+      // every GET was the actual amplification path, not the rate-limited
+      // rescan POST) — so an on-disk edit is invisible to list() until an
+      // explicit rescan(), and the tokenizer is not touched at all here.
+      expect(calls).toHaveLength(0);
+      const staleA = third.documents.find((d) => d.path === 'specs/a.md');
+      expect(staleA?.content_hash).toBe(first.documents.find((d) => d.path === 'specs/a.md')?.content_hash);
+    });
+
+    it('rescan() ALWAYS re-walks and picks up an on-disk edit list() would miss, re-counting only the changed document', async () => {
+      const { service, calls } = makeService({
+        repos: [
+          { id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath },
+        ],
+      });
+
+      await service.list('ws-1', 'r1'); // first-ever load — populates the cache
+      calls.length = 0;
+
+      await writeFileAt(clonePath, 'specs/a.md', '# spec a, edited');
+      const rescanned = await service.rescan('ws-1', 'r1');
+
+      expect(rescanned.documents).toHaveLength(2);
       expect(calls).toHaveLength(1); // only the edited document is re-counted
+      const editedA = rescanned.documents.find((d) => d.path === 'specs/a.md');
+      expect(editedA?.content_hash).not.toBe(undefined);
+
+      // A subsequent list() now serves the rescan's fresh rows.
+      calls.length = 0;
+      const afterRescan = await service.list('ws-1', 'r1');
+      expect(afterRescan.documents.find((d) => d.path === 'specs/a.md')?.content_hash).toBe(
+        editedA?.content_hash,
+      );
+      expect(calls).toHaveLength(0);
     });
   });
 });

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type {
   Agent,
   Repo,
+  Skill,
   ProjectContextListResponse,
   ProjectContextDocument,
   EffectiveProjectContext,
@@ -12,6 +13,14 @@ import type {
 } from "@devdigest/shared";
 import agentsMessages from "../../../../../../../../messages/en/agents.json";
 import contextMessages from "../../../../../../../../messages/en/context.json";
+
+// Builds the expected rendered copy from the imported messages fixture
+// instead of restating the English text as a literal — a literal passes
+// even after the underlying message key's meaning changes (client/insights/
+// gotchas.md, 2026-08-20).
+function fill(template: string, params: Record<string, string | number>): string {
+  return Object.entries(params).reduce((acc, [key, value]) => acc.replaceAll(`{${key}}`, String(value)), template);
+}
 
 const AGENT: Agent = {
   id: "ag1",
@@ -38,6 +47,29 @@ const REPO: Repo = {
   clone_path: "/clones/repo1",
   last_polled_at: null,
   created_by: null,
+};
+
+const REPO2: Repo = {
+  id: "repo2",
+  workspace_id: "w1",
+  owner: "acme",
+  name: "gadgets",
+  full_name: "acme/gadgets",
+  default_branch: "main",
+  clone_path: "/clones/repo2",
+  last_polled_at: null,
+  created_by: null,
+};
+
+const SKILL_SECURITY: Skill = {
+  id: "sk1",
+  name: "Security Rubric",
+  description: "",
+  type: "rubric",
+  source: "manual",
+  body: "",
+  enabled: true,
+  version: 1,
 };
 
 const DOCS: ProjectContextDocument[] = [
@@ -112,6 +144,7 @@ vi.mock("../../../../../../../lib/api", () => ({
   api: {
     get: vi.fn((path: string) => {
       if (path === "/repos") return Promise.resolve([REPO]);
+      if (path === "/skills") return Promise.resolve([SKILL_SECURITY]);
       if (path === `/repos/${REPO.id}/context/documents`) return Promise.resolve(DOCS_RESPONSE());
       if (path === `/agents/${AGENT.id}/context`) return Promise.resolve(computeEffective());
       if (path.startsWith(`/repos/${REPO.id}/context/documents/preview?`)) {
@@ -123,6 +156,23 @@ vi.mock("../../../../../../../lib/api", () => ({
           tokens: 42,
           truncated: false,
           used_by_agents: 1,
+        });
+      }
+      // REPO2's own preview response — deliberately distinct body/tokens from
+      // REPO's above so a test can tell "which repo's document actually
+      // rendered" apart, not merely "a preview opened" (residual layer of the
+      // same-path/different-repo bug family: previewing a row attached from a
+      // non-active repo must render THAT repo's content, not the active
+      // repo's content at the same path).
+      if (path.startsWith(`/repos/${REPO2.id}/context/documents/preview?`)) {
+        const qs = new URLSearchParams(path.split("?")[1]);
+        const docPath = qs.get("path") ?? "";
+        return Promise.resolve({
+          path: docPath,
+          body: `# ${docPath}\n\nrepo2 preview body`,
+          tokens: 99,
+          truncated: false,
+          used_by_agents: 3,
         });
       }
       if (path.startsWith(`/repos/${REPO.id}/context/drift?`)) {
@@ -184,9 +234,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// `qc` is returned so a test can inspect the exact QueryClient instance the
+// rendered tree is wired to (the preview cache-entry-identity tests need this
+// — same pattern as the skill ContextTab's `renderTab`).
 function renderTab() {
   const qc = new QueryClient();
-  return render(
+  render(
     <QueryClientProvider client={qc}>
       <RepoProvider>
         <NextIntlClientProvider locale="en" messages={{ agents: agentsMessages, context: contextMessages }}>
@@ -195,6 +248,7 @@ function renderTab() {
       </RepoProvider>
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 describe("ContextTab", () => {
@@ -234,12 +288,12 @@ describe("ContextTab", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: /public-api\.md/ }));
     await screen.findByText(/≈ 90 \/ 1000 tokens/);
 
-    fireEvent.change(screen.getByPlaceholderText("Filter documents…"), { target: { value: "sec" } });
+    fireEvent.change(screen.getByPlaceholderText(contextMessages.filter.placeholder), { target: { value: "sec" } });
     expect(screen.getByText("security-baseline.md")).toBeInTheDocument();
     expect(screen.queryByText("public-api.md")).not.toBeInTheDocument();
     expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("Filter documents…"), { target: { value: "" } });
+    fireEvent.change(screen.getByPlaceholderText(contextMessages.filter.placeholder), { target: { value: "" } });
     const publicApiCheckbox = await screen.findByRole("checkbox", { name: /public-api\.md/ });
     expect(publicApiCheckbox).toHaveAttribute("aria-checked", "true");
   });
@@ -315,7 +369,9 @@ describe("ContextTab", () => {
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(screen.queryByText(/^Repository$/)).toBeNull();
     // …and it still says which repo it is browsing.
-    expect(screen.getByText(`Documents in ${REPO.full_name}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(fill(contextMessages.agentTab.browseTitle, { repo: REPO.full_name })),
+    ).toBeInTheDocument();
   });
 
   it("previews a document in a right-side drawer, closable again", async () => {
@@ -340,5 +396,127 @@ describe("ContextTab", () => {
 
     await screen.findByRole("button", { name: /Reorder public-api\.md/ });
     expect(screen.queryByRole("button", { name: /^Move / })).toBeNull();
+  });
+
+  it("an agent with the same path attached from two different repos detaches only the clicked one (M1)", async () => {
+    agentDirectRefs = [
+      { repo_id: REPO.id, path: "specs/public-api.md" },
+      { repo_id: REPO2.id, path: "specs/public-api.md" },
+    ];
+    renderTab();
+
+    const checkboxes = await screen.findAllByRole("checkbox", { name: /public-api\.md/ });
+    expect(checkboxes).toHaveLength(2);
+    fireEvent.click(checkboxes[0]!);
+
+    // Losing BOTH on one click was the bug — exactly one attachment must
+    // survive the PUT, not zero and not two.
+    await waitFor(() => expect(agentDirectRefs).toHaveLength(1));
+    expect(agentDirectRefs[0]?.path).toBe("specs/public-api.md");
+  });
+
+  it("clicking the SECOND of two same-path rows detaches the second document, not the first (M2, identity)", async () => {
+    // Two rows share a path but come from different repos — rendered in
+    // `agentDirectRefs` order, so checkboxes[0] is REPO's row and
+    // checkboxes[1] is REPO2's row. A caller resolving "which repo_id was
+    // clicked" by picking the FIRST match in `directDocs` order (the bug this
+    // test guards against) would detach REPO's attachment regardless of which
+    // row was actually clicked — a silent wrong-row action. Asserting on
+    // WHICH repo_id survives (identity), not merely that exactly one
+    // survived, is what tells the two implementations apart: both leave
+    // exactly one ref, but only the fixed one leaves the RIGHT one.
+    agentDirectRefs = [
+      { repo_id: REPO.id, path: "specs/public-api.md" },
+      { repo_id: REPO2.id, path: "specs/public-api.md" },
+    ];
+    renderTab();
+
+    const checkboxes = await screen.findAllByRole("checkbox", { name: /public-api\.md/ });
+    expect(checkboxes).toHaveLength(2);
+    fireEvent.click(checkboxes[1]!);
+
+    await waitFor(() => expect(agentDirectRefs).toHaveLength(1));
+    // The SECOND row (REPO2's attachment) must be the one removed — REPO's
+    // survives. The first-match-wins bug would instead remove REPO's ref
+    // and leave REPO2.id here.
+    expect(agentDirectRefs[0]?.repo_id).toBe(REPO.id);
+    expect(agentDirectRefs[0]?.path).toBe("specs/public-api.md");
+  });
+
+  it("previewing the SECOND of two same-path rows from different repos renders THAT repo's own document, not the active repo's (residual fix)", async () => {
+    // Both rows attach "specs/public-api.md" — one from REPO (the active
+    // repo), one from REPO2. Rendered in `agentDirectRefs` order, so the
+    // FIRST preview button is REPO's row and the SECOND is REPO2's — same
+    // ordering M1/M2 already rely on for the checkbox rows.
+    agentDirectRefs = [
+      { repo_id: REPO.id, path: "specs/public-api.md" },
+      { repo_id: REPO2.id, path: "specs/public-api.md" },
+    ];
+    renderTab();
+
+    const previewButtons = await screen.findAllByRole("button", { name: contextMessages.attachments.preview });
+    fireEvent.click(previewButtons[1]!);
+
+    const dialog = await screen.findByRole("dialog");
+    // REPO2's content must render...
+    await within(dialog).findByText(/repo2 preview body/);
+    // ...and NEVER the active repo's (REPO's) content at the same path — the
+    // exact failure mode this fix closes: showing the wrong file as if it
+    // were the clicked one.
+    expect(within(dialog).queryByText(/rendered preview body/)).not.toBeInTheDocument();
+  });
+
+  it("previews for the same path from two different repos are separate cache entries, not one shared entry (residual fix)", async () => {
+    agentDirectRefs = [
+      { repo_id: REPO.id, path: "specs/public-api.md" },
+      { repo_id: REPO2.id, path: "specs/public-api.md" },
+    ];
+    const qc = renderTab();
+
+    const previewButtons = await screen.findAllByRole("button", { name: contextMessages.attachments.preview });
+
+    // Open REPO's row first, then close.
+    fireEvent.click(previewButtons[0]!);
+    await within(await screen.findByRole("dialog")).findByText(/rendered preview body/);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // Then open REPO2's row.
+    fireEvent.click(previewButtons[1]!);
+    await within(await screen.findByRole("dialog")).findByText(/repo2 preview body/);
+
+    // Both fetches must be sitting in the query cache SIMULTANEOUSLY, under
+    // distinct keys — a shared/collapsed cache entry (the bug this closes)
+    // would leave only one of these populated, or both holding the same body.
+    const repoEntry = qc.getQueryData<{ body: string }>(["project-context-preview", REPO.id, "specs/public-api.md"]);
+    const repo2Entry = qc.getQueryData<{ body: string }>([
+      "project-context-preview",
+      REPO2.id,
+      "specs/public-api.md",
+    ]);
+    expect(repoEntry?.body).toMatch(/rendered preview body/);
+    expect(repo2Entry?.body).toMatch(/repo2 preview body/);
+    expect(repoEntry).not.toEqual(repo2Entry);
+  });
+
+  it("an inherited row resolves the skill's name instead of showing its raw skill_id (M4)", async () => {
+    inherited = [
+      {
+        repo_id: REPO.id,
+        path: "specs/security-baseline.md",
+        type: "specs",
+        tokens: 120,
+        source: "skill",
+        skill_id: SKILL_SECURITY.id,
+      },
+    ];
+    renderTab();
+
+    const path = await screen.findByText("specs/security-baseline.md");
+    const row = path.closest('[role="listitem"]');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText(new RegExp(SKILL_SECURITY.name))).toBeInTheDocument();
+    // The raw uuid must never leak into the rendered text once a name resolves.
+    expect(within(row as HTMLElement).queryByText(new RegExp(SKILL_SECURITY.id))).not.toBeInTheDocument();
   });
 });

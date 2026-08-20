@@ -146,6 +146,7 @@ export const s = {
     color: "var(--text-muted)",
   } satisfies CSSProperties,
   driftOwnerBtn: {
+    fontFamily: "inherit",
     fontSize: 11,
     fontWeight: 600,
     color: "var(--warn)",
@@ -154,7 +155,6 @@ export const s = {
     borderRadius: 999,
     padding: "2px 8px",
     cursor: "pointer",
-    font: "inherit",
   } satisfies CSSProperties,
   driftPanel: {
     display: "flex",

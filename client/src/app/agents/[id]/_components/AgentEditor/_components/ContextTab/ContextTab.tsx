@@ -4,7 +4,7 @@ import React from "react";
 import { useTranslations } from "next-intl";
 import { Drawer, IconBtn, Skeleton } from "@devdigest/ui";
 import type { Agent, EffectiveProjectContextDoc, ProjectContextRef } from "@devdigest/shared";
-import { useActiveRepo } from "../../../../../../../lib/repo-context";
+import { useActiveRepo } from "@/lib/repo-context";
 import {
   useProjectContextDocuments,
   useAgentContext,
@@ -12,8 +12,9 @@ import {
   useDocumentDrift,
   useDocumentPreview,
   useConfirmDrift,
+  useSkills,
   type ProjectContextOwnerKind,
-} from "../../../../../../../lib/hooks/project-context";
+} from "@/lib/hooks";
 import {
   AttachmentList,
   DocumentFilter,
@@ -22,7 +23,7 @@ import {
   DriftBadge,
   DriftCompare,
   type AttachmentListItem,
-} from "../../../../../../../components/project-context";
+} from "@/components/project-context";
 import { filterByPath, reorderRefs } from "./helpers";
 import { s } from "./styles";
 
@@ -35,6 +36,19 @@ interface DriftTarget {
   repoId: string;
   ownerKind: ProjectContextOwnerKind;
   ownerId: string;
+  path: string;
+}
+
+/** Which document the preview drawer is open for — the row's OWN repo, not
+ *  whichever repo happens to be active in the shell. "Attached documents" is
+ *  NOT scoped to the active repo (it spans every repo the agent has ever
+ *  attached from), so two rows can share a `path` while living in different
+ *  repos; resolving the preview against the active repo instead of the
+ *  clicked row's `repo_id` silently rendered the WRONG repo's content at
+ *  that path (or failed to resolve at all) whenever the clicked row wasn't
+ *  from the active repo. */
+interface PreviewTarget {
+  repoId: string;
   path: string;
 }
 
@@ -71,9 +85,16 @@ export function ContextTab({ agent }: { agent: Agent }) {
   const { data: docsResp, isLoading: docsLoading } = useProjectContextDocuments(repoId);
   const { data: effective, isLoading: effectiveLoading } = useAgentContext(agent.id);
   const setContext = useSetAgentContext(agent.id);
+  // Resolves an inherited row's `skill_id` to a human name client-side
+  // (AC-16's "via skill …" hint must never leak a raw uuid — matches
+  // ProjectContextView's `owner_name` rendering for drift chips). No
+  // contract change: `EffectiveProjectContextDoc` only carries `skill_id`,
+  // so the name comes from the workspace's own skill list instead.
+  const { data: skills } = useSkills();
+  const skillNameById = new Map((skills ?? []).map((sk) => [sk.id, sk.name]));
   const [filter, setFilter] = React.useState("");
-  const [previewPath, setPreviewPath] = React.useState<string | null>(null);
-  const { data: preview } = useDocumentPreview(repoId, previewPath);
+  const [previewTarget, setPreviewTarget] = React.useState<PreviewTarget | null>(null);
+  const { data: preview } = useDocumentPreview(previewTarget?.repoId, previewTarget?.path);
 
   const directDocs = (effective?.documents ?? []).filter((d) => d.source === "agent");
   const inheritedDocs = (effective?.documents ?? []).filter((d) => d.source === "skill");
@@ -84,14 +105,22 @@ export function ContextTab({ agent }: { agent: Agent }) {
   const isDirectlyAttached = (path: string) =>
     repoId != null && directRefs.some((r) => r.repo_id === repoId && r.path === path);
 
-  const attach = (path: string) => {
+  const attach = (item: AttachmentListItem) => {
     if (!repoId) return;
     // AC-15: attaching an already-attached path is a no-op.
-    if (isDirectlyAttached(path)) return;
-    setContext.mutate([...directRefs, { repo_id: repoId, path }]);
+    if (isDirectlyAttached(item.path)) return;
+    setContext.mutate([...directRefs, { repo_id: repoId, path: item.path }]);
   };
-  const detach = (path: string) => {
-    setContext.mutate(directRefs.filter((r) => r.path !== path));
+  const detach = (item: AttachmentListItem) => {
+    // `AttachmentList` reports the FULL clicked row (`repo_id` + `path`), not
+    // just `path` — act directly on that identity. Filtering `directRefs` by
+    // `path` alone (the earlier bug) removed every ref sharing that path, and
+    // resolving the repo_id by "first match in `directDocs`" (the bug after
+    // that) acted on the WRONG row whenever the clicked row wasn't the first
+    // one in list order: an agent holding the same clone-relative path
+    // attached from two different repositories could lose the wrong one, or
+    // both, on a single click.
+    setContext.mutate(directRefs.filter((r) => !(r.repo_id === item.repo_id && r.path === item.path)));
   };
   /** Persists the whole ordered set in the order the drag produced
    *  (`reorderRefs` keeps rows the list wasn't showing — see its doc). */
@@ -140,6 +169,13 @@ export function ContextTab({ agent }: { agent: Agent }) {
 
   const attachedItems: AttachmentListItem[] = filterByPath(directDocs, filter).map((d) => ({
     path: d.path,
+    // Populates `AttachmentList`'s composite `${repo_id}:${path}` row key —
+    // "Attached documents" is the one list here that is NOT repo-scoped (an
+    // agent can hold direct attachments from several repos at once), so two
+    // rows can legitimately share a `path`. Omitting this collapses back to
+    // the `path`-only key the same bug class this session's M1 fixed at the
+    // data layer (`detach()`) was also caused by.
+    repo_id: d.repo_id,
     type: d.type,
     tokens: d.tokens,
     checked: true,
@@ -179,7 +215,7 @@ export function ContextTab({ agent }: { agent: Agent }) {
           items={attachedItems}
           onToggle={detach}
           onReorder={reorder}
-          onPreview={setPreviewPath}
+          onPreview={(item) => setPreviewTarget({ repoId: item.repo_id ?? activeRepo.id, path: item.path })}
         />
         {directDocs.some((d) => d.drift) && (
           <div style={s.driftList}>
@@ -228,7 +264,9 @@ export function ContextTab({ agent }: { agent: Agent }) {
                 </span>
                 {d.drift && <DriftBadge onClick={() => openDrift(d)} />}
                 <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {t("agentTab.inheritedFrom", { skill: d.skill_id ?? "" })}
+                  {t("agentTab.inheritedFrom", {
+                    skill: (d.skill_id && skillNameById.get(d.skill_id)) || d.skill_id || "",
+                  })}
                 </span>
                 <span className="tnum" style={{ fontSize: 12, color: "var(--text-muted)" }}>
                   {t("tokens.approx", { count: d.tokens })}
@@ -246,16 +284,20 @@ export function ContextTab({ agent }: { agent: Agent }) {
         {docsLoading ? (
           <Skeleton height={120} />
         ) : (
-          <AttachmentList items={browseItems} onToggle={attach} onPreview={setPreviewPath} />
+          <AttachmentList
+            items={browseItems}
+            onToggle={attach}
+            onPreview={(item) => setPreviewTarget({ repoId: item.repo_id ?? activeRepo.id, path: item.path })}
+          />
         )}
       </div>
 
-      {previewPath && (
+      {previewTarget && (
         <Drawer
           width={640}
           title={t("preview.drawerTitle")}
-          subtitle={previewPath}
-          onClose={() => setPreviewPath(null)}
+          subtitle={previewTarget.path}
+          onClose={() => setPreviewTarget(null)}
         >
           {preview ? (
             <DocumentPreview

@@ -27,7 +27,8 @@
     "title": "Generate onboarding tour",
     "body": "DevDigest reads the repository's index and its cloned source, then writes a six-section guided tour: Architecture overview, Critical paths, Routes & APIs, How to run locally, Guided reading path, and First tasks.",
     "cta": "Generate onboarding tour",
-    "generating": "Generating…"
+    "generating": "Generating…",
+    "generatingBody": "Generating this tour for the first time — this runs in the background and can take a minute."
   },
   "loadError": {
     "title": "Couldn’t load the onboarding tour"

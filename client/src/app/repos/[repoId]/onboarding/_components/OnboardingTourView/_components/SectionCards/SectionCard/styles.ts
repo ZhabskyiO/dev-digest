@@ -9,6 +9,11 @@ export const s = {
     background: "var(--bg-elevated)",
     overflow: "hidden",
   } satisfies CSSProperties,
+  headingWrap: {
+    margin: 0,
+    font: "inherit",
+    fontWeight: "inherit",
+  } satisfies CSSProperties,
   header: {
     display: "flex",
     alignItems: "center",

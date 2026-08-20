@@ -28,6 +28,7 @@ Element.prototype.scrollIntoView = vi.fn();
 let RESPONSE: OnboardingTourResponse | undefined;
 let QUERY_LOADING = false;
 let QUERY_ERROR = false;
+let QUERY_ERROR_VALUE: unknown = null;
 const refetchFn = vi.fn();
 const generateMutate = vi.fn();
 let generatePending = false;
@@ -37,7 +38,7 @@ vi.mock("@/lib/hooks", () => ({
     data: RESPONSE,
     isLoading: QUERY_LOADING,
     isError: QUERY_ERROR,
-    error: null,
+    error: QUERY_ERROR_VALUE,
     refetch: refetchFn,
   }),
   useGenerateOnboardingTour: () => ({
@@ -61,11 +62,19 @@ vi.mock("next/navigation", () => ({
 // thin stand-in that still renders `crumb` is enough to prove AC-35's
 // breadcrumb without any of that.
 vi.mock("@/components/app-shell", () => ({
-  AppShell: ({ children, crumb }: { children: React.ReactNode; crumb?: { label: string }[] }) => (
+  AppShell: ({
+    children,
+    crumb,
+  }: {
+    children: React.ReactNode;
+    crumb?: { label: string; mono?: boolean }[];
+  }) => (
     <div>
       <nav aria-label="breadcrumb">
         {crumb?.map((c, i) => (
-          <span key={i}>{c.label}</span>
+          <span key={i} data-mono={c.mono ? "true" : undefined}>
+            {c.label}
+          </span>
         ))}
       </nav>
       {children}
@@ -174,6 +183,7 @@ afterEach(() => {
   RESPONSE = undefined;
   QUERY_LOADING = false;
   QUERY_ERROR = false;
+  QUERY_ERROR_VALUE = null;
   generatePending = false;
   vi.clearAllMocks();
 });
@@ -188,7 +198,7 @@ beforeEach(() => {
 describe("OnboardingTourView", () => {
   it("renders six section cards and a six-entry on-this-page list in AC-1 order, Routes and APIs third (AC-36)", () => {
     RESPONSE = { tour: tour(), state: "ready", stale: false, failure_reason: null, job_id: null };
-    const { container } = renderView();
+    renderView();
 
     const toc = screen.getByRole("navigation", { name: "On this page" });
     const entries = within(toc).getAllByRole("button").map((btn) => btn.textContent);
@@ -201,8 +211,12 @@ describe("OnboardingTourView", () => {
       "First tasks",
     ]);
 
+    // Each section title is reachable as a real heading, not just as a
+    // scroll-anchor DOM id (M7/L8) — the on-this-page entries above and
+    // these headings share the same catalogue text, so this also proves
+    // every card actually rendered.
     for (const kind of SIX_KINDS) {
-      expect(container.querySelector(`#${kind}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: onboardingMessages.sections[kind] })).toBeInTheDocument();
     }
   });
 
@@ -240,12 +254,12 @@ describe("OnboardingTourView", () => {
       failure_reason: null,
       job_id: null,
     };
-    const { container } = renderView();
+    renderView();
 
     const toc = screen.getByRole("navigation", { name: "On this page" });
     expect(within(toc).getAllByRole("button")).toHaveLength(6);
     for (const kind of SIX_KINDS) {
-      expect(container.querySelector(`#${kind}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: onboardingMessages.sections[kind] })).toBeInTheDocument();
     }
     expect(
       screen.getByText("Not enough grounded evidence was found to fill this section."),
@@ -269,14 +283,26 @@ describe("OnboardingTourView", () => {
     expect(generateMutate).toHaveBeenCalled();
   });
 
+  it("renders the first-generation copy, not the 'previous version shown below' regenerating notice, when there is no stored tour yet (M4)", () => {
+    RESPONSE = { tour: null, state: "generating", stale: false, failure_reason: null, job_id: "job1" };
+    renderView();
+
+    expect(screen.getByText(onboardingMessages.generate.generatingBody)).toBeInTheDocument();
+    expect(screen.queryByText(onboardingMessages.notice.generating)).not.toBeInTheDocument();
+  });
+
   it("keeps all six previous sections rendered and disables Regenerate while generating (AC-26, AC-27)", () => {
     RESPONSE = { tour: tour(), state: "generating", stale: false, failure_reason: null, job_id: "job1" };
-    const { container } = renderView();
+    renderView();
 
     for (const kind of SIX_KINDS) {
-      expect(container.querySelector(`#${kind}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: onboardingMessages.sections[kind] })).toBeInTheDocument();
     }
     expect(screen.getByRole("button", { name: "Regenerating…" })).toBeDisabled();
+    // A tour IS stored and rendered below this notice here, unlike the
+    // no-stored-tour case above — this is the one place `notice.generating`
+    // is actually correct.
+    expect(screen.getByText(onboardingMessages.notice.generating)).toBeInTheDocument();
   });
 
   it("renders the failed reason and still renders the previous tour (AC-28)", () => {
@@ -287,11 +313,11 @@ describe("OnboardingTourView", () => {
       failure_reason: "provider timeout",
       job_id: null,
     };
-    const { container } = renderView();
+    renderView();
 
     expect(screen.getByText(/last regeneration failed: provider timeout/)).toBeInTheDocument();
     for (const kind of SIX_KINDS) {
-      expect(container.querySelector(`#${kind}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: onboardingMessages.sections[kind] })).toBeInTheDocument();
     }
   });
 
@@ -343,13 +369,13 @@ describe("OnboardingTourView", () => {
 
   it("renders the stale marker and all six sections for a stale tour (AC-29, AC-30)", () => {
     RESPONSE = { tour: tour(), state: "ready", stale: true, failure_reason: null, job_id: null };
-    const { container } = renderView();
+    renderView();
 
     expect(
       screen.getByText(/generated before the latest repository index update/),
     ).toBeInTheDocument();
     for (const kind of SIX_KINDS) {
-      expect(container.querySelector(`#${kind}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: onboardingMessages.sections[kind] })).toBeInTheDocument();
     }
   });
 
@@ -401,5 +427,63 @@ describe("OnboardingTourView", () => {
     }
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share link" })).toBeInTheDocument();
+  });
+
+  it("passes mono: true for the repo breadcrumb segment, matching every other repo-scoped page (L7)", () => {
+    RESPONSE = { tour: tour(), state: "ready", stale: false, failure_reason: null, job_id: null };
+    renderView();
+
+    const crumb = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(within(crumb).getByText("acme/payments-api")).toHaveAttribute("data-mono", "true");
+  });
+
+  it("Share link defaults to the first section's anchor before any scroll or TOC activation (M1)", async () => {
+    RESPONSE = { tour: tour(), state: "ready", stale: false, failure_reason: null, job_id: null };
+    renderView();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Share link" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const writeText = navigator.clipboard.writeText as ReturnType<typeof vi.fn>;
+    const written = writeText.mock.calls[0]![0] as string;
+    expect(written.endsWith("#architecture")).toBe(true);
+  });
+
+  it("Share link never shows 'Link copied' when the clipboard write rejects (M2)", async () => {
+    RESPONSE = { tour: tour(), state: "ready", stale: false, failure_reason: null, job_id: null };
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockRejectedValue(new Error("permission denied")) },
+      configurable: true,
+    });
+    renderView();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Share link" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText(onboardingMessages.shareCopied)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share link" })).toBeInTheDocument();
+  });
+
+  it("Share link never shows 'Link copied' when navigator.clipboard is unavailable (M2)", () => {
+    RESPONSE = { tour: tour(), state: "ready", stale: false, failure_reason: null, job_id: null };
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    renderView();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share link" }));
+    expect(screen.queryByText(onboardingMessages.shareCopied)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the catalogue's unknown-error copy for a non-ApiError load failure (L6)", () => {
+    QUERY_ERROR = true;
+    QUERY_ERROR_VALUE = new Error("network down");
+    renderView();
+
+    expect(screen.getByText(onboardingMessages.unknownError)).toBeInTheDocument();
   });
 });

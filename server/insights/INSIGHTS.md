@@ -394,6 +394,50 @@ Conventions and architectural decisions specific to this repo.
   exhaustive — an omission in the plan's bullet list is not evidence of a
   deliberate carve-out.
 
+- 2026-08-20 — When a `planBudget`-style function has TWO callers that must
+  agree on the exact same `dropped` list for "the same input" (AC-40's
+  preview vs. AC-23's run-time drop, `_shared/context-budget.ts`), "the same
+  input" means the identical, UNFILTERED candidate set — never a
+  budget-planning call over a subset one caller pre-filtered (e.g. dropping
+  `wrong_repo`/`missing` documents before budgeting) while the other budgets
+  over the full set. `modules/reviews/prompt-context.ts::resolveProjectContext`
+  used to filter first, which let an excluded document's tokens silently
+  "free up" budget space the preview (`ProjectContextService.effectiveContext`)
+  had already counted as spent — so the preview's `dropped_paths` and the
+  run's `dropped_over_budget` set could name different documents for the
+  same effective set (pre-PR gate finding). Fixed by running `planBudget`
+  FIRST over the full set, then determining `wrong_repo`/`missing` as a
+  SEPARATE, later step that overrides a budget-`injected` verdict (never the
+  reverse) — the existing `outcomePrecedence`/`resolveOutcome` machinery in
+  `project-context/helpers.ts` already models exactly this "which fact wins
+  when several apply to one document" shape; reuse it (or its ordering)
+  rather than filtering before planning.
+
+- 2026-08-20 — When two DIFFERENT modules' repositories must stay consistent
+  (one write per module, no shared DB transaction available) — e.g.
+  `SkillsService.update` writes `context_attachments` via
+  `container.projectContext.setSkillContext` (its own transaction) THEN
+  `skills`/`skill_versions` via `SkillsRepository.update` (a separate
+  transaction) — a failure in the SECOND write after the FIRST already
+  committed is not fixable by wrapping both in one transaction (the two
+  repositories don't share a `Db`/`tx` handle, and reaching into the other
+  module's repository to write its table would violate the "one file owns
+  this table" rule `ProjectContextRepository`'s header documents). The fix
+  is a compensating write: snapshot the pre-write state via the OTHER
+  module's own read method (`ProjectContextService.skillContext`) before
+  overwriting it, and on failure replay the SAME write method
+  (`setSkillContext`) with that snapshot. This works cleanly specifically
+  because the write is a full delete-then-insert
+  (`ProjectContextRepository.replaceAttachments`) — replaying with the prior
+  ref list reproduces the exact prior `(repo_id, path)` set with no orphaned
+  row, even though a ref that has to be re-created picks up a fresh
+  attach-time hash/revision rather than its original one (an accepted,
+  narrow imperfection confined to an already-rare failure path). Generalize:
+  a cross-module consistency fix reaches for "read current state via the
+  other module's public API, write, and on failure replay the same public
+  API with the saved state" before reaching for a shared transaction that
+  may not be achievable without a layering violation.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.

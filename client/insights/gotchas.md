@@ -51,6 +51,22 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-20 — **NEVER type a `useRef` holding a timeout id as
+  `ReturnType<typeof window.setTimeout>`** — it fails `tsc --noEmit` with
+  `Type 'number' is not assignable to type 'Timeout'` even though the same
+  ref assigned from a bare `setTimeout(...)` call typechecks fine. This
+  repo's ambient types resolve `window.setTimeout`'s return type to Node's
+  `Timeout` (via `@types/node`'s global augmentation) while the actual call
+  `window.setTimeout(...)` still returns a `number` at runtime in the DOM —
+  the two disagree. Use the existing codebase convention instead: `const ref
+  = useRef<ReturnType<typeof setTimeout> | null>(null)` and call bare
+  `setTimeout(...)`/`clearTimeout(...)` (no `window.` prefix), matching
+  `components/findings-summary/useHoverCard.ts` and
+  `components/app-shell/hooks/useGlobalShortcuts.ts`. Fixed the same way in
+  `OnboardingTourView.tsx`'s Share-link reset timer and
+  `SectionCards/LocalSetupCard/LocalSetupCard.tsx`'s per-row copy reset
+  timer.
+
 - 2026-08-20 — In an RTL test asserting a `MermaidDiagram` rendered (or
   didn't), NEVER assert on `container.querySelector("svg")` alone — every
   `@devdigest/ui`/`vendor/ui/icons.tsx` lucide icon is *also* an `<svg>`, so a
@@ -138,6 +154,32 @@ Quirks of dependencies, tooling, and the local environment.
   reason assertion. Run the grep against your own owned files before calling
   the task done; don't assume passing tests means the literal verification
   command also passes.
+
+- 2026-08-20 — `Intl.ListFormat(locale, { type: "conjunction" })` inserts an
+  Oxford comma for 3+ English items (`"specs/, docs/, and insights/"`), NOT
+  the comma-less `"specs/, docs/ and insights/"` a hand-rolled `joinList`
+  might produce. Confirmed via `node -e 'new Intl.ListFormat("en",
+  {type:"conjunction"}).format(["specs/","docs/","insights/"])'`. Switching a
+  hardcoded English joiner (never hardcode `" and "` in a component — use
+  `Intl.ListFormat` sourced from next-intl's `useLocale()`) to
+  `Intl.ListFormat` changes the exact rendered punctuation, so any test
+  asserting the literal joined string must build its expectation from
+  `Intl.ListFormat` too, not restate the old hand-written format — see
+  `app/repos/[repoId]/context/_components/ProjectContextView/ProjectContextView.test.tsx`.
+
+- 2026-08-20 — `useTranslations()`'s `t()` NEVER throws on a missing key —
+  confirmed by rendering `t(`ns.outcome.${unrecognisedValue}`)` in a test: it
+  logs `IntlError: MISSING_MESSAGE: Could not resolve …` to `console.error`
+  (visible in vitest's stderr) and falls back to next-intl's own
+  `getMessageFallback`, not a thrown exception. So a dynamic-key translation
+  lookup fed an out-of-union enum value from unvalidated persisted/server data
+  degrades safely on its own — the "never throw on unrecognised data" fix
+  only needs to guard *plain object/Record lookups* keyed by that same value
+  (e.g. `SOME_RECORD[value]` — `undefined.someProp` throws), not the `t()`
+  call sitting right next to it. See
+  `RunTraceDrawer/_components/TraceBody/TraceBody.tsx`'s `PROJECT_CONTEXT_OUTCOME_TONE`
+  lookup (fixed) vs. its neighbouring `t(`trace.projectContext.outcome.${doc.outcome}`)`
+  call (left as-is, already safe).
 
 ## Recurring Errors & Fixes
 

@@ -35,7 +35,7 @@ import type {
   OnboardingFirstTask,
   OnboardingLink,
 } from '@devdigest/shared';
-import { SECTION_KINDS, DIAGRAM_KINDS, EXCLUDED_PATH_SEGMENTS } from './constants.js';
+import { SECTION_KINDS, EXCLUDED_PATH_SEGMENTS } from './constants.js';
 import type { EvidenceFile, EvidenceResult } from './evidence.js';
 
 // ---- renderFacts (user message assembly) -----------------------------------
@@ -395,7 +395,7 @@ export async function groundTour(
       kind: 'architecture',
       title: architectureDraft.title,
       body: architectureDraft.body,
-      diagram: DIAGRAM_KINDS.includes('architecture') ? architectureDraft.diagram : null, // AC-13
+      diagram: architectureDraft.diagram, // AC-13: diagram permitted on this kind
       links: architectureLinks,
     },
     (() => {
@@ -414,7 +414,7 @@ export async function groundTour(
       return {
         kind: 'routes_and_apis' as const,
         title: routesDraft.title,
-        diagram: DIAGRAM_KINDS.includes('routes_and_apis') ? routesDraft.diagram : null,
+        diagram: routesDraft.diagram, // AC-13: diagram permitted on this kind
         items: reason ? [] : routesResult.items,
         facts_unavailable: routesResult.factsUnavailable,
         items_capped: routesResult.capped,

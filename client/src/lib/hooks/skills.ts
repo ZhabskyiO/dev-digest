@@ -64,7 +64,7 @@ export interface UpdateSkillInput {
   /** "What changed" note; the server records it only when the body changed. */
   version_label?: string;
   /** The skill's ordered project-context attachment set (specs/2026-08-18
-   *  -project-context.md, AC-13, AC-42). Sent through this same PATCH — not a
+   *  -project-context.md, AC-13, AC-42). Sent through this same PUT — not a
    *  separate mutation — so a body-and-attachments edit is one save and one
    *  `skill_versions` snapshot. */
   context?: ProjectContextRef[];

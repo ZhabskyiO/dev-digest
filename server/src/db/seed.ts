@@ -250,11 +250,23 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
       },
     ],
     generated_at: '2026-08-18T10:00:00.000Z',
-    indexed_revision: 'f3a9c7d1e8b4025619bc9a4e7f18cd2b6a0d3e5',
+    indexed_revision: 'f3a9c7d1e8b4025619bc9a4e7f18cd2b6a0d3e5a',
     indexed_file_count: 12450,
     provider: DEFAULT_PROVIDER,
     model: DEFAULT_MODEL,
   };
+  // `Onboarding`'s `indexed_revision` is a bare `z.string()` (no length/format
+  // constraint), so a malformed sha (e.g. 39 hex chars instead of 40) parses
+  // fine and only breaks the demo silently: `OnboardingService.getTour`
+  // compares it against `repo_index_state.lastIndexedSha` to derive `stale`
+  // (service.ts), and a sha that can never match a real one renders the
+  // seeded tour permanently stale. Check the actual shape here, not by eye.
+  if (!/^[0-9a-f]{40}$/.test(onboardingPayload.indexed_revision)) {
+    throw new Error(
+      `seed: onboardingPayload.indexed_revision must be a 40-char lowercase hex sha, got ` +
+        `${JSON.stringify(onboardingPayload.indexed_revision)} (length ${onboardingPayload.indexed_revision.length})`,
+    );
+  }
   // Validate in the seed, not by eye — see the doc comment above.
   const validatedOnboarding = Onboarding.parse(onboardingPayload);
 

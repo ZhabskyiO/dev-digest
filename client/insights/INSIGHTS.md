@@ -32,9 +32,92 @@ Approaches and solutions that worked here and are worth reusing.
   QueryClient()` per `render()` to avoid cross-test cache bleed. See
   `client/src/app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.test.tsx`.
 
+- 2026-08-20 — To reseed a local draft (`useState`) from React Query DATA on
+  first load without ever clobbering unsaved in-progress edits on a later
+  background refetch, gate the reset with a ref tracking "have I already
+  seeded THIS entity's id" — NOT with `!isDirty` alone. `!isDirty` alone
+  deadlocks on the very FIRST load whenever the persisted set is non-empty:
+  before the draft has ever been seeded it trivially differs from the
+  just-loaded server data, so `isDirty` is already true and the guard blocks
+  the very seed it exists to allow through. The ref lets the FIRST load for a
+  given id always seed (ignoring `isDirty`), while every LATER refetch of the
+  SAME id only reseeds when `!isDirty`. See
+  `client/src/app/skills/_components/SkillDetail/_components/ContextTab/ContextTab.tsx`'s
+  `seededForSkillRef` effect, and its test's "background refetch while dirty"
+  case for how to exercise it: extend the test's `renderTab()` helper to
+  return the `QueryClient` it built so the test can call
+  `qc.invalidateQueries({ queryKey: [...] })` directly against the exact
+  instance the tree is wired to, simulating a refetch without a real mutation.
+
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
+
+- 2026-08-20 — `AttachmentList`'s composite `${repo_id}:${path}` row key
+  (`AttachmentList.tsx:96-98`) only actually disambiguates two same-path rows
+  if the CALLER populates `AttachmentListItem.repo_id` — it's optional and
+  silently falls back to `""` when omitted, collapsing straight back to the
+  `path`-only collision the composite key exists to prevent. The agent
+  Context tab's cross-repo "Attached documents" list (`attachedItems`, built
+  from `directDocs`, which spans every repo the agent has ever attached
+  from — see the file's own header comment) needed `repo_id: d.repo_id`
+  added to the mapped item explicitly; it is not inferred from anywhere else.
+  Separately, and NOT fixed by the composite key: `onToggle`/`onPreview`
+  still report only `path` back to the caller, never `repo_id` — a caller
+  mutating state from that callback (e.g. `detach()`) genuinely cannot know
+  WHICH of two same-path rows was clicked. The practical fix there is to
+  resolve the matching doc from the caller's OWN source array by path (first
+  match wins) rather than trying to disambiguate the click itself — see
+  `app/agents/[id]/_components/AgentEditor/_components/ContextTab/ContextTab.tsx`'s
+  `detach()`.
+  └ 2026-08-20 correction: "first match wins" was itself a bug, not a fix — it
+    silently acts on the FIRST row in list order regardless of which row was
+    actually clicked (a wrong-row action, not merely a missing disambiguation).
+    The real fix threads identity through the callback itself:
+    `AttachmentList`'s `onToggle`/`onPreview` now report the FULL clicked
+    `AttachmentListItem` (`repo_id` + `path`), not a bare path string —
+    `AttachmentList.tsx`'s `RowContent` calls `onToggle(item)`/`onPreview(item)`
+    instead of `onToggle(item.path)`. `detach()` then filters `directRefs` by
+    `r.repo_id === item.repo_id && r.path === item.path` directly, with no
+    `directDocs.find()` resolution step at all. The skill ContextTab's
+    `toggle()` was updated to the same signature for consistency even though
+    its lists are always single-repo-scoped (`attachedRefs`/`browseItems`
+    filtered to `selectedRepoId`), so it has no reachable version of this bug.
+    One residual gap NOT fixed (flagged, not closed): `onPreview`'s new full
+    item is still reduced back to a bare path before reaching
+    `useDocumentPreview(repoId, path)`, which is scoped to the ACTIVE repo
+    (component state), not `item.repo_id` — previewing a same-path row from a
+    non-active repo still shows the active repo's content at that path.
+    Fixing that needs the preview hook (`lib/hooks/`) to accept a repo id per
+    call, out of a UI-only task's owned paths.
+  └ 2026-08-20 correction: closed, and it was NOT a hook change after all.
+    `useDocumentPreview(repoId, path)` (`lib/hooks/project-context.ts:54-66`)
+    already accepted `repoId` as a normal per-call argument and already keyed
+    its query on `["project-context-preview", repoId, path]` — the bug was
+    entirely in the TWO CALL SITES passing the tab's active-repo state
+    instead of the clicked row's own `item.repo_id`. Fix: both ContextTabs now
+    track `previewTarget: { repoId, path }` (not a bare path) set from
+    `item.repo_id ?? activeRepo.id` in every `onPreview` handler, and pass
+    `previewTarget?.repoId`/`previewTarget?.path` straight into the existing
+    hook signature unchanged. Lesson for next time: before assuming a fix
+    needs a hook/contract change, check whether the hook already accepts the
+    right parameter and the bug is only in what the CALLER passes it — this
+    one looked like an out-of-scope hook change for two passes running before
+    someone actually read the hook's existing signature.
+
+- 2026-08-20 — When a semantic heading (`<h2>`, etc.) wraps a toggle/disclosure
+  `<button>` that carries its OWN `aria-label` (e.g. a collapse control
+  labelled `"Toggle {section} section"`), give the heading itself an explicit
+  `aria-label` too — otherwise its accessible name is computed from the
+  button's aria-label (accname's "name from content" recurses into the
+  interactive child and uses ITS name, not its visible text), not from the
+  heading's visible span text. Without the heading's own `aria-label`,
+  `getByRole("heading", { name: "Architecture overview" })` fails to match
+  even though "Architecture overview" is plainly visible on screen — the
+  heading's computed name is actually `"Toggle Architecture overview
+  section"`. Fixed in `SectionCards/SectionCard/SectionCard.tsx`:
+  `<h2 aria-label={heading}><button aria-label={t("collapseSection", …)}>…`
+  pins the h2's name to just the section title, independent of the button.
 
 - 2026-08-20 — A component folder MUST carry its own `index.ts` re-export
   (`export { Thing } from "./Thing";`) the moment a SIBLING component folder
@@ -171,3 +254,19 @@ Unresolved, worth investigating.
   a "related links" affordance per section, `groundLinks()`'s existence check
   is not itself a scheme guard — that new render site will need its own
   http(s)-only check before treating `link.path` as an `href`.
+
+- 2026-08-20 — `AttachmentList`'s "Attached documents" list (agent Context
+  tab) is NOT scoped to the active repo — `attachedItems` is built from
+  `effective.documents.filter(d => d.source === "agent")`, i.e. every
+  attachment the agent has ever made across every repo, per
+  `ContextTab.tsx`'s own comment ("Attachments already made against another
+  repo stay saved and still appear in 'Attached documents'"). That's why
+  keying `AttachmentList`'s rows on `path` alone (fixed to
+  `${repo_id}:${path}`, `AttachmentList.tsx:236-252`) was a real, reachable
+  bug, not a theoretical one. That fix covers the React `key` only —
+  `SortableRow`'s `useSortable({ id: item.path })` (`AttachmentList.tsx:167`)
+  still uses `path` alone as the dnd-kit item id, so two attached docs from
+  different repos sharing a path would still collide as duplicate ids inside
+  `SortableContext` during a drag. Not fixed in this pass (out of scope for
+  the two findings this session covered); worth flagging if a future task
+  touches reordering in this list.

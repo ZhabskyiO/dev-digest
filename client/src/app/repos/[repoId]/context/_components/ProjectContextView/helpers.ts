@@ -45,11 +45,13 @@ export function formatSize(bytes: number): { key: "page.size.bytes" | "page.size
 }
 
 /** Joins a list of configured root/filename strings into human prose —
- *  `["specs/", "docs/", "insights/"]` becomes `"specs/, docs/ and insights/"`,
- *  matching AC-43's example copy exactly while staying driven entirely by
- *  whatever the API returned (never a hardcoded root list). */
-export function joinList(items: string[]): string {
+ *  `["specs/", "docs/", "insights/"]` becomes e.g. `"specs/, docs/, and
+ *  insights/"` in English — via `Intl.ListFormat` so the conjunction itself
+ *  is locale-correct rather than a hardcoded English `" and "`, while still
+ *  staying driven entirely by whatever the API returned (never a hardcoded
+ *  root list). `locale` must be sourced from next-intl's `useLocale()` at
+ *  the call site, not hardcoded. */
+export function joinList(items: string[], locale: string): string {
   if (items.length === 0) return "";
-  if (items.length === 1) return items[0]!;
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return new Intl.ListFormat(locale, { type: "conjunction" }).format(items);
 }

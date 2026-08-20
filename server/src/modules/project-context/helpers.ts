@@ -2,56 +2,13 @@
  * project-context — pure helpers (T9). No I/O, no DB, no git, no tokenizer:
  * every function here is a plain data transform so it can be unit-tested
  * without a fixture clone or a database.
+ *
+ * `planBudget` used to live here too; it moved to `../_shared/context-budget.js`
+ * because it has a genuine second consumer outside this module
+ * (`modules/reviews/prompt-context.ts`) — see that file's header for the
+ * rationale. Import it from there directly; it is not re-exported here.
  */
 import type { ProjectContextOutcome } from '@devdigest/shared';
-
-// ---------------------------------------------------------------------------
-// Budget planning (AC-23, AC-40)
-// ---------------------------------------------------------------------------
-
-export interface PlanBudgetResult<T> {
-  /** Documents that fit, in the same order they were given. */
-  injected: T[];
-  /** Everything from the first document that didn't fit onward, in order. */
-  dropped: T[];
-}
-
-/**
- * Plans which documents fit a token budget, in order — "stop at first
- * overflow": documents are injected while the running total stays within
- * `budgetTokens`; the FIRST document that would push the total over the
- * budget, and every document after it, is dropped, even if a later document
- * alone would have fit. This is deliberately not a best-fit/knapsack packing
- * — prompt order matters more than squeezing in a smaller later document
- * out of order (AC-14 already defines order as prompt order).
- *
- * Shared by two callers that must agree on the exact same tail: AC-40's
- * "what would be dropped" preview in the effective-context UI, and AC-23's
- * actual run-time drop. Both must compute the identical `dropped` list for
- * the same input, or the UI's warning would lie about what a run actually
- * does.
- */
-export function planBudget<T extends { tokens: number }>(
-  docs: readonly T[],
-  budgetTokens: number,
-): PlanBudgetResult<T> {
-  const injected: T[] = [];
-  const dropped: T[] = [];
-  let used = 0;
-  let overBudget = false;
-
-  for (const doc of docs) {
-    if (!overBudget && used + doc.tokens <= budgetTokens) {
-      injected.push(doc);
-      used += doc.tokens;
-    } else {
-      overBudget = true;
-      dropped.push(doc);
-    }
-  }
-
-  return { injected, dropped };
-}
 
 // ---------------------------------------------------------------------------
 // Effective context merge (AC-16)

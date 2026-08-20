@@ -137,12 +137,44 @@ describe("ProjectContextView", () => {
     renderView();
 
     const body = screen.getByText(/DevDigest reads Markdown from/);
-    // Every configured root and filename appears, joined from the API's own
-    // arrays — never a hardcoded "specs/, docs/ and insights/" literal.
-    expect(body.textContent).toContain("specs/, docs/ and insights/");
+    // Every configured root and filename appears, joined via Intl.ListFormat
+    // (locale-correct conjunction) from the API's own arrays — never a
+    // hardcoded English " and " literal in the component.
+    expect(body.textContent).toContain(
+      new Intl.ListFormat("en", { type: "conjunction" }).format(["specs/", "docs/", "insights/"]),
+    );
     expect(body.textContent).toContain("insights.md");
     // And nothing that wasn't configured leaks in.
     expect(body.textContent).not.toContain("guides/");
+  });
+
+  it("joins the no-documents roots prose correctly for one, two, and three roots (AC-43)", () => {
+    // One root: no conjunction at all.
+    DATA = listResponse({ documents: [], roots: ["specs/"], conventional_filenames: [] });
+    const { unmount } = renderView();
+    expect(screen.getByText(/DevDigest reads Markdown from/).textContent).toContain("specs/ folders");
+    unmount();
+    cleanup();
+
+    // Two roots: single conjunction, no comma.
+    DATA = listResponse({ documents: [], roots: ["specs/", "docs/"], conventional_filenames: [] });
+    const two = renderView();
+    expect(screen.getByText(/DevDigest reads Markdown from/).textContent).toContain(
+      new Intl.ListFormat("en", { type: "conjunction" }).format(["specs/", "docs/"]),
+    );
+    two.unmount();
+    cleanup();
+
+    // Three roots: comma-separated with a trailing conjunction.
+    DATA = listResponse({
+      documents: [],
+      roots: ["specs/", "docs/", "insights/"],
+      conventional_filenames: [],
+    });
+    renderView();
+    expect(screen.getByText(/DevDigest reads Markdown from/).textContent).toContain(
+      new Intl.ListFormat("en", { type: "conjunction" }).format(["specs/", "docs/", "insights/"]),
+    );
   });
 
   it("renders the not_cloned empty state, distinct from the no-documents one (AC-4)", () => {

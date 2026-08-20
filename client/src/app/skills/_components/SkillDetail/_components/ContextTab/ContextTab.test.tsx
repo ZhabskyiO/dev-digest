@@ -13,6 +13,14 @@ import skillsMessages from "../../../../../../../messages/en/skills.json";
 import contextMessages from "../../../../../../../messages/en/context.json";
 import { ToastProvider } from "../../../../../../lib/toast";
 
+// Builds the expected rendered copy from the imported messages fixture
+// instead of restating the English text as a literal — a literal passes
+// even after the underlying message key's meaning changes (client/insights/
+// gotchas.md, 2026-08-20).
+function fill(template: string, params: Record<string, string | number>): string {
+  return Object.entries(params).reduce((acc, [key, value]) => acc.replaceAll(`{${key}}`, String(value)), template);
+}
+
 const SKILL: Skill = {
   id: "sk1",
   name: "pr-quality-rubric",
@@ -154,9 +162,11 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderTab(skill: Skill = SKILL) {
-  const qc = new QueryClient();
-  return render(
+// `qc` is returned so a test can force a background refetch (e.g.
+// `qc.invalidateQueries`) against the exact QueryClient instance the
+// rendered tree is wired to (M2's regression needs this).
+function renderTab(skill: Skill = SKILL, qc: QueryClient = new QueryClient()) {
+  const utils = render(
     <QueryClientProvider client={qc}>
       <RepoProvider>
         <NextIntlClientProvider locale="en" messages={{ skills: skillsMessages, context: contextMessages }}>
@@ -167,6 +177,7 @@ function renderTab(skill: Skill = SKILL) {
       </RepoProvider>
     </QueryClientProvider>,
   );
+  return { ...utils, qc };
 }
 
 describe("ContextTab", () => {
@@ -272,7 +283,9 @@ describe("ContextTab", () => {
 
     expect(screen.queryByRole("combobox")).toBeNull();
     // The hint names the active repo instead of a selector label.
-    expect(screen.getByText(new RegExp(`Attaching from ${REPO.full_name}`))).toBeInTheDocument();
+    expect(
+      screen.getByText(fill(contextMessages.skillSection.repoHint, { repo: REPO.full_name })),
+    ).toBeInTheDocument();
   });
 
   it("previews a document in a right-side drawer, closable again", async () => {
@@ -321,5 +334,50 @@ describe("ContextTab", () => {
     expect(
       screen.queryByRole("button", { name: /Reorder setup\.md/ }),
     ).toBeNull();
+  });
+
+  it("a background refetch of ['skill-context', id] while the draft is dirty does not discard the user's unsaved edits (M2)", async () => {
+    skillAttachments = [
+      { repo_id: REPO.id, path: "specs/security-baseline.md", order: 0, attached_hash: "h", attached_size: 0, attached_revision: "rev1" },
+    ];
+    const { qc } = renderTab();
+
+    expect(await screen.findByRole("checkbox", { name: /security-baseline\.md/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    // Dirty the draft WITHOUT saving — attach a second document locally only.
+    fireEvent.click(await screen.findByRole("checkbox", { name: /public-api\.md/ }));
+    expect(await screen.findByRole("checkbox", { name: /public-api\.md/ })).toHaveAttribute("aria-checked", "true");
+
+    // A background refetch lands (another tab, a focus refetch, …) — the
+    // mocked "server" still only knows about the ORIGINAL attachment since
+    // nothing was saved. Before the fix, the effect reseeded `draft` from
+    // this stale response and silently dropped the just-toggled
+    // public-api.md the moment it arrived.
+    await qc.invalidateQueries({ queryKey: ["skill-context", SKILL.id] });
+
+    expect(await screen.findByRole("checkbox", { name: /public-api\.md/ })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("checkbox", { name: /security-baseline\.md/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("renders a token budget total for the skill's own attachment set against the configured budget (L1)", async () => {
+    skillAttachments = [
+      { repo_id: REPO.id, path: "specs/security-baseline.md", order: 0, attached_hash: "h", attached_size: 0, attached_revision: "rev1" },
+      { repo_id: REPO.id, path: "specs/public-api.md", order: 1, attached_hash: "h", attached_size: 0, attached_revision: "rev1" },
+    ];
+    renderTab();
+
+    // security-baseline.md (139 tokens) + public-api.md (178 tokens) = 317,
+    // against DOCS_RESPONSE's budget_tokens (1000) — the same budget signal
+    // the agent Context tab already shows while configuring, not only
+    // discoverable later in a run trace.
+    expect(
+      await screen.findByText(fill(contextMessages.budget.approx, { total: 317, budget: 1000 })),
+    ).toBeInTheDocument();
   });
 });

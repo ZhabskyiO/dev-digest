@@ -1,7 +1,7 @@
 /* hooks/project-context.ts — React Query hooks for the Project Context feature
    (specs/2026-08-18-project-context.md): the repo-level document list/rescan/
    preview/drift surface, and the agent/skill attachment surface. Skill
-   attachments are saved through `useUpdateSkill` (PATCH /skills/:id, body
+   attachments are saved through `useUpdateSkill` (PUT /skills/:id, body
    carries `context`) — NOT a hook here — because a separate mutation would
    append two `skill_versions` rows for one logical save (AC-39, AC-42). */
 "use client";

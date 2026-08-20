@@ -10,6 +10,7 @@ import type { OnboardingSection } from "@devdigest/shared";
 import { Markdown } from "@devdigest/ui";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import { SectionCard } from "../SectionCard";
+import { stripMarkdownLinks } from "./helpers";
 import { s } from "./styles";
 
 type ArchitectureSection = Extract<OnboardingSection, { kind: "architecture" }>;
@@ -19,7 +20,7 @@ export function ArchitectureCard({ section }: { section: ArchitectureSection }) 
   return (
     <SectionCard kind="architecture" icon="GitBranch" isEmpty={isEmpty}>
       <div style={s.prose}>
-        <Markdown>{section.body}</Markdown>
+        <Markdown>{stripMarkdownLinks(section.body)}</Markdown>
       </div>
       {section.diagram && <MermaidDiagram chart={section.diagram} />}
     </SectionCard>

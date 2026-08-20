@@ -93,4 +93,22 @@ describe("A5 Run Trace drawer (smoke)", () => {
     // No project-context configuration row either, since the field is absent.
     expect(screen.queryByText(/project context/i)).not.toBeInTheDocument();
   });
+
+  it("AC-33: renders a trace whose project_context carries an unrecognised outcome without throwing", () => {
+    // Persisted trace JSON is never client-validated — an older trace or one
+    // written by a future server can carry an `outcome` string outside the
+    // known union. Looking up its badge tone must degrade, not throw and
+    // blank the drawer.
+    mockTrace = {
+      ...TRACE,
+      // `outcome` is deliberately not one of `ProjectContextOutcome`'s members —
+      // simulating unvalidated persisted JSON, hence the `as unknown as RunTrace`.
+      project_context: [{ path: "specs/api.md", tokens: 300, outcome: "some_future_outcome" }],
+    } as unknown as RunTrace;
+    expect(() =>
+      renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />),
+    ).not.toThrow();
+    expect(screen.getByText("Configuration")).toBeInTheDocument();
+    expect(screen.getByText("specs/api.md")).toBeInTheDocument();
+  });
 });
