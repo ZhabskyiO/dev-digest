@@ -113,6 +113,10 @@ describe('SkillsService.update — cross-tenant project-context ref (CRITICAL 1 
     (projectContext as unknown as { repo: Record<string, unknown> }).repo = {
       listAttachments: async () => [],
       replaceAttachments,
+      // `buildAttachmentRows` now requires the ref's path to resolve as a
+      // discovered document before it will attach it (PAT-disclosure fix,
+      // see `project-context/service.ts`) — this stub reports it as one.
+      getDocument: async () => ({ id: 'doc-1', repoId: 'own-repo', path: 'docs/a.md' }),
     };
 
     await expect(

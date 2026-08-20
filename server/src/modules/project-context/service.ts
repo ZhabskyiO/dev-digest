@@ -344,6 +344,20 @@ export class ProjectContextService {
     const rows: ReplaceAttachmentInput[] = [];
 
     for (const ref of refs) {
+      // A ref is only ever a valid attachment target if it is a discovered
+      // document (a `project_context_documents` row) — never merely a path
+      // that survives `resolveInClone`'s containment check. This gate must
+      // run even for a ref that already has a `prior` row: without it, a
+      // path attached before this check existed (e.g. `.git/config`, stamped
+      // via the pre-fix version of this method) would keep being silently
+      // re-confirmed forever through the fast path below, which reuses the
+      // stored hash without ever re-reading the file. Skipped, not thrown —
+      // one stale/malicious path in a larger `refs` set must not fail the
+      // whole save (matches the "degrade, never block" rule documented on
+      // `setAgentContext`).
+      const doc = await this.repo.getDocument(ref.repo_id, ref.path);
+      if (!doc) continue;
+
       const prior = existingByKey.get(attachKey(ref.repo_id, ref.path));
       if (prior) {
         rows.push({
@@ -501,6 +515,15 @@ export class ProjectContextService {
     const repo = await this.container.reviewRepo.getRepo(repoId);
     if (!repo || repo.clonePath === null) throw new NotFoundError('Repository clone not found');
 
+    // An attachment row alone is not proof the path is safe to read back out
+    // of the clone — it may have been persisted before this check existed,
+    // or (pre-fix) for any path that merely survived `resolveInClone`'s
+    // containment check. Require it to still be a discovered document, same
+    // as `preview()` (AC-10/AC-11) — same error shape, so this never leaks
+    // whether the underlying file exists on disk.
+    const doc = await this.repo.getDocument(repoId, relPath);
+    if (!doc) throw new NotFoundError('Document not found');
+
     const currentBuf = await this.readClonePath(repo.clonePath, relPath);
     const current = currentBuf === null ? '' : currentBuf.toString('utf8');
 
@@ -532,6 +555,12 @@ export class ProjectContextService {
   async confirm(owner: AttachmentOwnerRef, repoId: string, relPath: string): Promise<void> {
     const attachment = await this.repo.getAttachment(owner, repoId, relPath);
     if (!attachment) throw new NotFoundError('Attachment not found');
+
+    // Same reasoning as `drift()` above: an attachment row is not proof the
+    // path is a discovered document, so gate the read the same way before
+    // advancing the recorded hash/size/revision.
+    const doc = await this.repo.getDocument(repoId, relPath);
+    if (!doc) throw new NotFoundError('Document not found');
 
     const meta = await this.currentDocMeta(repoId, relPath);
     if (meta === null) throw new NotFoundError('Document not found in clone');

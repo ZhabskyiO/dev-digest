@@ -112,10 +112,17 @@ export class OnboardingService {
   /**
    * Serves the stored tour when there is one (or reports why there isn't).
    * `workspaceId` is accepted for signature parity with `requestGeneration`
-   * and the route surface — tenancy scoping of `repoId` to `workspaceId` is
-   * the route layer's job (mirrors `container.reviewRepo.getRepo`'s own
-   * doc comment: it is workspace-scoped only where the id is untrusted
-   * input, not where it already comes from a resolved workspace route).
+   * and the route surface, but is NOT used to scope `repoId` here — tenancy
+   * scoping is enforced by the route layer's `assertRepoInWorkspace`
+   * (`routes.ts`), which runs BEFORE either handler calls into this service
+   * and 404s (not 403s) a repo that doesn't belong to `workspaceId`. Unlike
+   * `container.reviewRepo.getRepo` (unscoped by design — see its own doc
+   * comment), this method is reachable ONLY from `routes.ts` today, so the
+   * route-level check is the sole tenancy guard, not defence in depth. A
+   * future second caller of this method must add its own equivalent check
+   * before relying on it, per the `assertRefsInWorkspace` lesson recorded in
+   * `insights/INSIGHTS.md` (2026-08-19): a route-level guard only protects
+   * the route that happens to have one.
    */
   async getTour(workspaceId: string, repoId: string): Promise<OnboardingTourResponse> {
     void workspaceId;
@@ -165,6 +172,22 @@ export class OnboardingService {
       .enqueue(workspaceId, ONBOARDING_JOB_KIND, { repoId } satisfies OnboardingJobPayload)
       .then((enqueued) => enqueued.id);
     inFlightJobs.set(repoId, jobIdPromise);
+    // A REJECTED `jobIdPromise` (e.g. a DB hiccup on the `jobs` insert) never
+    // reaches `registerJobHandlers`'s `finally` — that only runs once the
+    // queued handler executes, which never happens if `enqueue` itself
+    // throws. Without this, a failed enqueue would poison the registry
+    // permanently: every subsequent `getTour`/`requestGeneration` for this
+    // repo would await the same rejected promise and 500 until the process
+    // restarts. This `.catch()` is a SEPARATE listener on the same promise
+    // (attached synchronously, before either settles) purely to clear the
+    // entry on failure — it does not swallow the error for this call: the
+    // `await jobIdPromise` below still rejects and propagates to the caller
+    // exactly as before. Guard on identity in case a concurrent call already
+    // replaced this repo's entry with a fresher promise by the time this
+    // settles.
+    jobIdPromise.catch(() => {
+      if (inFlightJobs.get(repoId) === jobIdPromise) inFlightJobs.delete(repoId);
+    });
     const jobId = await jobIdPromise;
     return { state: 'generating', job: { id: jobId } };
   }

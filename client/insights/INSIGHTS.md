@@ -92,6 +92,25 @@ Conventions and architectural decisions specific to this repo.
   needs (`ownerId = source === 'agent' ? agent.id : d.skill_id`) — one click
   handler covers both a directly-attached and an inherited-from-skill row.
 
+- 2026-08-20 — **NEVER assume a server body handed to a client-side algorithm
+  is capped just because some OTHER endpoint on the same resource caps it.**
+  `DriftCompare/helpers.ts`'s O(n·m) LCS `diffLines` justified its full-matrix
+  allocation on "bodies are capped at the server's preview limit" — true only
+  for the *preview* endpoint (`projectContextPreviewChars`, 16k chars, applied
+  in `service.ts:239`). The *drift* endpoint's `previous`/`current` are
+  returned uncapped, and discovery allows files up to
+  `PROJECT_CONTEXT_MAX_FILE_BYTES` (1 MiB) — a drifted large doc allocates a
+  matrix in the hundreds of millions of cells during render. Fix pattern: the
+  pure diff helper owns an explicit, named budget (`DIFF_MAX_LINES`) and caps
+  both sides *before* building the matrix, returning `{ lines, truncated }`
+  instead of a bare array so the component can never silently render a
+  partial diff as if it were complete — it must show a truncation notice
+  (`context.json`'s `drift.detail.truncatedNote`). When adding a new
+  algorithm over a document body sourced from `lib/hooks/project-context.ts`,
+  check which cap (if any) applies to *that specific* route in
+  `server/src/modules/project-context/service.ts`, not just the feature as a
+  whole — the caps are per-endpoint, not per-resource.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.

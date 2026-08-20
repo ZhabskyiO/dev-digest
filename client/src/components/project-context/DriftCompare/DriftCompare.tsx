@@ -26,11 +26,13 @@ export function DriftCompare({
   confirming?: boolean;
 }) {
   const t = useTranslations("context");
-  const lines = previousUnavailable || previous == null ? null : diffLines(previous, current);
+  const diff = previousUnavailable || previous == null ? null : diffLines(previous, current);
+  const lines = diff?.lines ?? null;
 
   return (
     <div style={s.wrap}>
       {previousUnavailable && <div style={s.note}>{t("drift.detail.previousUnavailable")}</div>}
+      {diff?.truncated && <div style={s.note}>{t("drift.detail.truncatedNote")}</div>}
       <div style={s.lines}>
         {lines
           ? lines.map((line, i) => (

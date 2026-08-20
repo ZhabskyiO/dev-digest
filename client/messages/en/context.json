@@ -69,6 +69,7 @@
       "previous": "Attached version",
       "current": "Current version",
       "previousUnavailable": "The earlier version is no longer available in this clone. Showing the current content only.",
+      "truncatedNote": "This document is large — the comparison below is truncated and may not show every change.",
       "confirm": "Confirm change",
       "confirming": "Confirming…",
       "close": "Close"

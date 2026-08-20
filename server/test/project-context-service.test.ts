@@ -224,6 +224,32 @@ async function writeFileAt(root: string, rel: string, contents: string): Promise
   await writeFile(full, contents);
 }
 
+/** Seeds a `project_context_documents` row directly on the fake repository —
+ *  i.e. simulates a path that a scan (`list`/`rescan`) has already
+ *  discovered, WITHOUT running a real scan. Needed because
+ *  `buildAttachmentRows`/`drift`/`confirm` now require
+ *  `repo.getDocument(repoId, path)` to resolve before they will touch an
+ *  attachment for that path (the CVE-style fix: an attachment row alone,
+ *  or a path that merely survives `resolveInClone`, is no longer enough). */
+function seedDocument(
+  fakeRepo: FakeProjectContextRepository,
+  repoId: string,
+  docPath: string,
+  overrides: Partial<ProjectContextDocumentRow> = {},
+): void {
+  fakeRepo.documents.set(docKey(repoId, docPath), {
+    id: `doc-seed-${docPath}`,
+    repoId,
+    path: docPath,
+    type: 'other',
+    sizeBytes: 0,
+    contentHash: 'seed-hash',
+    tokens: 0,
+    scannedAt: new Date(),
+    ...overrides,
+  } as ProjectContextDocumentRow);
+}
+
 describe('ProjectContextService.list', () => {
   it('returns {documents: [], reason: "not_cloned"} with no error when the repo has no clone (AC-4)', async () => {
     const { service } = makeService({
@@ -413,6 +439,9 @@ describe('ProjectContextService.confirm', () => {
         git,
       });
 
+      // A legitimate discovered document — required for confirm() to proceed.
+      seedDocument(fakeRepo, 'r1', 'specs/a.md');
+
       // Seed an existing attachment as if it had drifted: stale hash/revision.
       await fakeRepo.replaceAttachments(
         { agentId: 'agent-1' },
@@ -435,6 +464,35 @@ describe('ProjectContextService.confirm', () => {
       await rm(clonePath, { recursive: true, force: true });
     }
   });
+
+  it('throws NotFoundError for a path that is not a discovered document, even when an attachment row already exists for it (PAT-disclosure regression)', async () => {
+    const clonePath = await mkdtemp(path.join(tmpdir(), 'devdigest-pc-confirm-guard-'));
+    try {
+      // A file that exists in the clone and even has a persisted attachment
+      // row (as if it had been attached before this fix existed) — but was
+      // never a discovered `project_context_documents` row. Simulates the
+      // realistic upgrade case: no `seedDocument()` call here.
+      await writeFileAt(clonePath, '.git/config', '[remote "origin"]\n\turl = https://user:ghp_TOKEN@github.com/acme/x.git\n');
+
+      const { service, fakeRepo } = makeService({
+        repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
+      });
+      await fakeRepo.replaceAttachments(
+        { agentId: 'agent-1' },
+        [{ repoId: 'r1', path: '.git/config', attachedHash: 'h', attachedSize: 1, attachedRevision: 'rev-1' }],
+      );
+
+      await expect(service.confirm({ agentId: 'agent-1' }, 'r1', '.git/config')).rejects.toThrow(
+        'Document not found',
+      );
+
+      // Confirm must not have advanced the stale attachment either.
+      const attachment = await fakeRepo.getAttachment({ agentId: 'agent-1' }, 'r1', '.git/config');
+      expect(attachment?.attachedHash).toBe('h');
+    } finally {
+      await rm(clonePath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ProjectContextService.setAgentContext', () => {
@@ -445,6 +503,7 @@ describe('ProjectContextService.setAgentContext', () => {
       const { service, fakeRepo } = makeService({
         repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
       });
+      seedDocument(fakeRepo, 'r1', 'specs/a.md');
 
       await service.setAgentContext('ws-1', 'agent-1', [{ repo_id: 'r1', path: 'specs/a.md' }]);
       const firstRow = await fakeRepo.getAttachment({ agentId: 'agent-1' }, 'r1', 'specs/a.md');
@@ -467,6 +526,8 @@ describe('ProjectContextService.setAgentContext', () => {
       const { service, fakeRepo } = makeService({
         repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
       });
+      seedDocument(fakeRepo, 'r1', 'specs/a.md');
+      seedDocument(fakeRepo, 'r1', 'specs/b.md');
 
       await service.setAgentContext('ws-1', 'agent-1', [{ repo_id: 'r1', path: 'specs/a.md' }]);
       const beforeAdd = await fakeRepo.getAttachment({ agentId: 'agent-1' }, 'r1', 'specs/a.md');
@@ -487,6 +548,52 @@ describe('ProjectContextService.setAgentContext', () => {
       await rm(clonePath, { recursive: true, force: true });
     }
   });
+
+  it('does NOT create an attachment for a ref whose path is not a discovered document, even though it exists and reads fine inside the clone (PAT-disclosure regression)', async () => {
+    const clonePath = await mkdtemp(path.join(tmpdir(), 'devdigest-pc-attach-guard-'));
+    try {
+      // A real, readable, in-clone file that a scan would never surface as a
+      // document (it isn't under one of `projectContextRoots` / a
+      // conventional filename) — e.g. the git remote config that embeds a
+      // GitHub PAT once the repo was cloned with a token in the URL.
+      await writeFileAt(clonePath, '.git/config', '[remote "origin"]\n\turl = https://user:ghp_TOKEN@github.com/acme/x.git\n');
+
+      const { service, fakeRepo } = makeService({
+        repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
+      });
+      // Deliberately NOT seeded as a discovered document.
+
+      await service.setAgentContext('ws-1', 'agent-1', [{ repo_id: 'r1', path: '.git/config' }]);
+
+      expect(await fakeRepo.getAttachment({ agentId: 'agent-1' }, 'r1', '.git/config')).toBeUndefined();
+      expect(await fakeRepo.listAttachments({ agentId: 'agent-1' })).toEqual([]);
+    } finally {
+      await rm(clonePath, { recursive: true, force: true });
+    }
+  });
+
+  it('drops a previously-persisted attachment for a non-document path on the next save, rather than reusing it via the "already attached" fast path (upgrade case)', async () => {
+    const clonePath = await mkdtemp(path.join(tmpdir(), 'devdigest-pc-attach-guard-prior-'));
+    try {
+      await writeFileAt(clonePath, '.git/config', '[remote "origin"]\n\turl = https://user:ghp_TOKEN@github.com/acme/x.git\n');
+
+      const { service, fakeRepo } = makeService({
+        repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
+      });
+      // Simulates an attachment row persisted by the pre-fix code path —
+      // i.e. exactly the "already attached" fast path this fix must close.
+      await fakeRepo.replaceAttachments(
+        { agentId: 'agent-1' },
+        [{ repoId: 'r1', path: '.git/config', attachedHash: 'stolen-hash', attachedSize: 99, attachedRevision: 'rev-1' }],
+      );
+
+      await service.setAgentContext('ws-1', 'agent-1', [{ repo_id: 'r1', path: '.git/config' }]);
+
+      expect(await fakeRepo.getAttachment({ agentId: 'agent-1' }, 'r1', '.git/config')).toBeUndefined();
+    } finally {
+      await rm(clonePath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ProjectContextService.drift', () => {
@@ -499,6 +606,8 @@ describe('ProjectContextService.drift', () => {
         repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
         git,
       });
+      // A legitimate discovered document — required for drift() to proceed.
+      seedDocument(fakeRepo, 'r1', 'specs/a.md');
       await fakeRepo.replaceAttachments(
         { agentId: 'agent-1' },
         [{ repoId: 'r1', path: 'specs/a.md', attachedHash: 'h', attachedSize: 1, attachedRevision: 'gone-sha' }],
@@ -509,6 +618,31 @@ describe('ProjectContextService.drift', () => {
       expect(result.previous_unavailable).toBe(true);
       expect(result.previous).toBeUndefined();
       expect(result.current).toBe('# current content');
+    } finally {
+      await rm(clonePath, { recursive: true, force: true });
+    }
+  });
+
+  it('throws NotFoundError for a path that is not a discovered document, even when an attachment row exists for it (PAT-disclosure regression)', async () => {
+    const clonePath = await mkdtemp(path.join(tmpdir(), 'devdigest-pc-drift-guard-'));
+    try {
+      // Same exploit shape as the confirm()/setAgentContext() regressions
+      // above: an attachment row persisted (here, directly through the repo
+      // double, simulating one that survived from before this fix) for a
+      // path that was never a discovered document.
+      await writeFileAt(clonePath, '.git/config', '[remote "origin"]\n\turl = https://user:ghp_TOKEN@github.com/acme/x.git\n');
+
+      const { service, fakeRepo } = makeService({
+        repos: [{ id: 'r1', workspaceId: 'ws-1', owner: 'acme', name: 'x', fullName: 'acme/x', defaultBranch: 'main', clonePath }],
+      });
+      await fakeRepo.replaceAttachments(
+        { agentId: 'agent-1' },
+        [{ repoId: 'r1', path: '.git/config', attachedHash: 'h', attachedSize: 1, attachedRevision: 'rev-1' }],
+      );
+
+      await expect(service.drift({ agentId: 'agent-1' }, 'r1', '.git/config')).rejects.toThrow(
+        'Document not found',
+      );
     } finally {
       await rm(clonePath, { recursive: true, force: true });
     }

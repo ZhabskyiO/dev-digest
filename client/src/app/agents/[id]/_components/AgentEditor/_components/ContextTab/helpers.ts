@@ -17,9 +17,11 @@ export function filterByPath<T extends { path: string }>(items: readonly T[], qu
  *
  * `paths` is only what the list was SHOWING — a filter can hide rows, and an
  * agent can still carry attachments made against another repository. Those
- * refs are not in `paths`, so they are preserved in their existing relative
- * order and appended after the reordered block rather than silently dropped
- * (dropping them would detach documents the user never touched).
+ * refs are not in `paths`, so a reorder must leave them at their ORIGINAL
+ * index slot rather than appending them after the reordered block: this list
+ * is the prompt injection order, and the tail is what gets dropped first when
+ * the token budget is exceeded, so silently relocating an untouched ref to
+ * the end can demote or evict a document the user never touched.
  *
  * Refs are matched by path alone, which is what `AttachmentList` keys its rows
  * on; two attachments sharing a path across different repositories would
@@ -29,5 +31,6 @@ export function reorderRefs(refs: readonly ProjectContextRef[], paths: readonly 
   const shown = new Set(paths);
   const byPath = new Map(refs.filter((r) => shown.has(r.path)).map((r) => [r.path, r]));
   const moved = paths.map((p) => byPath.get(p)).filter((r): r is ProjectContextRef => r != null);
-  return [...moved, ...refs.filter((r) => !shown.has(r.path))];
+  let cursor = 0;
+  return refs.map((r) => (shown.has(r.path) ? moved[cursor++] : r)).filter((r): r is ProjectContextRef => r != null);
 }

@@ -107,6 +107,22 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
     window.setTimeout(() => setShareCopied(false), SHARE_COPIED_RESET_MS);
   }
 
+  // A new generation attempt must always be able to surface its own failure
+  // (AC-28) — dismissing one failed notice must not silently swallow every
+  // later one. `job_id` would be the sturdier identity key, but the API
+  // response always sends `job_id: null` on `state === "failed"`
+  // (server/src/modules/onboarding/service.ts:149), so it can't distinguish
+  // one failed run from the next. Resetting on the click that kicks off the
+  // next attempt is therefore the reliable option here — see
+  // `client/insights/gotchas.md` for the identity-key dead end and its
+  // known gap (a failure from a regeneration someone else triggered, not
+  // this session's own click, still won't re-show until this session's own
+  // Regenerate is used).
+  function handleRegenerate() {
+    setFailedDismissed(false);
+    generate.mutate();
+  }
+
   const isGenerating = data?.state === "generating";
   const regenerateDisabled = isGenerating || generate.isPending;
 
@@ -141,7 +157,7 @@ export function OnboardingTourView({ repoId }: { repoId: string }) {
                 onDismissFailed={() => setFailedDismissed(true)}
                 regenerateDisabled={regenerateDisabled}
                 isGenerating={isGenerating}
-                onRegenerate={() => generate.mutate()}
+                onRegenerate={handleRegenerate}
                 onShare={handleShare}
                 shareCopied={shareCopied}
               />

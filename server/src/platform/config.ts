@@ -103,11 +103,18 @@ const EnvSchema = z.object({
   ONBOARDING_MAX_FRONTEND_ROUTES: z.coerce.number().int().positive().default(12),
   // Max number of API endpoints listed in the tour.
   ONBOARDING_MAX_API_ENDPOINTS: z.coerce.number().int().positive().default(24),
-  // Timeout for the structured generation model call. Kept comfortably below
-  // JobRunner's own 120s job timeout (platform/jobs.ts) — a generation
-  // allowed to run longer than the job would be aborted by JobRunner and then
-  // retried, doubling cost. Never raise this above the job timeout.
-  ONBOARDING_GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+  // Timeout for ONE provider attempt inside the structured generation call
+  // (adapters/llm/openai.ts's `req.timeoutMs`, applied per `withTimeout(...)`
+  // around each `chat.completions.create`), NOT a total wall-clock budget for
+  // the call. `maxRetries: 1` (service.ts) permits two sequential attempts,
+  // so the call's worst-case wall time is ~2x this value. JobRunner's own job
+  // timeout (platform/jobs.ts, 120s default) wraps the WHOLE handler — if
+  // 2x this value exceeded that budget, a slow-but-still-running generation
+  // would be aborted and retried by JobRunner while the original attempt
+  // could still write a tour. Default is 45000 so the 2x worst case (90s)
+  // stays comfortably under the 120s job timeout; never raise this above
+  // half the job timeout.
+  ONBOARDING_GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   // Language the generated tour is written in.
   ONBOARDING_LANGUAGE: z.string().min(1).default('English'),
 });
@@ -210,9 +217,10 @@ export type AppConfig = {
   /** Max number of API endpoints listed in the tour. See ONBOARDING_MAX_API_ENDPOINTS default. */
   onboardingMaxApiEndpoints: number;
   /**
-   * Timeout for the onboarding-tour structured generation model call.
-   * Deliberately below JobRunner's 120s job timeout (platform/jobs.ts) — see
-   * ONBOARDING_GENERATION_TIMEOUT_MS default and its doc comment above.
+   * Timeout for ONE provider attempt of the onboarding-tour structured
+   * generation call — NOT a total wall-clock budget (up to 2 attempts run
+   * sequentially). See ONBOARDING_GENERATION_TIMEOUT_MS default and its doc
+   * comment above.
    */
   onboardingGenerationTimeoutMs: number;
   /** Language the generated onboarding tour is written in. See ONBOARDING_LANGUAGE default. */

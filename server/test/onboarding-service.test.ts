@@ -26,6 +26,7 @@ import type { IndexState } from '../src/modules/repo-intel/types.js';
 import { OnboardingService } from '../src/modules/onboarding/service.js';
 import { OnboardingRepository } from '../src/modules/onboarding/repository.js';
 import { ONBOARDING_JOB_KIND, SECTION_KINDS } from '../src/modules/onboarding/constants.js';
+import { loadConfig } from '../src/platform/config.js';
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -50,13 +51,22 @@ class FakeJobRunner {
   enqueueCalls: { workspaceId: string; kind: string; payload: unknown }[] = [];
   private handlers = new Map<string, (payload: unknown, ctx: { jobId: string }) => Promise<void>>();
   private counter = 0;
+  /** Queue of errors: the next N `enqueue()` calls reject with these, in order. */
+  private failNext: Error[] = [];
 
   register(kind: string, handler: (payload: unknown, ctx: { jobId: string }) => Promise<void>): void {
     this.handlers.set(kind, handler);
   }
 
+  /** Makes the next `enqueue()` call reject with `err` instead of succeeding. */
+  rejectNextEnqueue(err: Error): void {
+    this.failNext.push(err);
+  }
+
   async enqueue(workspaceId: string, kind: string, payload: unknown) {
     this.enqueueCalls.push({ workspaceId, kind, payload });
+    const err = this.failNext.shift();
+    if (err) throw err;
     const id = `job-${++this.counter}`;
     return { id, done: Promise.resolve() };
   }
@@ -71,7 +81,7 @@ class FakeJobRunner {
 
 /** Spy `LLMProvider` — records every `completeStructured` call and returns a fixed draft (or throws). */
 function makeLlmSpy(opts: { draft?: OnboardingDraft; throws?: Error }) {
-  const calls: { model: string; maxRetries?: number; schemaName: string }[] = [];
+  const calls: { model: string; maxRetries?: number; schemaName: string; timeoutMs?: number }[] = [];
   return {
     calls,
     provider: {
@@ -80,8 +90,13 @@ function makeLlmSpy(opts: { draft?: OnboardingDraft; throws?: Error }) {
       complete: async () => {
         throw new Error('not used');
       },
-      completeStructured: async (req: { model: string; maxRetries?: number; schemaName: string }) => {
-        calls.push({ model: req.model, maxRetries: req.maxRetries, schemaName: req.schemaName });
+      completeStructured: async (req: {
+        model: string;
+        maxRetries?: number;
+        schemaName: string;
+        timeoutMs?: number;
+      }) => {
+        calls.push({ model: req.model, maxRetries: req.maxRetries, schemaName: req.schemaName, timeoutMs: req.timeoutMs });
         if (opts.throws) throw opts.throws;
         return {
           data: opts.draft,
@@ -327,6 +342,41 @@ describe('OnboardingService generation — cost fence (AC-5)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// (d2) the model-call timeout fits two sequential provider attempts inside
+// JobRunner's job timeout, with margin (pre-PR gate finding #3).
+// ---------------------------------------------------------------------------
+
+describe('OnboardingService generation — model-call timeout stays inside the job budget', () => {
+  it('(d2) passes container.config.onboardingGenerationTimeoutMs through to completeStructured, and 2x it stays under JobRunner\'s 120s job timeout', async () => {
+    const llm = makeLlmSpy({ draft: makeBlankDraft() });
+    const jobs = new FakeJobRunner();
+    const indexState = makeIndexState();
+    const container = makeContainer({ indexState, llm, jobs });
+    // Use the REAL, production-configured default (not the fixture's fixed
+    // 90000 used by other tests in this file) — the point of this assertion
+    // is that the actual shipped default fits the job budget, not an
+    // arbitrary fixture value.
+    const realTimeoutMs = loadConfig({ NODE_ENV: 'test' } as NodeJS.ProcessEnv).onboardingGenerationTimeoutMs;
+    (container as unknown as { config: { onboardingGenerationTimeoutMs: number } }).config.onboardingGenerationTimeoutMs =
+      realTimeoutMs;
+    const { service } = makeService(container);
+
+    await runJob(service, jobs, 'repo-d2');
+
+    expect(llm.calls[0]!.timeoutMs).toBe(realTimeoutMs);
+    // `adapters/llm/openai.ts` applies `timeoutMs` to EACH provider attempt;
+    // `maxRetries: 1` (asserted above) permits two sequential attempts, so
+    // the call's worst-case wall time is ~2x this value. That must stay
+    // under `JobRunner`'s own 120s job timeout (platform/jobs.ts) with
+    // margin, or a slow-but-still-running generation gets aborted and
+    // retried by JobRunner while the original attempt may still write a
+    // tour. Asserted as a relationship, not a bare number, so it stays
+    // meaningful if the default is retuned later.
+    expect(2 * realTimeoutMs).toBeLessThan(120_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // (e) in-flight dedupe.
 // ---------------------------------------------------------------------------
 
@@ -346,6 +396,50 @@ describe('OnboardingService.requestGeneration (AC-27)', () => {
     expect(second.state).toBe('generating');
     expect(second.job.id).toBe(first.job.id);
     expect(jobs.enqueueCalls.length).toBe(1);
+  });
+
+  it('an enqueue that rejects leaves the in-flight registry clean, so a later retry attempts a fresh enqueue rather than re-awaiting the poisoned promise, with no unhandled rejection', async () => {
+    const llm = makeLlmSpy({ draft: makeBlankDraft() });
+    const jobs = new FakeJobRunner();
+    const indexState = makeIndexState();
+    const container = makeContainer({ indexState, llm, jobs });
+    const { service } = makeService(container);
+
+    const repoId = 'repo-e3';
+    jobs.rejectNextEnqueue(new Error('db hiccup on jobs insert'));
+
+    await expect(service.requestGeneration('ws-1', repoId)).rejects.toThrow('db hiccup on jobs insert');
+    expect(jobs.enqueueCalls.length).toBe(1);
+
+    // A later call for the same repo must attempt a FRESH enqueue (not reuse
+    // a permanently-rejected promise from the registry) and succeed normally.
+    const retry = await service.requestGeneration('ws-1', repoId);
+    expect(retry.state).toBe('generating');
+    expect(jobs.enqueueCalls.length).toBe(2);
+  });
+
+  it('an unhandled-rejection listener never fires for a rejected enqueue', async () => {
+    const llm = makeLlmSpy({ draft: makeBlankDraft() });
+    const jobs = new FakeJobRunner();
+    const indexState = makeIndexState();
+    const container = makeContainer({ indexState, llm, jobs });
+    const { service } = makeService(container);
+
+    const repoId = 'repo-e4';
+    jobs.rejectNextEnqueue(new Error('db hiccup on jobs insert'));
+
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await expect(service.requestGeneration('ws-1', repoId)).rejects.toThrow();
+      // Give any stray unhandled-rejection microtask a chance to fire before
+      // asserting none did.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(seen).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 
   it('getTour reports generating with the in-flight job id while a job is outstanding', async () => {

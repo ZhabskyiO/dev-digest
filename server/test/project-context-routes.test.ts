@@ -189,6 +189,104 @@ describe('project-context routes (no DB)', () => {
     await app.close();
   });
 
+  it('rejects PUT /agents/:id/context with a non-UUID repo_id with 422 before the service or getRepo run', async () => {
+    const setAgentContext = vi.fn();
+    const effectiveContext = vi.fn();
+    const projectContext = { setAgentContext, effectiveContext } as unknown as ProjectContextService;
+    const agentsRepo = {
+      getById: vi.fn(async () => ({ id: AGENT_ID, workspaceId: 'ws-1' })),
+    } as unknown as AgentsRepository;
+    const reviewRepo = { getRepo: vi.fn() } as unknown as ReviewRepository;
+    const app = await buildApp({
+      config,
+      overrides: { auth: AUTH, projectContext, agentsRepo, reviewRepo },
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_ID}/context`,
+      payload: { documents: [{ repo_id: 'not-a-uuid', path: 'specs/a.md' }] },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error.code).toBe('validation_error');
+    expect(setAgentContext).not.toHaveBeenCalled();
+    expect(reviewRepo.getRepo).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects PUT /agents/:id/context with a "../" path with 422', async () => {
+    const setAgentContext = vi.fn();
+    const projectContext = { setAgentContext } as unknown as ProjectContextService;
+    const agentsRepo = {
+      getById: vi.fn(async () => ({ id: AGENT_ID, workspaceId: 'ws-1' })),
+    } as unknown as AgentsRepository;
+    const app = await buildApp({ config, overrides: { auth: AUTH, projectContext, agentsRepo } });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_ID}/context`,
+      payload: { documents: [{ repo_id: REPO_ID, path: '../etc/passwd' }] },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(setAgentContext).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('rejects PUT /agents/:id/context with a leading-slash path with 422', async () => {
+    const setAgentContext = vi.fn();
+    const projectContext = { setAgentContext } as unknown as ProjectContextService;
+    const agentsRepo = {
+      getById: vi.fn(async () => ({ id: AGENT_ID, workspaceId: 'ws-1' })),
+    } as unknown as AgentsRepository;
+    const app = await buildApp({ config, overrides: { auth: AUTH, projectContext, agentsRepo } });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_ID}/context`,
+      payload: { documents: [{ repo_id: REPO_ID, path: '/etc/passwd' }] },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(setAgentContext).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('PUT /agents/:id/context still succeeds with a well-formed body (happy path)', async () => {
+    const setAgentContext = vi.fn(async () => undefined);
+    const effectiveContext = vi.fn(async () => ({
+      documents: [],
+      total_tokens: 0,
+      budget_tokens: 12_000,
+      over_budget: false,
+      dropped_paths: [],
+    }));
+    const projectContext = { setAgentContext, effectiveContext } as unknown as ProjectContextService;
+    const agentsRepo = {
+      getById: vi.fn(async () => ({ id: AGENT_ID, workspaceId: 'ws-1' })),
+    } as unknown as AgentsRepository;
+    const reviewRepo = {
+      getRepo: vi.fn(async () => ({ id: REPO_ID, workspaceId: 'ws-1' })),
+    } as unknown as ReviewRepository;
+    const app = await buildApp({
+      config,
+      overrides: { auth: AUTH, projectContext, agentsRepo, reviewRepo },
+    });
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/agents/${AGENT_ID}/context`,
+      payload: { documents: [{ repo_id: REPO_ID, path: 'specs/a.md' }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(setAgentContext).toHaveBeenCalledWith('ws-1', AGENT_ID, [
+      { repo_id: REPO_ID, path: 'specs/a.md' },
+    ]);
+    await app.close();
+  });
+
   it('GET /agents/:id/context 404s for an agent outside the caller workspace, never calling the service', async () => {
     const effectiveContext = vi.fn();
     const projectContext = { effectiveContext } as unknown as ProjectContextService;

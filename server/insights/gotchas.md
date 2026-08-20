@@ -30,6 +30,20 @@ most-skipped and most-valuable section: if something failed, record it here.**
   rephrase to avoid the sequence entirely. Same class of footgun as the
   unescaped-backtick-in-template-literal entry below (2026-08-04), different
   trigger character.
+- 2026-08-20 — Adding a required call (`this.repo.getDocument(...)`) to
+  `ProjectContextService` broke a test OUTSIDE `project-context-service.test.ts`:
+  `test/skills-service.test.ts` overrides `(projectContext as unknown as {repo}).
+  repo` with an inline object literal (`{ listAttachments, replaceAttachments }`)
+  rather than casting a class instance — `TypeError: this.repo.getDocument is
+  not a function` at runtime, not a typecheck error, because the override is
+  `as unknown as ProjectContextRepository`, which suppresses the missing-method
+  check entirely. `ProjectContextRepository` has at least two such ad-hoc
+  partial-object overrides across the test suite (`test/project-context-
+  service.test.ts`'s full `FakeProjectContextRepository` class is NOT the only
+  one) — when adding a call the service makes on `this.repo`, grep
+  `unknown as ProjectContextRepository`/`unknown as \{ repo:` across `test/`
+  for every file that overrides it, not just the one this task's Acceptance
+  names.
 - 2026-08-20 — `repo-intel/routes.ts`'s "return 202 even when `enqueue`
   fails" resync precedent (`repo-intel/routes.ts:43-65`) does NOT transplant
   to a route whose 202 body has a strict zod `response` schema. Resync's
@@ -77,6 +91,37 @@ most-skipped and most-valuable section: if something failed, record it here.**
   required; put the leniency in the prompt instead ("return `[]`" as an
   explicitly stated, common answer), exactly as `Intent.out_of_scope` already
   does. Hit adding `Intent.risk_areas` in `vendor/shared/contracts/brief.ts`.
+- 2026-08-20 — NEVER build a route's write-body Zod schema directly from a
+  mirrored `@devdigest/shared` contract when the same route file defines
+  *stricter* refinements for its read-side query/body schemas — the mirrored
+  contract stays intentionally unconstrained (e.g. `ProjectContextRef`:
+  `{repo_id: z.string(), path: z.string()}`, no `.uuid()`, no path-traversal
+  guard) because it also describes persisted/API shapes elsewhere, so a
+  handler that does `z.object({ documents: z.array(ProjectContextRef) })`
+  silently skips the file's own `ContextPath` refine chain (no leading `/`,
+  no `..`) and lets a non-UUID `repo_id` reach a repository call as a raw
+  string, surfacing as a Postgres `22P02` 500 instead of a 422. Fixed in
+  `modules/project-context/routes.ts`'s `PUT /agents/:id/context` by
+  rebuilding the body schema from the file's own `ContextPath` plus
+  `z.string().uuid()` rather than importing the contract's unrefined shape.
+  General rule: when a route file already defines a stricter local schema
+  (a `ContextPath`, an id refinement) for some routes, grep every OTHER
+  route in that same file for a raw mirrored-contract import used directly
+  as `body`/`querystring` — that is the write path most likely to have
+  skipped it, since write bodies are exactly where a hostile shape gets
+  persisted. `modules/skills/routes.ts`'s `PUT /skills/:id` (`context:
+  z.array(ProjectContextRef).optional()`) has the identical gap and was
+  left unfixed here — out of this task's owned paths.
+  └ 2026-08-20 fixed: `ContextPath`/`ContextRefBody` extracted to
+    `modules/_shared/context-ref.ts` (mirroring the `_shared/net-guards.ts`
+    precedent this same file already documents for `isDisallowedIp`/
+    `looksLikeHtml`) and imported by BOTH `project-context/routes.ts` and
+    `skills/routes.ts`, rather than duplicating the shape a second time —
+    extraction was chosen over duplication specifically because a THIRD
+    write route accepting the same ref shape is now a real possibility
+    (two write paths already exist), and a shared definition means a future
+    refinement (e.g. tightening `ContextPath` further) can't drift between
+    copies the way this pair already had.
 - 2026-08-09 — NEVER expect a route's `config: { rateLimit: … }` to fire in a
   `.it.test.ts`. `app.ts:95` skips registering `@fastify/rate-limit` entirely
   when `config.nodeEnv === 'test'`, so per-route limits are inert under
@@ -84,6 +129,26 @@ most-skipped and most-valuable section: if something failed, record it here.**
   a test that *relies* on the limit as a safety fence is testing nothing. Cost
   fences that must hold in tests have to live in the service (e.g. the per-PR
   in-flight dedupe in `IntentService.recalculate`), not in the route config.
+
+- 2026-08-20 — A `timeoutMs` passed to `LLMProvider.completeStructured`
+  (`adapters/llm/openai.ts:104-118`) bounds ONE provider attempt, not the
+  call's total wall time — `withTimeout(...)` wraps each iteration of the
+  `for (attempt = 1; attempt <= maxRetries + 1; ...)` loop separately, so a
+  caller with `maxRetries: 1` can legitimately take up to `2 × timeoutMs`
+  wall-clock. Any job handler that both (a) runs inside `JobRunner`
+  (`platform/jobs.ts`, default per-instance `timeoutMs: 120_000` wrapping the
+  WHOLE handler via `withTimeout`) and (b) calls `completeStructured` inside
+  that handler must size its own `timeoutMs` so `(maxRetries + 1) ×
+  timeoutMs` stays comfortably under `JobRunner`'s job timeout — sizing it as
+  if `timeoutMs` were the total budget (as `ONBOARDING_GENERATION_TIMEOUT_MS`
+  originally did, defaulting to 90000 against a 120s job timeout with
+  `maxRetries: 1`, i.e. up to ~180s wall time) lets `JobRunner` abort+retry a
+  generation that is still running and may still complete and write its
+  result, doubling cost and risking a race between the aborted and retried
+  attempt. Fixed for onboarding by halving the default
+  (`ONBOARDING_GENERATION_TIMEOUT_MS` 90000 → 45000, `platform/config.ts`);
+  any future feature composing these two primitives needs the same `(N+1) ×
+  timeoutMs < jobTimeoutMs` sizing, not `timeoutMs < jobTimeoutMs`.
 
 ## Tool & Library Notes
 

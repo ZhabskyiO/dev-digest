@@ -19,7 +19,28 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { OnboardingTourResponse, OnboardingGenerateResponse } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
+import { NotFoundError } from '../../platform/errors.js';
+import type { Container } from '../../platform/container.js';
 import { OnboardingService } from './service.js';
+
+/**
+ * Throws `NotFoundError` unless `repoId` resolves to a repo owned by
+ * `workspaceId`. `OnboardingService.getTour`/`requestGeneration` are NOT
+ * workspace-scoped themselves (see `service.ts`'s doc comment on `getTour`) —
+ * this is the tenancy check both handlers below rely on, before either reads
+ * or spends model budget on another workspace's repo. Copies
+ * `project-context/routes.ts`'s `assertRepoInWorkspace` precedent exactly:
+ * `NotFoundError` (not 403) so the endpoint does not disclose whether a repo
+ * id exists in another workspace.
+ */
+async function assertRepoInWorkspace(
+  container: Container,
+  workspaceId: string,
+  repoId: string,
+): Promise<void> {
+  const repo = await container.reviewRepo.getRepo(repoId);
+  if (!repo || repo.workspaceId !== workspaceId) throw new NotFoundError('Repository not found');
+}
 
 export default async function onboardingRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
@@ -37,6 +58,7 @@ export default async function onboardingRoutes(appBase: FastifyInstance) {
     { schema: { params: IdParams, response: { 200: OnboardingTourResponse } } },
     async (req) => {
       const { workspaceId } = await getContext(container, req);
+      await assertRepoInWorkspace(container, workspaceId, req.params.id);
       return container.onboarding.getTour(workspaceId, req.params.id);
     },
   );
@@ -53,6 +75,7 @@ export default async function onboardingRoutes(appBase: FastifyInstance) {
     },
     async (req, reply) => {
       const { workspaceId } = await getContext(container, req);
+      await assertRepoInWorkspace(container, workspaceId, req.params.id);
       reply.code(202);
       // Unlike resync's POST /repos/:id/resync (repo-intel/routes.ts:43-65),
       // whose response carries no zod `response` schema and so can degrade

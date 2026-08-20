@@ -7,10 +7,10 @@ import {
   ProjectContextDrift,
   ProjectContextListResponse,
   ProjectContextPreview,
-  ProjectContextRef,
 } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
+import { ContextPath, ContextRefBody } from '../_shared/context-ref.js';
 import { NotFoundError } from '../../platform/errors.js';
 import type { Container } from '../../platform/container.js';
 
@@ -41,18 +41,13 @@ import type { Container } from '../../platform/container.js';
 export default async function projectContextRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
 
-  // A clone-relative document path is attacker-influenced (it arrives as a
-  // query param / body field, and drives filesystem reads downstream). This
-  // is defence-in-depth #1: reject the obviously-hostile shapes at the
-  // schema layer so they never reach a handler. The service's own
+  // `ContextPath` (a clone-relative document path is attacker-influenced —
+  // it arrives as a query param / body field and drives filesystem reads
+  // downstream) is shared from `_shared/context-ref.ts`, not redefined here:
+  // this is defence-in-depth #1, rejecting the obviously-hostile shapes at
+  // the schema layer so they never reach a handler. The service's own
   // `resolveInClone` (realpath + prefix check) is defence-in-depth #2 for
   // whatever slips past a merely-textual check (e.g. a symlink).
-  const ContextPath = z
-    .string()
-    .min(1)
-    .refine((p) => !p.startsWith('/'), 'path must not start with "/"')
-    .refine((p) => !p.split('/').includes('..'), 'path must not contain ".."');
-
   const OwnerKind = z.enum(['agent', 'skill']);
 
   const PreviewQuery = z.object({ path: ContextPath });
@@ -66,7 +61,12 @@ export default async function projectContextRoutes(appBase: FastifyInstance) {
     owner_id: z.string().uuid(),
     path: ContextPath,
   });
-  const SetAgentContextBody = z.object({ documents: z.array(ProjectContextRef) });
+  // `ContextRefBody` carries the same `ContextPath` refinements (no leading
+  // "/", no "..") the read routes above apply, plus a `repo_id` shape
+  // narrow enough to fail schema validation (422) instead of reaching
+  // `container.reviewRepo.getRepo` with a non-UUID and failing there as a
+  // Postgres 500 — see `_shared/context-ref.ts` for the full rationale.
+  const SetAgentContextBody = z.object({ documents: z.array(ContextRefBody) });
   const ConfirmResponse = z.object({ ok: z.boolean() });
   const SkillContextResponse = z.array(ProjectContextAttachment);
 

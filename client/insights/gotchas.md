@@ -18,7 +18,34 @@ quirks, and error → cause → fix records. Newest at the top.
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
-_None yet._
+- 2026-08-20 — A drag-reorder helper that receives only the FILTERED/visible
+  path list must NEVER append the untouched (hidden/other-repo) refs after
+  the reordered block — that tail-append silently relocates every untouched
+  ref to the end on any drag while a filter is active, which for an
+  attachment-order list is the prompt injection order and the first thing
+  dropped when the token budget is exceeded. `reorderRefs`
+  (`app/agents/[id]/_components/AgentEditor/_components/ContextTab/helpers.ts`)
+  and `reorderDraft` (`app/skills/_components/SkillDetail/_components/ContextTab/helpers.ts`)
+  both had this bug; the fix splices the reordered visible refs back into the
+  INDEX SLOTS the visible refs originally occupied (`refs.map((r) => shown.has(r.path)
+  ? moved[cursor++] : r)` then filter out `undefined`, `noUncheckedIndexedAccess`
+  makes `moved[cursor++]` `T | undefined` honestly). The corresponding tests were
+  weak positives — one fixture happened to have the hidden ref already last, so
+  tail-append and splice-back gave the same answer; always place the untouched
+  ref in the MIDDLE of the fixture, never first/last, or the test can't tell
+  the two implementations apart.
+
+- 2026-08-20 — `OnboardingTourResponse.job_id` CANNOT be used to key a
+  per-failure dismissal (e.g. "re-show the failed notice only for a *new*
+  `job_id`") — the server always sends `job_id: null` alongside
+  `state: 'failed'` (`server/src/modules/onboarding/service.ts:149`); it is
+  only ever non-null while `state === 'generating'`. Every failed response
+  looks identical on this field regardless of which attempt produced it, so
+  an identity check against it can't tell two different failures apart.
+  `OnboardingTourView.tsx`'s `failedDismissed` reset therefore keys off the
+  `Regenerate` click itself (`handleRegenerate` resets before
+  `generate.mutate()`), not off response identity — this covers the user's
+  own retry but not a failure from a regeneration someone else triggered.
 
 ## Tool & Library Notes
 

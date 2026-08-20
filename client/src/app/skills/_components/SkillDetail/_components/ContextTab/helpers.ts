@@ -18,9 +18,12 @@ export function refsEqual(a: ProjectContextRef[], b: ProjectContextRef[]): boole
  *
  * Only refs belonging to `repoId` AND named in `paths` move; everything else —
  * a row hidden by the filter, or an attachment carried from another
- * repository — keeps its relative order and follows the reordered block. A
- * skill may legitimately hold refs from several repositories even though only
- * the active repo's documents are browsable, so a reorder must never drop them.
+ * repository — keeps its ORIGINAL index slot rather than following the
+ * reordered block. A skill may legitimately hold refs from several
+ * repositories even though only the active repo's documents are browsable,
+ * and this list is the prompt injection order (the tail is what gets dropped
+ * first once the token budget is exceeded) — so a reorder must never drop
+ * an untouched ref, and must never silently relocate it either.
  */
 export function reorderDraft(
   draft: readonly ProjectContextRef[],
@@ -31,5 +34,6 @@ export function reorderDraft(
   const isMoved = (r: ProjectContextRef) => r.repo_id === repoId && shown.has(r.path);
   const byPath = new Map(draft.filter(isMoved).map((r) => [r.path, r]));
   const moved = paths.map((p) => byPath.get(p)).filter((r): r is ProjectContextRef => r != null);
-  return [...moved, ...draft.filter((r) => !isMoved(r))];
+  let cursor = 0;
+  return draft.map((r) => (isMoved(r) ? moved[cursor++] : r)).filter((r): r is ProjectContextRef => r != null);
 }

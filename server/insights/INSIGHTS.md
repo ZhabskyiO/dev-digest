@@ -38,6 +38,19 @@ Approaches and solutions that worked here and are worth reusing.
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-20 — In `modules/project-context/service.ts`, a `context_attachments`
+  row is NEVER by itself proof that `(repo_id, path)` is safe to read back out
+  of a clone — it is only proof someone once called `setAgentContext`/
+  `setSkillContext` for it, and (before the PAT-disclosure fix at `drift():497`,
+  `confirm():532`, `buildAttachmentRows():337`) that call only required
+  `resolveInClone` containment, not membership in `project_context_documents`
+  (the scan's own allowlist). Any code path in this file that turns an
+  attachment/ref into a filesystem read must re-check
+  `this.repo.getDocument(repoId, path)` resolves, even on the `prior`
+  (already-attached) fast path in `buildAttachmentRows` — a row persisted
+  before this check existed must not be grandfathered in, or the fast path
+  itself becomes the bypass. `preview()` had this check from the start; the
+  other three methods didn't.
 - 2026-08-20 — `JobRunner`'s `JobHandler` signature (`platform/jobs.ts:16`,
   `(payload, ctx: { jobId }) => Promise<void>`) never receives the
   `workspaceId` passed to `enqueue(workspaceId, kind, payload)` — it is

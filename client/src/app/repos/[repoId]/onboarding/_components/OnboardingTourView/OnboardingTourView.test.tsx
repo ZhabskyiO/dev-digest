@@ -295,6 +295,52 @@ describe("OnboardingTourView", () => {
     }
   });
 
+  it("re-shows the failure notice for a fresh failed regeneration after a dismissed one (AC-28)", () => {
+    RESPONSE = {
+      tour: tour(),
+      state: "failed",
+      stale: false,
+      failure_reason: "provider timeout",
+      job_id: null,
+    };
+    const { rerender } = renderView();
+
+    expect(screen.getByText(/last regeneration failed: provider timeout/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText(/last regeneration failed: provider timeout/)).not.toBeInTheDocument();
+    expect(generateMutate).not.toHaveBeenCalled();
+
+    // A second, still-mounted "failed" response (e.g. left over between
+    // refetches) must stay dismissed until the user actually starts a new
+    // attempt — otherwise the dismissal would never do anything.
+    const rerenderView = () =>
+      rerender(
+        <NextIntlClientProvider locale="en" messages={{ onboarding: onboardingMessages, common: commonMessages }}>
+          <OnboardingTourView repoId="r1" />
+        </NextIntlClientProvider>,
+      );
+    rerenderView();
+    expect(screen.queryByText(/last regeneration failed: provider timeout/)).not.toBeInTheDocument();
+
+    // Clicking Regenerate starts a new attempt — the dismissal must reset so
+    // that if this next attempt also fails, its notice is visible again.
+    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
+    expect(generateMutate).toHaveBeenCalledTimes(1);
+
+    // The next attempt comes back failed too, with a different reason.
+    RESPONSE = {
+      tour: tour(),
+      state: "failed",
+      stale: false,
+      failure_reason: "rate limited",
+      job_id: null,
+    };
+    rerenderView();
+
+    expect(screen.getByText(/last regeneration failed: rate limited/)).toBeInTheDocument();
+  });
+
   it("renders the stale marker and all six sections for a stale tour (AC-29, AC-30)", () => {
     RESPONSE = { tour: tour(), state: "ready", stale: true, failure_reason: null, job_id: null };
     const { container } = renderView();

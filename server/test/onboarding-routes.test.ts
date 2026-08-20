@@ -15,6 +15,7 @@ import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/platform/config.js';
 import { MockAuthProvider } from '../src/adapters/mocks.js';
 import type { OnboardingService } from '../src/modules/onboarding/service.js';
+import type { ReviewRepository } from '../src/modules/reviews/repository.js';
 import type { OnboardingTourResponse, OnboardingGenerateResponse } from '@devdigest/shared';
 
 const config = loadConfig({ ...process.env, NODE_ENV: 'test' } as NodeJS.ProcessEnv);
@@ -25,6 +26,22 @@ const AUTH = new MockAuthProvider(
 );
 
 const REPO_ID = '11111111-1111-1111-1111-111111111111';
+const OTHER_WORKSPACE_REPO_ID = '22222222-2222-2222-2222-222222222222';
+
+/** A fake `ReviewRepository` whose `getRepo` reports `REPO_ID` as owned by
+ *  `ws-1` (the caller's workspace, per `AUTH` above) and
+ *  `OTHER_WORKSPACE_REPO_ID` as owned by a different workspace — enough to
+ *  drive `assertRepoInWorkspace`'s ownership check without a DB. */
+function makeReviewRepo(): ReviewRepository {
+  const getRepo = vi.fn(async (id: string) => {
+    if (id === REPO_ID) return { id: REPO_ID, workspaceId: 'ws-1', fullName: 'acme/widgets', clonePath: null };
+    if (id === OTHER_WORKSPACE_REPO_ID) {
+      return { id: OTHER_WORKSPACE_REPO_ID, workspaceId: 'ws-other', fullName: 'other/repo', clonePath: null };
+    }
+    return null;
+  });
+  return { getRepo } as unknown as ReviewRepository;
+}
 
 describe('onboarding routes (no DB)', () => {
   it('GET /repos/:id/onboarding returns 200 with state: "not_indexed" for an unindexed repo with no stored tour (AC-6)', async () => {
@@ -37,7 +54,7 @@ describe('onboarding routes (no DB)', () => {
     };
     const getTour = vi.fn(async () => response);
     const onboarding = { getTour } as unknown as OnboardingService;
-    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding } });
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const res = await app.inject({ method: 'GET', url: `/repos/${REPO_ID}/onboarding` });
 
@@ -54,7 +71,7 @@ describe('onboarding routes (no DB)', () => {
     };
     const requestGeneration = vi.fn(async () => generateResponse);
     const onboarding = { requestGeneration } as unknown as OnboardingService;
-    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding } });
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
 
     const first = await app.inject({ method: 'POST', url: `/repos/${REPO_ID}/onboarding/generate` });
     const second = await app.inject({ method: 'POST', url: `/repos/${REPO_ID}/onboarding/generate` });
@@ -82,6 +99,43 @@ describe('onboarding routes (no DB)', () => {
     expect(postRes.statusCode).toBe(422);
     expect(getTour).not.toHaveBeenCalled();
     expect(requestGeneration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('GET /repos/:id/onboarding returns 404 for a repo belonging to a different workspace and calls no service read (tenancy)', async () => {
+    const getTour = vi.fn();
+    const onboarding = { getTour } as unknown as OnboardingService;
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
+
+    const res = await app.inject({ method: 'GET', url: `/repos/${OTHER_WORKSPACE_REPO_ID}/onboarding` });
+
+    expect(res.statusCode).toBe(404);
+    expect(getTour).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('POST /repos/:id/onboarding/generate returns 404 for a repo belonging to a different workspace and enqueues nothing (tenancy)', async () => {
+    const requestGeneration = vi.fn();
+    const onboarding = { requestGeneration } as unknown as OnboardingService;
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
+
+    const res = await app.inject({ method: 'POST', url: `/repos/${OTHER_WORKSPACE_REPO_ID}/onboarding/generate` });
+
+    expect(res.statusCode).toBe(404);
+    expect(requestGeneration).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('GET /repos/:id/onboarding returns 404 for a repo id that does not exist at all (tenancy guard doubles as existence check)', async () => {
+    const getTour = vi.fn();
+    const onboarding = { getTour } as unknown as OnboardingService;
+    const app = await buildApp({ config, overrides: { auth: AUTH, onboarding, reviewRepo: makeReviewRepo() } });
+
+    const missingId = '33333333-3333-3333-3333-333333333333';
+    const res = await app.inject({ method: 'GET', url: `/repos/${missingId}/onboarding` });
+
+    expect(res.statusCode).toBe(404);
+    expect(getTour).not.toHaveBeenCalled();
     await app.close();
   });
 });
