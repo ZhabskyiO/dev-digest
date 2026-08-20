@@ -18,7 +18,17 @@ quirks, and error → cause → fix records. Newest at the top.
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
-_None yet._
+- 2026-08-20 — NEVER defer a task's own test to "a later `test-writer` pass"
+  when the run is driven by `/run-plan`. That skill **deliberately does not
+  invoke `test-writer`** (its guardrails say so explicitly): coverage comes only
+  from each implementer's self-verification. A plan's `## Testing strategy`
+  section may still name `test-writer` as the owner of some suite — that naming
+  is about a manual run, not about `/run-plan`, and reading it as a promise
+  ships the acceptance criterion unproven. Seen when an implementer skipped an
+  `.it.test.ts` its own Acceptance list required, on the strength of the plan's
+  testing-strategy line; a sibling task in the same phase wrote its equivalent
+  test and was right to. If a task's Acceptance names a test, that task writes
+  it.
 
 ## Tool & Library Notes
 
@@ -46,6 +56,15 @@ Quirks of dependencies, tooling, and the local environment.
   var before a config module snapshots it), make the config read lazily
   (a getter) instead — `mcp-server/src/config.ts:17` does this so `--api-url`
   works with static imports.
+- 2026-08-20 — `pr-self-review`'s PASS is keyed to a `diffHash` over the whole
+  diff state, so **committing invalidates it**. Moving the same content from the
+  working tree into a commit changes the hash; `.pr-self-review.json` is then
+  stale and `scripts/check-gate.sh` denies the next `git push` as though no
+  review ever ran. ALWAYS re-run
+  `.claude/skills/pr-self-review/scripts/diff-hash.sh` and update the state
+  file's `diffHash` (and `head`) after any commit that follows the review —
+  otherwise the failure surfaces at push time and reads like a tooling bug
+  rather than a stale record. Same applies after `--amend` or a rebase.
 
 ## Recurring Errors & Fixes
 

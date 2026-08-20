@@ -17,12 +17,40 @@ conventions, and open threads. Newest at the top.
 
 Approaches and solutions that worked here and are worth reusing.
 
-_None yet._
+- 2026-08-20 — When ONE user-visible bug spans several agents' owned paths, give
+  the whole bug to ONE agent, or verify the composition yourself — per-file
+  correctness does not imply the fix works. Splitting a same-path-from-two-repos
+  collision in `client/src/components/project-context/AttachmentList` across
+  three agents produced three locally-correct, jointly-broken fixes in one
+  session: the composite React key shipped while the caller never populated
+  `repo_id` (so `itemKey` silently degraded to `":path"` and still collided);
+  the row callbacks still reported a bare `path`, so clicking the second of two
+  rows acted on the first; and the identity was then discarded again before
+  `useDocumentPreview`, which used the tab's active repo. Every one was found by
+  an agent reading adjacent code while fixing something else — none by the
+  review that scoped the work, because none was visible from inside a single set
+  of owned paths. The reusable rule: owned-path isolation makes parallel work
+  safe to WRITE, not safe to ASSUME CORRECT; a bug family needs one owner or an
+  explicit end-to-end check.
 
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-20 — The root `README.md`'s "What you build in the course" table
+  (course-plan line items per lesson) is NEVER updated when a lesson's feature
+  actually ships in this lab repo — verified across L01-L05: `git log --
+  README.md` shows it untouched since the initial commit except for one
+  unrelated CLI-feature commit, and `4031d30` ("feat:(Lab4): add project
+  context") made zero changes to it. Project Context and Blast Radius (both
+  shipped, both module-level, not new top-level packages) have no root-README
+  mention outside that table row. Only a feature that ships as an entirely new
+  top-level package (`mcp-server`, L04) gets added elsewhere (package table +
+  doc-links line). Do not assume a prior "sibling feature" has a root-README
+  treatment worth mirroring just because it shipped — check `git log`/`grep`
+  first. For a module-level (non-package) feature, the closest real precedent
+  is the short one-paragraph callout used for `repo-intel` right after the
+  package table (`README.md:21-24`), not the course-plan table.
 - 2026-07-28 — `skills-lock.json` tracks only **vendored** third-party skills
   (`sourceType: github` + upstream path + sha256 for drift detection).
   Locally-authored skills (`security`, `mermaid-diagram`, `react-best-practices`,
