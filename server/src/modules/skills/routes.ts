@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
-import { SkillImportRequest, SkillSource, SkillType } from '@devdigest/shared';
+import { ProjectContextRef, SkillImportRequest, SkillSource, SkillType } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
@@ -57,8 +57,13 @@ const UpdateSkillBody = z.object({
   body: z.string().min(1).optional(),
   source: SkillSource.optional(),
   enabled: z.boolean().optional(),
-  /** "What changed" note for the snapshot this edit creates. Ignored when the
-   *  body is unchanged, because no snapshot is written then. */
+  /** The skill's ordered project-context attachment set (AC-13, AC-39,
+   *  AC-42). Sent through this same update — not a separate route — so a
+   *  body-and-attachments edit is one save and at most one version snapshot. */
+  context: z.array(ProjectContextRef).optional(),
+  /** "What changed" note for the snapshot this edit creates. Ignored when
+   *  neither the body nor the attachment set changed, because no snapshot is
+   *  written then. */
   version_label: z.string().max(120).optional(),
 });
 

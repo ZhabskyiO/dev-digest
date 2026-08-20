@@ -42,12 +42,19 @@ vi.mock("../../../../lib/hooks/skills", () => ({
 
 // The detail pane owns its own data hooks (versions, stats, agents) and pulls in
 // CodeMirror; this suite covers the rail and the URL wiring, not the tabs.
+// The allowlist is imported for real (via `vi.hoisted`) rather than restated:
+// the literal that used to sit here had already gone stale — it was missing
+// `context` — so this suite would have passed against a broken tab bar.
+const detailConstants = await vi.hoisted(
+  async () => await import("../SkillDetail/constants"),
+);
+
 vi.mock("../SkillDetail", () => ({
   SkillDetail: ({ skill, tab }: { skill: { name: string }; tab: string }) => (
     <div data-testid="skill-detail">{`${skill.name}:${tab}`}</div>
   ),
-  TAB_KEYS: ["config", "preview", "stats", "versions"],
-  DEFAULT_TAB: "config",
+  TAB_KEYS: detailConstants.TAB_KEYS,
+  DEFAULT_TAB: detailConstants.DEFAULT_TAB,
 }));
 
 const push = vi.fn();

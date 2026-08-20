@@ -16,6 +16,7 @@ import type {
   SkillStatsSummary,
   SkillUsage,
   SkillVersion,
+  ProjectContextRef,
 } from "@devdigest/shared";
 
 export function useSkills() {
@@ -62,6 +63,11 @@ export interface UpdateSkillInput {
   enabled?: boolean;
   /** "What changed" note; the server records it only when the body changed. */
   version_label?: string;
+  /** The skill's ordered project-context attachment set (specs/2026-08-18
+   *  -project-context.md, AC-13, AC-42). Sent through this same PATCH — not a
+   *  separate mutation — so a body-and-attachments edit is one save and one
+   *  `skill_versions` snapshot. */
+  context?: ProjectContextRef[];
 }
 
 export interface UpdateSkillArgs {
@@ -76,6 +82,11 @@ export function useUpdateSkill() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["skills"] });
       qc.setQueryData(["skill", data.id], data);
+      // A `context` save (ContextTab) changes what GET /skills/:id/context
+      // would return next — without this, `useSkillContext`'s cache stays
+      // stale in-session until a remount (only masked in tests by each one
+      // using a fresh QueryClient).
+      qc.invalidateQueries({ queryKey: ["skill-context", data.id] });
     },
   });
 }

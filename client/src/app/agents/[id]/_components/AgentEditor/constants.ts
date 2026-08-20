@@ -7,9 +7,19 @@ export interface EditorTab {
   icon: IconName;
 }
 
-/** Editor tabs. Part-0 shipped Config only; L02 adds Skills + Stats. */
+/** Editor tabs. Part-0 shipped Config only; L02 adds Skills + Stats; the
+ *  project-context spec adds Context (specs/2026-08-18-project-context.md). */
 export const TABS: readonly EditorTab[] = [
   { key: "config", labelKey: "editor.tabs.config", icon: "Settings" },
   { key: "skills", labelKey: "editor.tabs.skills", icon: "Sparkles" },
+  { key: "context", labelKey: "editor.tabs.context", icon: "FileText" },
   { key: "stats", labelKey: "editor.tabs.stats", icon: "BarChart" },
 ];
+
+/** The `?tab=` allowlist, DERIVED from `TABS` — mirrors SkillDetail's
+ *  `TAB_KEYS`. Never restate these keys as a literal in the page: a
+ *  hand-maintained second list silently drifts the moment a tab is added, and
+ *  the symptom is a tab that highlights for one render and then bounces back
+ *  to `DEFAULT_TAB` (which is exactly what Context did). */
+export const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
+export const DEFAULT_TAB = "config";

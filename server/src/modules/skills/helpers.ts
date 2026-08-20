@@ -1,6 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 
 import type {
+  ProjectContextRef,
   Skill,
   SkillImportWarning,
   SkillSource,
@@ -46,19 +47,45 @@ export function toSkillVersionDto(row: SkillVersionRow): SkillVersion {
     body: row.body,
     label: row.label ?? null,
     created_at: row.createdAt.toISOString(),
+    // `attachments` is untyped jsonb (nullable — rows written before T16
+    // shipped have none), so it is cast rather than parsed here; the route
+    // response schema (`SkillVersion.attachments`, `.nullish()`) is the real
+    // validation gate for anything client-facing.
+    attachments: (row.attachments as ProjectContextRef[] | null) ?? undefined,
   };
 }
 
+/** Order-sensitive equality for two ordered attachment-ref lists — a reorder
+ *  with the same members still counts as a change (AC-39). Deliberately not
+ *  imported from `modules/agents/helpers.ts`'s identical function: a
+ *  module→module internal import is exactly what `.dependency-cruiser.cjs`'s
+ *  `no-cross-module-internals` rule forbids (see this file's existing
+ *  `isDisallowedIp`/`looksLikeHtml` re-export comment for the same rule
+ *  applied the other direction — this helper is small enough to just
+ *  duplicate rather than relocate to `_shared`). */
+function sameOrderedRefs(a: ProjectContextRef[], b: ProjectContextRef[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((ref, i) => ref.repo_id === b[i]?.repo_id && ref.path === b[i]?.path);
+}
+
 /**
- * True when a patch changes a skill's `body` relative to the existing row —
- * unlike agents, only `body` bumps the version and writes `skill_versions`;
- * name/description/type/source/enabled changes do not (per the API surface).
+ * True when a patch changes a skill's `body` and/or its ordered
+ * project-context attachment set relative to the existing row — either one
+ * alone, or both together, bumps the version and writes a `skill_versions`
+ * snapshot (AC-39, AC-42); name/description/type/source/enabled changes do
+ * not (per the API surface). `existing.context` is the CALLER's
+ * responsibility to resolve (from the last `skill_versions` snapshot — see
+ * `SkillsRepository.lastContext`), mirroring how `AgentsRepository` splits
+ * the same concern.
  */
 export function isConfigChange(
-  existing: Pick<SkillRow, 'body'>,
-  patch: { body?: string },
+  existing: Pick<SkillRow, 'body'> & { context?: ProjectContextRef[] },
+  patch: { body?: string; context?: ProjectContextRef[] },
 ): boolean {
-  return patch.body !== undefined && patch.body !== existing.body;
+  return (
+    (patch.body !== undefined && patch.body !== existing.body) ||
+    (patch.context !== undefined && !sameOrderedRefs(existing.context ?? [], patch.context))
+  );
 }
 
 // `isDisallowedIp` and `looksLikeHtml` moved to `modules/_shared/net-guards.ts`

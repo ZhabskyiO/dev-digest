@@ -62,8 +62,13 @@ Is it a development/implementation plan?
 └── YES → docs/plans/<kebab-feature-name>.md
 
 Is it a gotcha, known quirk, or session discovery?
-└── YES → <module>/insights/gotchas.md  or  <module>/insights/INSIGHTS.md
-          (co-located with the module, append-only for INSIGHTS.md)
+└── YES → <module>/insights/    (an append-only folder at the module root:
+          server/insights/ · client/insights/ · reviewer-core/insights/ ·
+          e2e/insights/ · mcp-server/insights/, plus root insights/ for
+          cross-cutting entries. INSIGHTS.md holds what works / patterns /
+          session notes / open questions; gotchas.md holds what doesn't work /
+          tool quirks / errors)
+          Write it through the `engineering-insights` skill, never by hand.
 ```
 
 ## Diátaxis classification

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ProjectContextRef } from './project-context.js';
+
 /**
  * Conformance, Onboarding, Eval, Memory, Conventions, Skills,
  * Agents and their DTOs.
@@ -212,6 +214,15 @@ export const AgentVersionConfig = z.object({
   ci_fail_on: CiFailOn,
   repo_intel: z.boolean(),
   skills: z.array(z.string()),
+  // Ordered project-context document attachments at snapshot time (AC-19).
+  // `.default([])` is safe here — this contract is never passed as `schema:`
+  // to llm.completeStructured, so the "default fields still land in
+  // `required` and OpenAI's strict structured-output rejects `default`" trap
+  // (server/insights/gotchas.md, 2026-08-08) does not apply. It IS required for every
+  // pre-existing `agent_versions` row: `toAgentVersionDto` (helpers.ts:39)
+  // `.parse()`s stored `config_json` that predates this field, and a required
+  // key would throw on every one of them.
+  context: z.array(ProjectContextRef).default([]),
 });
 export type AgentVersionConfig = z.infer<typeof AgentVersionConfig>;
 

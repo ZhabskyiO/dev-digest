@@ -3,7 +3,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrIntentDetail } from "@devdigest/shared";
 // 10×`../` reaches `client/` from here: `messages/` sits at the package root,
-// two levels above what `@/lib/...` would need. See client/insights.md.
+// two levels above what `@/lib/...` would need. See client/insights/gotchas.md.
 import messages from "../../../../../../../../../../messages/en/brief.json";
 import commonMessages from "../../../../../../../../../../messages/en/common.json";
 import { IntentCard } from "./IntentCard";

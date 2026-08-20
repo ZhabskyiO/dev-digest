@@ -16,8 +16,10 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [typescript-expert](typescript-expert/SKILL.md) | Full-stack | Type-level programming, performance, tooling, migrations |
 | [security](security/SKILL.md) | Full-stack | OWASP Top 10:2025, auth, injection, uploads, secrets |
 | [mermaid-diagram](mermaid-diagram/SKILL.md) | Shared | Mermaid diagrams in markdown (flowcharts, sequence, ERD, …) |
-| [engineering-insights](engineering-insights/SKILL.md) | Shared | Captures non-obvious discoveries into the right module's `insights.md` (append-only) |
+| [engineering-insights](engineering-insights/SKILL.md) | Shared | Captures non-obvious discoveries into the right module's `insights/` folder (append-only) |
 | [open-pull-request](open-pull-request/SKILL.md) | Workflow | Opening a PR: Conventional Commits title, the committed template, self-review before review |
+| [run-plan](run-plan/SKILL.md) | Workflow | `/run-plan` — executes an approved Implementation Plan: implementers per DAG, then architecture-reviewer ‖ plan-verifier, then a bounded fix loop |
+| [pr-self-review](pr-self-review/SKILL.md) | Workflow | `/pr-self-review` — local pre-PR gate; blocks the push while a verified CRITICAL remains |
 
 ## What Are Skills?
 

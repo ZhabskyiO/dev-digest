@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord, PrFile, SmartDiff } from "@devdigest/shared";
 // 8×`../` reaches `client/` from here — same depth as the sibling
 // FindingCard test. `messages/` sits at the package root, one level above
-// `src/`. See client/insights.md.
+// `src/`. See client/insights/gotchas.md.
 import prReview from "../../../../../../../../messages/en/prReview.json";
 import shell from "../../../../../../../../messages/en/shell.json";
 import { SmartDiffViewer } from "./SmartDiffViewer";

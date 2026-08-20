@@ -19,8 +19,12 @@ const TRACE: RunTrace = {
   ],
 };
 
+// Mutable so individual tests can swap in a trace shaped differently
+// (e.g. one with `prompt_assembly.specs` set) without a second render module.
+let mockTrace: RunTrace = TRACE;
+
 vi.mock("../../../../../../../lib/hooks/trace", () => ({
-  useRunTrace: () => ({ data: TRACE, isLoading: false }),
+  useRunTrace: () => ({ data: mockTrace, isLoading: false }),
 }));
 vi.mock("../../../../../../../lib/hooks/reviews", () => ({
   useRunEvents: () => ({ events: [], running: false }),
@@ -28,7 +32,10 @@ vi.mock("../../../../../../../lib/hooks/reviews", () => ({
 
 import RunTraceDrawer from "./RunTraceDrawer";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mockTrace = TRACE;
+});
 
 function renderWithIntl(ui: React.ReactElement) {
   return render(
@@ -52,5 +59,38 @@ describe("A5 Run Trace drawer (smoke)", () => {
     fireEvent.click(screen.getByText("log"));
     // LiveLogStream renders its filter input
     expect(screen.getByPlaceholderText("Filter log…")).toBeInTheDocument();
+  });
+
+  it("AC-31: labels the attached-specs prompt-assembly slot as untrusted", () => {
+    // The i18n string under test lives only in messages/en/runs.json
+    // (trace.prompt.specs) — deliberately not spelled out here so this
+    // fixture can't stand in for the source-of-truth label copy.
+    mockTrace = {
+      ...TRACE,
+      prompt_assembly: { ...TRACE.prompt_assembly, specs: "<untrusted>...</untrusted>" },
+    };
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    // Prompt assembly section is collapsed by default — open it first.
+    fireEvent.click(screen.getByText("Prompt assembly"));
+    const label = screen.getByText(/attached specs/i);
+    expect(label.textContent).toMatch(/untrusted/i);
+  });
+
+  it("AC-32: omits the attached-specs slot when prompt_assembly.specs is null", () => {
+    renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />);
+    // TRACE.prompt_assembly.specs is null — no "untrusted" prompt-assembly row.
+    expect(screen.queryByText(/untrusted/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/attached specs/i)).not.toBeInTheDocument();
+  });
+
+  it("AC-33: renders a legacy trace lacking project_context without throwing", () => {
+    // TRACE has neither `project_context` nor a `prompt_assembly.specs` value —
+    // exactly the shape of a trace persisted before this feature (AC-33).
+    expect(() =>
+      renderWithIntl(<RunTraceDrawer runId="r1" agentName="Security" prNumber={482} onClose={() => {}} />),
+    ).not.toThrow();
+    expect(screen.getByText("Configuration")).toBeInTheDocument();
+    // No project-context configuration row either, since the field is absent.
+    expect(screen.queryByText(/project context/i)).not.toBeInTheDocument();
   });
 });

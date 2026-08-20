@@ -57,4 +57,4 @@ repo). Never edit; exclude from every search.
 ## Docs
 
 Request/DI flow, API map, full env table: [README.md](README.md).
-[../TESTING.md](../TESTING.md) · [insights.md](insights.md) · [docs/](docs/) · [specs/](specs/).
+[../TESTING.md](../TESTING.md) · [insights/INSIGHTS.md](insights/INSIGHTS.md) · [insights/gotchas.md](insights/gotchas.md) · [docs/](docs/) · [specs/](specs/).

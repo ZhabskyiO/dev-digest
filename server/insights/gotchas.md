@@ -1,7 +1,7 @@
-# Insights — `server`
+# Gotchas — `server`
 
-Append-only log of things learned the hard way in this package: gotchas, dead
-ends, and *why* a workaround exists. Newest at the top.
+Append-only log of what broke and why: dead ends, dependency and environment
+quirks, and error → cause → fix records. Newest at the top.
 
 > **Format:** new entries go under the matching section below as
 > `- YYYY-MM-DD — one-line claim`, with `file:line` evidence where it applies.
@@ -9,14 +9,9 @@ ends, and *why* a workaround exists. Newest at the top.
 > **Corrections:** append `└ YYYY-MM-DD correction: …` beneath an entry — never
 > rewrite, move, or delete what is already there.
 > When an entry starts causing repeated mistakes, promote a one-line version of
-> it into [CLAUDE.md](CLAUDE.md) and leave the full detail here.
-> Repo-wide entries belong in [../insights.md](../insights.md) instead.
-
-## What Works
-
-Approaches and solutions that worked here and are worth reusing.
-
-_None yet._
+> it into [CLAUDE.md](../CLAUDE.md) and leave the full detail here.
+> Repo-wide entries belong in the root [insights/](../../insights/) folder instead.
+> The other half of this log lives in [INSIGHTS.md](INSIGHTS.md).
 
 ## What Doesn't Work
 
@@ -54,147 +49,72 @@ most-skipped and most-valuable section: if something failed, record it here.**
   fences that must hold in tests have to live in the service (e.g. the per-PR
   in-flight dedupe in `IntentService.recalculate`), not in the route config.
 
-## Codebase Patterns
-
-Conventions and architectural decisions specific to this repo.
-
-- 2026-08-11 — The repo-intel index is built from the repo's DEFAULT BRANCH
-  only — `repo_index_state` is one row per repo with no sha dimension, and
-  `resyncRepo` fetches `origin/<defaultBranch>`. So NOTHING a pull request adds
-  (new functions, new routes, a new cron) exists in the index, and any
-  PR-scoped read served purely from it silently omits exactly the code under
-  review. `modules/repo-intel/head-overlay.ts` is the workaround: fetch
-  `pull/<n>/head`, read only the changed files at that sha via
-  `git.readFileAt`, parse in-memory, merge. Two limits worth knowing — it sees
-  callers only in files the diff touches, and it resolves overlay references by
-  NAME (a full import resolution would need the whole branch parsed).
-
-- 2026-08-11 — NEVER apply a per-line regex to detect route registrations.
-  `extractEndpoints` did, and any route whose path sits on the line after the
-  verb — i.e. every route that takes a schema/options object, which in practice
-  is all of them — was invisible. The visible symptom is inverted and very
-  easy to misread: `file_facts` fills up with a repo's TEST files (one-liner
-  `api.get('/x?limit=1000')` calls do fit on one line) while its real
-  `routes.ts` files record nothing, so the endpoint list looks populated and is
-  entirely wrong. Fixed by matching the whole source (`\s` spans newlines) and
-  by excluding test files from `file_facts` (`repo-intel/helpers.ts`
-  `isTestFile`) — a test calls INTO an API, it does not register one.
-
-- 2026-08-11 — `extractCrons` only matched a cron literal sitting next to a
-  `cron`/`schedule`/`CronJob` token, which misses every idiomatic way of
-  hoisting the schedule out of the call — a `CRON_SCHEDULES` lookup table, a
-  config default, a constant — because on the line holding the literal the
-  keyword is gone. It now also recognises a quoted 5/6-field cron expression by
-  its own grammar; across ~500 files of this repo that rule fired on nothing
-  else. Job kinds are routinely kebab-case, so `[a-z][a-z0-9_]*` silently
-  dropped every hyphenated one.
-
-- 2026-08-11 — ALWAYS bump `INDEXER_VERSION` when changing what the extractors
-  WRITE, not just when changing the symbol schema. `POST /repos/:id/resync` on
-  an unchanged sha takes the incremental no-op path and never rewrites
-  `file_facts`, so an extractor fix appears to do nothing; the version mismatch
-  is the only thing that forces the full rebuild.
-
-- 2026-08-11 — `references.to_symbol` is a BARE NAME, so `(file, name)` — not
-  the name — is a symbol's identity anywhere blast-style attribution happens.
-  Keying per-symbol maps on the name alone made `getById` in
-  `articles/repository.ts` and `articles/service.ts` share one bucket: each
-  rendered the union of both callers, and the totals double-counted. Carry
-  `references.decl_file` through and key with `symbolKey(file, name)`.
-
-- 2026-08-11 — ALWAYS pin a code link built from repo-intel data to
-  `repo_index_state.last_indexed_sha`, **never** to the repo's default branch or
-  the PR head sha. Every `file:line` the index emits (`symbols.line`,
-  `references.line`, and so anything downstream like `BlastCallerRow.line`) is
-  measured against the commit the indexer walked, and the index lags `main` by
-  however many commits have landed since — so a `blob/main/...#L146` link drifts
-  by however many lines were inserted above. Verified concretely: for the
-  `deriveReviewStatus` caller in `server/src/modules/pulls/routes.ts`, line 146
-  at the indexed sha is the real call site, while line 146 on `main` is an
-  unrelated `.where(and(eq(...)))`. The PR head sha is wrong too — index callers
-  mostly live in files the PR never touched. This is why
-  `BlastRadiusResult.indexed_sha` exists
-  (`server/src/vendor/shared/contracts/blast.ts`); any new surface over index
-  data needs the same field rather than reusing `repo.default_branch`.
-
-- 2026-08-07 — `server/src/prompts/intent.extract.md` (T3) has exactly seven
-  placeholders (`title`, `branch`, `commits`, `paths`, `body`, `ticket`,
-  `docs`) with **no dedicated slot for evidence tiers (d) external URLs or
-  (e) Jira/Linear**, and the template is out of scope for whoever implements
-  those tiers (T15/T16) since it's already accept-criteria-frozen. The
-  working pattern (`modules/reviews/intent/service.ts`, the
-  `INTENT_EXTERNAL_EVIDENCE` seam): fold tier-(d) fetched URL content into the
-  existing `docsText` variable (same `{{docs}}` slot) and tier-(e) ticket
-  content into `ticketText` (same `{{ticket}}` slot), both still individually
-  `wrapEvidence()`-wrapped before concatenation. If a template placeholder set
-  is ever frozen like this again, check whether new evidence sources are
-  meant to widen the template or fold into an existing slot before assuming a
-  template edit is needed.
-
-- 2026-07-29 — Cost pricing is two-layered and the layers use **different model-id
-  namespaces**. `PriceBook` (`platform/price-book.ts:54`) caches live OpenRouter
-  prices keyed by `m.id` — OpenRouter slugs like `z-ai/glm-4.7-flash`. The static
-  fallback (`adapters/llm/pricing.ts`) is keyed by bare ids like `gpt-4.1` and
-  `claude-haiku-4-5`. So injecting `PriceBook` into the OpenAI/Anthropic adapters
-  does **not** give them live pricing — their ids never match the live map and
-  every lookup falls through to the static table. ALWAYS add a static entry when
-  a non-OpenRouter model prices as `null`; wiring the PriceBook alone will not
-  fix it.
-
-- 2026-08-04 — ALWAYS pair a server-side "import/fetch this URL the user gave
-  us" feature with an SSRF guard — resolve the hostname via `dns.lookup`
-  *before* fetching, reject any resolved address that is loopback/private/
-  link-local (including the `169.254.169.254` cloud-metadata address), only
-  allow `http(s):`, and pass `redirect: 'manual'` so a redirect can't silently
-  reach an unchecked host. Template: `isDisallowedIp()`
-  (`modules/skills/helpers.ts`) + `SkillsService.fetchUrlBody()`
-  (`modules/skills/service.ts`) — the skills URL-import route originally did a
-  bare `fetch(url)` with no destination check, which is a ready-made SSRF (the
-  fetched response body is returned to the caller, so it doubles as response
-  reflection) caught in self-review, not by any test. Any future "paste a URL"
-  feature in this codebase should reuse or mirror this pair rather than calling
-  `fetch()` on user input directly.
-
-- 2026-07-30 — `pnpm db:seed` creates a review with **no `run_id` and no
-  `agent_id`**, and inserts **no `agent_runs` rows at all** (`db/seed.ts:136-148`
-  — grep `runId` there returns nothing). So anything that joins reviews ↔ runs on
-  `run_id` renders empty on freshly seeded data while working perfectly on real
-  reviews, which `run-executor.ts` does link. NEVER debug such a feature against
-  the demo PR — run a real review, or check a genuinely imported repo, before
-  concluding the join is broken. (Hit while adding the per-run findings breakdown
-  to the PR timeline: seeded PRs silently fell back to the plain count.)
-
-- 2026-08-08 — There is NO identifier shared across one "Run Review (all
-  agents)". `ReviewService.runReview` calls `createAgentRun` inside the
-  per-agent loop, so every agent gets its own `agent_runs.id` and writes its own
-  `reviews` row seconds apart. Two consequences for any feature reading "the
-  latest review": `reviewsForPull(prId)[0]` is whichever agent's write landed
-  LAST — routinely one that found nothing (observed: rows at 19:58:06 with 0
-  findings, 19:58:01 with 0, 19:57:40 with 8) — and grouping by `run_id` does
-  NOT repair it, because each of those rows has a different run id. ALWAYS
-  de-duplicate by `agentId` newest-first instead (`findingsFromLatestRunPerAgent`
-  in `modules/reviews/helpers.ts`): one vote per agent, a re-run supersedes only
-  that agent. Taking every row is the opposite error — it double-counts re-runs.
-
-- 2026-08-08 — Adding a new derived field to `pr_intent` does NOT backfill on the
-  next review run. `IntentService.deriveForRun` short-circuits on
-  `cached.headSha === pull.headSha` (`modules/reviews/intent/service.ts:126`)
-  and returns the persisted row without calling the model, so every PR whose
-  head hasn't moved keeps the old shape — the new column sits at its DB default
-  forever and re-running the review changes nothing. ALWAYS state this when
-  shipping such a field, and force a re-derive with
-  `DELETE FROM pr_intent WHERE pr_id = …` (or push a new commit) rather than
-  debugging why the value is empty. Hit shipping `risk_areas`.
-  └ 2026-08-09 update: there is now a supported escape hatch —
-    `POST /pulls/:id/intent/recalculate` force-derives one PR at the same
-    `head_sha` (`IntentService.recalculate`, which skips the cache check that
-    `deriveForRun` still performs). Prefer it over `DELETE FROM pr_intent` for
-    a handful of PRs; the SQL is still the move for a bulk backfill, since the
-    endpoint is one PR per call and rate-limited.
-
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
+
+- 2026-08-18 — A `Dirent` from `readdir(dir, { withFileTypes: true })` does
+  **not** resolve a symlink's target type: for a symlink entry,
+  `entry.isSymbolicLink()` is `true` but both `entry.isFile()` and
+  `entry.isDirectory()` are `false` — you cannot tell from the Dirent alone
+  whether a symlinked entry points at a file or a directory. Determining that
+  requires one extra `stat(fullPath)` (which follows the link) per symlink
+  entry. Hit building `modules/project-context/reader.ts`'s recursive walk,
+  where a symlinked directory must never be descended into (avoids symlink
+  cycles) while a symlinked *file* is still a valid candidate subject to the
+  usual realpath-containment check. Same class of gotcha as the
+  `walkClone`/`repo-intel` precedent (`pipeline/walk.ts:89`, "never follow
+  symlinks") — that walker sidesteps the issue by skipping every symlink
+  entry outright; a walker that must still accept symlinked *files* (as
+  project-context discovery does) cannot take that shortcut and needs the
+  extra `stat`.
+
+- 2026-08-19 — zod v3's `.default(x)` makes a field's presence optional only
+  for **parsing** — `z.infer<>` (the OUTPUT type) still marks that field
+  REQUIRED, not `field?:`, because a default guarantees it's always present
+  after `.parse()`. This means adding `.default([])` to a widely-shared,
+  already-in-use contract (e.g. `ProjectContextDocument.drifted_for`,
+  `server/src/vendor/shared/contracts/project-context.ts`) is NOT a
+  no-ripple change for code that constructs plain TS object literals of that
+  type directly (not through `.parse()`) — every such literal, anywhere in
+  the codebase, now needs the field or `tsc` fails with `TS2741: Property
+  '…' is missing`. Confirmed concretely: adding `drifted_for` broke
+  `pnpm typecheck` in THREE client test files
+  (`ContextTab.test.tsx` ×2, `ProjectContextView.test.tsx`) that hand-build
+  `ProjectContextDocument` fixtures, while every real API response stayed
+  correct (the server's own object-literal call sites — `service.ts`'s
+  `scanAndBuildResponse`/`preview` — were updated in the same change; the
+  broken sites were pre-existing literals the contract-adding task didn't
+  own). `.default([])` is still the right call per the AC-33-style
+  backward-compat rule ("older cached/persisted shapes still parse") — the
+  lesson is to expect and flag test-fixture ripple in every OTHER
+  module/package that builds literals of the extended type, not to read a
+  clean `tsc` in your own module as proof the change is ripple-free
+  repo-wide.
+
+- 2026-08-18 — drizzle-orm 0.38.3's `PgInsertOnConflictDoUpdateConfig` field for
+  a conditional `ON CONFLICT DO UPDATE` is `setWhere` (or the deprecated
+  `where`) — NOT a `.where()` chained after `.onConflictDoUpdate()`, which
+  doesn't exist on the insert builder. To reference the row that *would* have
+  been inserted (Postgres's `EXCLUDED` pseudo-table) from `set`/`setWhere`,
+  use a raw `sql\`excluded.column_name\`` fragment (snake_case DB column
+  name, not the camelCase TS field) — there is no typed helper for it. Used in
+  `modules/project-context/repository.ts::upsertDocuments` to make the update
+  a no-op when `content_hash` didn't change. Also: this drizzle-orm version's
+  `pg-core` has no `union`/`unionAll` query-builder combinator exported
+  anywhere findable in its `.d.ts` files — a genuine `UNION` (e.g. "distinct
+  agent ids from two different attachment paths", `usedByAgentCounts`) has to
+  be a raw `sql` template through `db.execute()`, same pattern already used in
+  `modules/repo-intel/repository.ts:414`.
+
+- 2026-08-18 — There are ZERO colocated test files anywhere under
+  `src/modules/**` in this repo (`find src/modules -iname '*.test.ts'` is
+  empty) — every `*.it.test.ts` lives under `server/test/`, even for a
+  single-file module like a repository. A task brief that says "plus its
+  colocated test file" for a `repository.ts` should be read as "the test file
+  for this repository", placed at `server/test/<module>-repository.it.test.ts`,
+  not literally next to the source file — there is no precedent for the
+  latter and nothing in the vitest config special-cases `src/**/*.it.test.ts`.
 
 - 2026-08-07 — `npm run depcruise` (referenced by the `onion-architecture` skill
   as an already-working gate, "0 errors, 15 warnings") does **not exist yet** in
@@ -224,9 +144,48 @@ Quirks of dependencies, tooling, and the local environment.
   created_at from drizzle.__drizzle_migrations order by created_at desc limit
   1` before and after `pnpm db:migrate` to confirm no new row was inserted.
 
+- 2026-08-17 — ALWAYS pass `--exclude '**/*.it.test.ts'` to `vitest related` in
+  `server/`. `pnpm exec vitest related --run <src files>` resolves *every* test
+  importing those files, `.it.test.ts` included, so it silently starts a
+  testcontainers Postgres: measured on `src/platform/price-book.ts`, 16 files /
+  17.7s with Docker vs 2 files / 1.4s once the exclude is added. `related` is the
+  right tool for a narrow "did I break anything I touch" check (it is what the
+  implementer agents run), but only with the exclude — the `--exclude` flag in
+  `server/CLAUDE.md`'s unit-test command is not inherited by the `related`
+  subcommand.
+
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
+
+- 2026-08-19 — A raw NUL byte (0x00) inside a `.ts` template literal (e.g.
+  `` return `${repoId}\0${docPath}`; `` written with a literal control
+  character rather than the `\x00` escape) makes `git` classify the WHOLE
+  FILE as binary: `git diff --stat` reports `Bin 0 -> N bytes, 0
+  insertions(+), 0 deletions(-)` no matter how many real lines changed, and
+  `grep` (without `-a`), `git blame -L`, and normal patch application all
+  silently fail or return nothing on that file. Found in
+  `modules/reviews/prompt-context.ts` (a 349-line file, the one deciding what
+  an LLM actually reads) via `file <path>` reporting `data` instead of a text
+  type, and `python3 -c "open(path,'rb').read().find(b'\x00')"` to locate the
+  byte offset — `grep -an` also works once you remember to add `-a`. Fix:
+  replace the literal NUL with the `\x00` escape sequence in the source
+  (behaviorally identical string at runtime, but now ASCII in the file) —
+  verify with `file <path>` reporting a text type again and `git diff --stat`
+  showing real insertion/deletion counts. Same class of footgun as this
+  file's `*/`-inside-a-JSDoc-glob and unescaped-backtick entries above
+  (2026-08-07, 2026-08-04) — a literal special character silently corrupting
+  how tooling parses/diffs a `.ts` file — but a NUL byte is worse: it hides
+  the entire file from code review, not just from `tsc`.
+  └ 2026-08-19 second sighting: `test/project-context-service.test.ts:52`
+    (`docKey`) carried the same literal NUL, independently of
+    `prompt-context.ts` — so this is a recurring authoring slip, not a
+    one-off. It hid the whole 16 KB test file from `grep` (silent exit 1, no
+    "binary file matches" warning). NEVER try to find these with `grep` for a
+    NUL: the shell cannot pass a 0x00 byte in argv, so `grep $'\x00' …`
+    degenerates to an EMPTY pattern and reports every file as a hit. Use
+    `file` (a NUL-carrying `.ts` reports `data`, not `… text`) or
+    `python3 -c "import sys;[print(p) for p in sys.argv[1:] if b'\0' in open(p,'rb').read()]" $(git ls-files '*.ts')`.
 
 - 2026-08-07 — A doc-comment sentence like "never read `process.env`
   directly" **fails** a verification gate phrased as
@@ -305,38 +264,7 @@ Error message → cause → fix. Keep the literal error text so it is greppable.
   `diagnostics_channel.tracingChannel` (Node ≥ 19.9). It surfaces as a *suite
   collection* failure ("0 test") with no mention of Node, so it reads like a
   broken import. Fix: `nvm use` first. Same root cause as the Next.js boot
-  failure in [../insights.md](../insights.md), different symptom entirely.
-
-## Session Notes
-
-Dated one-line records of sessions that changed something material.
-
-_None yet._
-
-## Open Questions
-
-Unresolved, worth investigating.
-
-- 2026-08-07 — `modules/reviews/repository.ts` (the `ReviewRepository` facade)
-  exposes `getPrFiles(prId)` but has **no `getPrCommits`/equivalent for
-  `pr_commits`**, even though `pr_commits` is a first-class table with its own
-  schema (`db/schema/pulls.ts`). `IntentService.deriveForRun`
-  (`modules/reviews/intent/service.ts`) needs commit messages for tier-(a)
-  evidence and, lacking a facade method, queries `schema.prCommits` directly
-  via `container.db` — the same class of shortcut `pulls/routes.ts` already
-  takes for the same table (both are on the onion-architecture skill's known
-  `warn` drift list for touching `db/schema` outside a repository). Worth
-  adding a `getPrCommits`/`getCommitMessages` method to `ReviewRepository` (or
-  a shared one both modules can use) so this doesn't need re-deciding next
-  time something in `reviews/` needs commit data.
-  └ 2026-08-08 resolved: `getPrCommits(prId)` added to
-    `modules/reviews/repository/pull.repo.ts` + exposed on the
-    `ReviewRepository` facade, and `IntentService.deriveForRun` now calls
-    `this.repo.getPrCommits(pull.id)` instead of querying `schema.prCommits`
-    directly. `pulls/routes.ts:269`'s identical shortcut is untouched — it
-    remains the one still-open instance of this pattern (tracked separately
-    on the onion-architecture skill's `db-confined-to-repositories` drift
-    list).
+  failure in [../../insights/gotchas.md](../../insights/gotchas.md), different symptom entirely.
 
 ---
 

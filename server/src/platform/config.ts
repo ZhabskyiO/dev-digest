@@ -50,6 +50,30 @@ const EnvSchema = z.object({
     (v) => (v === '' ? undefined : v),
     z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
   ),
+  // Project Context (attach specs/docs/insights to a review) — discovery roots
+  // walked at any depth in the repo clone, comma-separated, case-insensitive.
+  PROJECT_CONTEXT_ROOTS: z.string().default('specs,docs,insights'),
+  // Conventional filenames recognised anywhere in the clone regardless of
+  // which root (if any) they sit under, comma-separated, case-insensitive.
+  // Exact basename matches only — NOT globs. The reader looks each candidate's
+  // basename up in a Map, so a pattern like `*.md` matches only a file
+  // literally named `*.md`; leave this empty to discover by root alone.
+  PROJECT_CONTEXT_FILENAMES: z.string().default('insights.md'),
+  // Per-run token budget for the effective (attached) document set. Documents
+  // are injected in order until the budget is reached; the remainder is
+  // dropped and recorded with an over-budget reason (AC-23).
+  PROJECT_CONTEXT_BUDGET_TOKENS: z.coerce.number().int().positive().default(12000),
+  // Per-document character cap applied before injection; the excess is
+  // truncated and the truncation is recorded in the trace (AC-24).
+  PROJECT_CONTEXT_DOC_CHAR_CAP: z.coerce.number().int().positive().default(16000),
+  // Discovery cap on the number of documents returned per scan (AC-5).
+  PROJECT_CONTEXT_MAX_DOCS: z.coerce.number().int().positive().default(500),
+  // Discovery cap on a single file's size in bytes; larger files are omitted
+  // and counted (AC-5).
+  PROJECT_CONTEXT_MAX_FILE_BYTES: z.coerce.number().int().positive().default(1048576),
+  // Character cap applied when rendering a document preview in the UI (not
+  // the run-time injection cap above, which is PROJECT_CONTEXT_DOC_CHAR_CAP).
+  PROJECT_CONTEXT_PREVIEW_CHARS: z.coerce.number().int().positive().default(16000),
 });
 
 export type AppConfig = {
@@ -86,7 +110,55 @@ export type AppConfig = {
   intentInPromptEnabled: boolean;
   /** Gates evidence tiers (d)/(e) (external URLs, Jira/Linear). Default OFF. */
   intentExternalEvidenceEnabled: boolean;
+  /**
+   * Project Context discovery roots, walked at any depth in the repo clone.
+   * Lower-cased and trimmed for case-insensitive matching against path
+   * segments. Default `['specs', 'docs', 'insights']`.
+   */
+  projectContextRoots: string[];
+  /**
+   * Conventional filenames recognised anywhere in the clone regardless of
+   * root. Lower-cased and trimmed for case-insensitive matching. Default
+   * `['insights.md']`.
+   */
+  projectContextFilenames: string[];
+  /**
+   * Token budget for the effective (attached) project-context document set
+   * on a run. Documents are injected in order until this is reached; the
+   * remainder is dropped (AC-23). See PROJECT_CONTEXT_BUDGET_TOKENS default.
+   */
+  projectContextBudgetTokens: number;
+  /**
+   * Per-document character cap applied before injection into a run's prompt
+   * (AC-24). See PROJECT_CONTEXT_DOC_CHAR_CAP default.
+   */
+  projectContextDocCharCap: number;
+  /** Discovery cap on the number of documents returned per scan (AC-5). See PROJECT_CONTEXT_MAX_DOCS default. */
+  projectContextMaxDocs: number;
+  /**
+   * Discovery cap on a single file's size in bytes; larger files are omitted
+   * and counted (AC-5). See PROJECT_CONTEXT_MAX_FILE_BYTES default.
+   */
+  projectContextMaxFileBytes: number;
+  /**
+   * Character cap applied when rendering a document preview in the UI.
+   * Independent of `projectContextDocCharCap`, which gates run-time
+   * injection. See PROJECT_CONTEXT_PREVIEW_CHARS default.
+   */
+  projectContextPreviewChars: number;
 };
+
+/**
+ * Splits a comma-separated env value into trimmed, lower-cased, non-empty
+ * entries — shared by PROJECT_CONTEXT_ROOTS and PROJECT_CONTEXT_FILENAMES so
+ * matching against clone paths can stay case-insensitive.
+ */
+function parseCsvList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.parse(env);
@@ -108,5 +180,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     intentEnabled: parsed.INTENT_ENABLED !== 'false',
     intentInPromptEnabled: parsed.INTENT_IN_PROMPT !== 'false',
     intentExternalEvidenceEnabled: parsed.INTENT_EXTERNAL_EVIDENCE === 'true',
+    projectContextRoots: parseCsvList(parsed.PROJECT_CONTEXT_ROOTS),
+    projectContextFilenames: parseCsvList(parsed.PROJECT_CONTEXT_FILENAMES),
+    projectContextBudgetTokens: parsed.PROJECT_CONTEXT_BUDGET_TOKENS,
+    projectContextDocCharCap: parsed.PROJECT_CONTEXT_DOC_CHAR_CAP,
+    projectContextMaxDocs: parsed.PROJECT_CONTEXT_MAX_DOCS,
+    projectContextMaxFileBytes: parsed.PROJECT_CONTEXT_MAX_FILE_BYTES,
+    projectContextPreviewChars: parsed.PROJECT_CONTEXT_PREVIEW_CHARS,
   };
 }

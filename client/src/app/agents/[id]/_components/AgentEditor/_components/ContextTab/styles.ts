@@ -1,0 +1,51 @@
+import type { CSSProperties } from "react";
+
+/** Co-located styles for ContextTab. */
+export const s = {
+  wrap: { maxWidth: 760, display: "flex", flexDirection: "column", gap: 16 } satisfies CSSProperties,
+  header: { display: "flex", alignItems: "center" } satisfies CSSProperties,
+  h2: { fontSize: 18, fontWeight: 700 } satisfies CSSProperties,
+  footerNote: { fontSize: 12.5, color: "var(--text-muted)", lineHeight: 1.5, margin: 0 } satisfies CSSProperties,
+  section: { display: "flex", flexDirection: "column", gap: 8 } satisfies CSSProperties,
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+  list: { display: "flex", flexDirection: "column", gap: 6 } satisfies CSSProperties,
+  inheritedRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "9px 10px",
+    borderRadius: 7,
+    border: "1px solid var(--border)",
+    background: "var(--bg-elevated)",
+  } satisfies CSSProperties,
+  inheritedPath: { flex: 1, fontSize: 13, color: "var(--text-primary)" } satisfies CSSProperties,
+  empty: { fontSize: 13, color: "var(--text-muted)", padding: "10px 0" } satisfies CSSProperties,
+  driftList: { display: "flex", flexDirection: "column", gap: 6, marginTop: 6 } satisfies CSSProperties,
+  driftRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "7px 10px",
+    borderRadius: 7,
+    border: "1px solid var(--warn)",
+    background: "var(--warn-bg)",
+  } satisfies CSSProperties,
+  driftPath: { flex: 1, fontSize: 12.5, color: "var(--text-primary)" } satisfies CSSProperties,
+  driftPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    padding: 12,
+    borderRadius: 8,
+    border: "1px solid var(--border-strong)",
+    background: "var(--bg-elevated)",
+  } satisfies CSSProperties,
+  driftPanelHeader: { display: "flex", alignItems: "center", justifyContent: "space-between" } satisfies CSSProperties,
+  driftPanelTitle: { fontSize: 13, fontWeight: 700 } satisfies CSSProperties,
+} as const;

@@ -3,6 +3,7 @@ import type { Container } from '../../platform/container.js';
 import type {
   Agent,
   CommunitySkill,
+  ProjectContextRef,
   Skill,
   SkillImportPreview,
   SkillImportRequest,
@@ -60,7 +61,11 @@ export interface UpdateSkillInput {
   source?: SkillSource;
   body?: string;
   enabled?: boolean;
-  /** "What changed" note; only recorded when this patch snapshots a new body. */
+  /** Ordered project-context attachment refs (AC-13, AC-39, AC-42). Sent
+   *  through this same PATCH — not a separate mutation — so a body-and-
+   *  attachments edit is one save and at most one `skill_versions` snapshot. */
+  context?: ProjectContextRef[];
+  /** "What changed" note; only recorded when this patch snapshots a new version. */
   versionLabel?: string;
 }
 
@@ -111,11 +116,29 @@ export class SkillsService {
     return toSkillDto(row);
   }
 
+  /**
+   * Update a skill. When `patch.context` is present, the attachment rows are
+   * persisted FIRST (via `container.projectContext.setSkillContext`, only
+   * after confirming the SKILL itself belongs to this workspace — never let
+   * an unresolved id reach that call). `setSkillContext` separately validates
+   * every ref's `repo_id` against `workspaceId` and throws before persisting
+   * anything if one resolves to a foreign workspace's repo — this route does
+   * not (and must not) re-derive that check itself; it only forwards
+   * `workspaceId` through. Then `repo.update` decides — from body AND
+   * attachment-set change together — whether to bump the version and write
+   * exactly one `skill_versions` snapshot (AC-39, AC-42).
+   */
   async update(
     workspaceId: string,
     id: string,
     patch: UpdateSkillInput,
   ): Promise<Skill | undefined> {
+    if (patch.context !== undefined) {
+      const owned = await this.repo.getById(workspaceId, id);
+      if (!owned) return undefined;
+      await this.container.projectContext.setSkillContext(workspaceId, id, patch.context);
+    }
+
     const row = await this.repo.update(workspaceId, id, {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
@@ -123,6 +146,7 @@ export class SkillsService {
       ...(patch.source !== undefined ? { source: patch.source } : {}),
       ...(patch.body !== undefined ? { body: patch.body } : {}),
       ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      ...(patch.context !== undefined ? { context: patch.context } : {}),
       ...(patch.versionLabel !== undefined ? { versionLabel: patch.versionLabel } : {}),
     });
     return row ? toSkillDto(row) : undefined;

@@ -1,7 +1,7 @@
-# Insights — `client`
+# Gotchas — `client`
 
-Append-only log of things learned the hard way in this package: gotchas, dead
-ends, and *why* a workaround exists. Newest at the top.
+Append-only log of what broke and why: dead ends, dependency and environment
+quirks, and error → cause → fix records. Newest at the top.
 
 > **Format:** new entries go under the matching section below as
 > `- YYYY-MM-DD — one-line claim`, with `file:line` evidence where it applies.
@@ -9,14 +9,9 @@ ends, and *why* a workaround exists. Newest at the top.
 > **Corrections:** append `└ YYYY-MM-DD correction: …` beneath an entry — never
 > rewrite, move, or delete what is already there.
 > When an entry starts causing repeated mistakes, promote a one-line version of
-> it into [CLAUDE.md](CLAUDE.md) and leave the full detail here.
-> Repo-wide entries belong in [../insights.md](../insights.md) instead.
-
-## What Works
-
-Approaches and solutions that worked here and are worth reusing.
-
-_None yet._
+> it into [CLAUDE.md](../CLAUDE.md) and leave the full detail here.
+> Repo-wide entries belong in the root [insights/](../../insights/) folder instead.
+> The other half of this log lives in [INSIGHTS.md](INSIGHTS.md).
 
 ## What Doesn't Work
 
@@ -24,21 +19,6 @@ Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
 _None yet._
-
-## Codebase Patterns
-
-Conventions and architectural decisions specific to this repo.
-
-- 2026-07-30 — **ALWAYS portal a popover/hover-card anchored inside a table row
-  to `document.body`** (`createPortal` + `position: fixed` from
-  `getBoundingClientRect()`). The list table cards set `overflow: hidden` to clip
-  their rounded corners (`app/repos/[repoId]/pulls/styles.ts` → `s.tableCard`), so
-  an `position: absolute` panel inside a row is silently cut off at the card
-  edge — worst for the last rows, where most of the panel disappears. Working
-  example: `pulls/_components/FindingsCell/`, with the flip-above-anchor and
-  viewport-clamp maths isolated in its pure `popoverPosition()` helper.
-  `vendor/ui/kit/Dropdown.tsx` is still the right source for the *visual*
-  treatment (`--shadow-modal`, `ddpop` animation), just not the positioning.
 
 ## Tool & Library Notes
 
@@ -70,6 +50,19 @@ Quirks of dependencies, tooling, and the local environment.
   this. Easy to miss because plain array destructuring/`.map()` callbacks
   don't trigger it — only direct indexed access does.
 
+- 2026-08-18 — `@devdigest/ui`'s `Markdown` (`react-markdown` + `remark-gfm`,
+  no `rehype-raw`) does not silently drop embedded raw HTML in untrusted
+  markdown — it renders it as **literal, HTML-escaped text** sitting directly
+  in the wrapping `<div class="dd-md">` (not wrapped in a `<p>`, since it's a
+  raw mdast HTML node, not a paragraph). So a preview fed
+  `<script>alert(1)</script>` produces zero `<script>` elements (confirmed via
+  `container.querySelector('script')`) while `screen.getByText(/<script>alert\(1\)<\/script>/)`
+  still finds it as visible text — RTL's `getByText` matches it fine even
+  though it's a bare text node among sibling `<p>`s, no special query needed.
+  Relevant to any component that previews third-party markdown: don't assume
+  "no `rehype-raw`" means the raw tag vanishes from the page — it means it
+  never becomes a real DOM element or executes, not that it's invisible.
+
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
@@ -84,18 +77,6 @@ Error message → cause → fix. Keep the literal error text so it is greppable.
   whole app, so do not go hunting in your diff. Fix: stop the dev server,
   `rm -rf client/.next`, restart it. To check a production build safely, do it in
   a throwaway copy or after stopping dev.
-
-## Session Notes
-
-Dated one-line records of sessions that changed something material.
-
-_None yet._
-
-## Open Questions
-
-Unresolved, worth investigating.
-
-_None yet._
 
 ---
 

@@ -94,7 +94,7 @@ export type BlastPriorPr = z.infer<typeof BlastPriorPr>;
  *
  * NOTE: no field carries a Zod `.default()`. This doubles as the route's
  * response schema, and a default there rewrites what actually goes on the wire
- * (see server/insights.md).
+ * (see server/insights/gotchas.md).
  */
 export const BlastRadiusResult = z.object({
   pull_id: z.string(),

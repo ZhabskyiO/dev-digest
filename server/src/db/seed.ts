@@ -182,7 +182,7 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
 
   // ---- built-in skills (L02: Test Quality Reviewer's rubrics) ----
   // Bodies are directive markdown instructions (skills are read as trusted
-  // instructions once enabled) — see server/insights.md for why these are
+  // instructions once enabled) — see server/insights/INSIGHTS.md for why these are
   // inserted directly against `t.skills` rather than via SkillsRepository.insert
   // (that call also writes a `skill_versions` row; seeded rows deliberately don't
   // get one, matching how seedAgents bypasses AgentsRepository).

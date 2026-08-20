@@ -3,7 +3,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrFile, RunSummary } from "@devdigest/shared";
 // 8×`../` reaches `client/` from here — same depth as the sibling
-// SmartDiffViewer test. See client/insights.md.
+// SmartDiffViewer test. See client/insights/gotchas.md.
 import prReview from "../../../../../../../../messages/en/prReview.json";
 import shell from "../../../../../../../../messages/en/shell.json";
 import { DiffTab } from "./DiffTab";

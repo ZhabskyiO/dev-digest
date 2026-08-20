@@ -39,26 +39,33 @@ A `.ts`/`.tsx` file is always *also* in the full-stack pass (TS / Zod / security
 
 ## 3. Skill map
 
+Only skills that exist in `.claude/skills/` may be listed here. Before adding one, check the
+directory — a routed skill that does not exist silently drops that whole review dimension.
+
 ### UI bucket
 - `frontend-architecture` — where code lives, component splitting, App Router organization.
-- `react-best-practices` — anti-patterns, hooks rules, derive-don't-store (CRITICAL/HIGH/MEDIUM).
+- `react-best-practices` — anti-patterns, hooks rules, derive-don't-store, performance
+  (CRITICAL/HIGH/MEDIUM). This is also the runtime-performance pass; there is no separate
+  perf skill installed here.
 - `next-best-practices` — RSC boundaries, data fetching, server/client component rules.
-- `vercel-react-best-practices` — runtime performance, bundle.
 - `react-testing-library` — **test files only**; style-level, never blocks.
 
 ### Backend bucket
-- `onion-architecture` — layering / dependency rule; this is the "domain architecture" gate.
 - `fastify-best-practices` — routes, plugins, schema validation, error handling.
 - `drizzle-orm-patterns` — db queries, transactions, schema.
 - `postgresql-table-design` — schema/index/constraint review (migrations are read-only).
-- `nodejs-best-practices` — async, security, architecture decisions.
+
+Layering / the dependency rule is **not** reviewed by a generic subagent here: the
+`architecture-reviewer` agent owns it (it carries `onion-architecture`, cites the documented
+rule per finding, and is read-only by construction). Route the structural pass to that agent.
 
 ### Full-stack (runs on any changed `.ts`/`.tsx`)
 - `typescript-expert` · `zod` · `security`.
 
 ### Always feed
-- The touched package's `INSIGHTS.md` (`client/`, `server/`, `reviewer-core/`, `e2e/`) — known
-  gotchas for that code become extra review criteria.
+- The touched module's `insights/` — an `INSIGHTS.md` + `gotchas.md` pair at the module root
+  (`client/insights/`, `server/insights/`, `reviewer-core/insights/`, `e2e/insights/`,
+  `mcp-server/insights/`), plus root `insights/` for cross-cutting entries. Known gotchas for that code become extra review criteria.
 
 ## 4. Contract-drift check (project-specific CRITICAL)
 

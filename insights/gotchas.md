@@ -1,7 +1,7 @@
-# Insights — repo-wide
+# Gotchas — repo-wide
 
-Append-only log of things learned the hard way: gotchas, dead ends, and *why*
-a workaround exists. Newest at the top.
+Append-only log of what broke and why: dead ends, dependency and environment
+quirks, and error → cause → fix records. Newest at the top.
 
 > **Format:** new entries go under the matching section below as
 > `- YYYY-MM-DD — one-line claim`, with `file:line` evidence where it applies.
@@ -9,14 +9,9 @@ a workaround exists. Newest at the top.
 > **Corrections:** append `└ YYYY-MM-DD correction: …` beneath an entry — never
 > rewrite, move, or delete what is already there.
 > When an entry starts causing repeated mistakes, promote a one-line version of
-> it into [CLAUDE.md](CLAUDE.md) and leave the full detail here.
-> Package-specific entries belong in that package's own `insights.md`.
-
-## What Works
-
-Approaches and solutions that worked here and are worth reusing.
-
-_None yet._
+> it into [CLAUDE.md](../CLAUDE.md) and leave the full detail here.
+> Package-specific entries belong in that package's own `insights/` folder.
+> The other half of this log lives in [INSIGHTS.md](INSIGHTS.md).
 
 ## What Doesn't Work
 
@@ -24,19 +19,6 @@ Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
 _None yet._
-
-## Codebase Patterns
-
-Conventions and architectural decisions specific to this repo.
-
-- 2026-07-28 — `skills-lock.json` tracks only **vendored** third-party skills
-  (`sourceType: github` + upstream path + sha256 for drift detection).
-  Locally-authored skills (`security`, `mermaid-diagram`, `react-best-practices`,
-  `react-testing-library`, `engineering-insights`) are deliberately absent —
-  NEVER add one when creating a skill. The file is maintained by an external
-  tool: nothing in this repo reads or writes it, and it already drifts both ways
-  (`architecture-patterns` and `github-workflow-automation` are listed but not
-  present in `.claude/skills/`).
 
 ## Tool & Library Notes
 
@@ -71,18 +53,6 @@ Error message → cause → fix. Keep the literal error text so it is greppable.
 
 _None yet._
 
-## Session Notes
-
-Dated one-line records of sessions that changed something material.
-
-_None yet._
-
-## Open Questions
-
-Unresolved, worth investigating.
-
-_None yet._
-
 ---
 
 ## Earlier entries
@@ -108,7 +78,7 @@ survived unnoticed.
 `node-linker=hoisted`) and updated every CI workflow
 (`reviewer-core.yml`, `server-unit.yml`, `server-integration.yml`,
 `e2e-web.yml`) plus `TESTING.md`. All four packages are pnpm now — see
-[server/insights.md](server/insights.md) for the still-real gotcha this did
+[server/insights/gotchas.md](../server/insights/gotchas.md) for the still-real gotcha this did
 **not** remove (installing reviewer-core's deps is still a separate step).
 
 ## 2026-07-27 — Port 5432 taken by a *native* Postgres, not a container

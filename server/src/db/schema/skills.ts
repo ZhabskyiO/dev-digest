@@ -50,6 +50,10 @@ export const skillVersions = pgTable(
     version: integer('version').notNull(),
     body: text('body').notNull(),
     label: text('label'),
+    // [T3] Project-context attachment snapshot (which docs were attached, in
+    // what order) at the time this version was saved. Nullable on purpose —
+    // rows written before this feature existed have none.
+    attachments: jsonb('attachments'),
     createdAt: now(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.skillId, t.version] }) }),

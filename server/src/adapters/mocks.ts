@@ -258,6 +258,10 @@ export interface MockGitOptions {
   head?: string;
   /** Head `currentHead()` returns AFTER `sync()` runs — simulates fetch+reset advancing HEAD. */
   syncedHead?: string;
+  /** When set, `sync()` rejects with this message — simulates a fetch that
+   *  fails (offline, revoked token, upstream branch deleted). The call is
+   *  still recorded in `syncs` so a test can assert it was attempted. */
+  syncError?: string;
 }
 
 export class MockGitClient implements GitClient {
@@ -277,6 +281,9 @@ export class MockGitClient implements GitClient {
   async fetchPullHead(): Promise<void> {}
   async sync(repo: RepoRef, branch: string): Promise<{ head: string }> {
     this.syncs.push({ repo, branch });
+    // Recorded before the throw: a failing fetch was still an ATTEMPTED fetch,
+    // and callers that degrade on failure need that distinction asserted.
+    if (this.opts.syncError !== undefined) throw new Error(this.opts.syncError);
     // After a sync, HEAD advances to syncedHead (or stays at head if unset).
     this.syncedHead = this.opts.syncedHead ?? this.opts.head ?? 'a1b2c3d4';
     return { head: this.syncedHead };

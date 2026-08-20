@@ -1,7 +1,7 @@
 # Insights — `MODULE_NAME`
 
-Append-only log of things learned the hard way in this package: gotchas, dead
-ends, and *why* a workaround exists.
+Append-only log of what works and why this package is built the way it is:
+reusable approaches, conventions, and open threads.
 
 > **Format:** new entries go under the matching section below as
 > `- YYYY-MM-DD — one-line claim`, with `file:line` evidence where it applies.
@@ -9,8 +9,9 @@ ends, and *why* a workaround exists.
 > **Corrections:** append `└ YYYY-MM-DD correction: …` beneath an entry — never
 > rewrite, move, or delete what is already there.
 > When an entry starts causing repeated mistakes, promote a one-line version of
-> it into [CLAUDE.md](CLAUDE.md) and leave the full detail here.
-> Repo-wide entries belong in [../insights.md](../insights.md) instead.
+> it into [CLAUDE.md](../CLAUDE.md) and leave the full detail here.
+> Repo-wide entries belong in the root [insights/](../../insights/) folder instead.
+> The other half of this log lives in [gotchas.md](gotchas.md).
 
 ## What Works
 
@@ -18,28 +19,9 @@ Approaches and solutions that worked here and are worth reusing.
 
 _None yet._
 
-## What Doesn't Work
-
-Dead ends and antipatterns — what was tried and failed, and why. **This is the
-most-skipped and most-valuable section: if something failed, record it here.**
-
-_None yet._
-
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
-
-_None yet._
-
-## Tool & Library Notes
-
-Quirks of dependencies, tooling, and the local environment.
-
-_None yet._
-
-## Recurring Errors & Fixes
-
-Error message → cause → fix. Keep the literal error text so it is greppable.
 
 _None yet._
 

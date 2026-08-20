@@ -7,9 +7,13 @@
 # deletes a file. server/clones/** is never read: those are vendored checkouts
 # of other repositories and contain a full copy of this repo.
 #
+# Each module keeps an insights/ folder holding two halves of the same log:
+#   insights/INSIGHTS.md  what works, codebase patterns, session notes, open questions
+#   insights/gotchas.md   what doesn't work, tool & library quirks, error → cause → fix
+#
 # Usage:
 #   list-entries.sh                 # every module
-#   list-entries.sh server          # one module: root|client|server|reviewer-core|e2e
+#   list-entries.sh server          # one module: root|client|server|reviewer-core|e2e|mcp-server
 
 set -euo pipefail
 
@@ -21,17 +25,22 @@ if [ ! -f "$ROOT/CLAUDE.md" ]; then
   exit 1
 fi
 
-FILES=(insights.md client/insights.md server/insights.md \
-       reviewer-core/insights.md e2e/insights.md)
+DIRS=(insights client/insights server/insights \
+      reviewer-core/insights e2e/insights mcp-server/insights)
 
 if [ "$#" -gt 0 ]; then
   case "$1" in
-    root)                          FILES=(insights.md) ;;
-    client|server|reviewer-core|e2e) FILES=("$1/insights.md") ;;
-    *) echo "error: unknown module '$1' (use root|client|server|reviewer-core|e2e)" >&2
+    root)                                     DIRS=(insights) ;;
+    client|server|reviewer-core|e2e|mcp-server) DIRS=("$1/insights") ;;
+    *) echo "error: unknown module '$1' (use root|client|server|reviewer-core|e2e|mcp-server)" >&2
        exit 2 ;;
   esac
 fi
+
+FILES=()
+for d in "${DIRS[@]}"; do
+  FILES+=("$d/INSIGHTS.md" "$d/gotchas.md")
+done
 
 total=0
 
@@ -44,9 +53,10 @@ for rel in "${FILES[@]}"; do
     continue
   fi
 
-  # Two entry shapes coexist by design:
+  # Three entry shapes coexist by design:
   #   "## YYYY-MM-DD — title"  entries written before the section format
-  #   "- YYYY-MM-DD — claim"   entries written under one of the 7 sections
+  #   "- YYYY-MM-DD — claim"   entries written under one of the sections
+  #   "YYYY-MM-DD — claim"     bare-paragraph entries (mcp-server's older style)
   awk '
     /^## [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {
       print "  [earlier] " substr($0, 4); next
@@ -56,10 +66,14 @@ for rel in "${FILES[@]}"; do
       line = $0
       sub(/^[[:space:]]*- /, "", line)
       print "  [" section "] " line
+      next
+    }
+    /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] / {
+      print "  [" section "] " $0
     }
   ' "$f"
 
-  n=$(grep -cE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}|^[[:space:]]*- [0-9]{4}-[0-9]{2}-[0-9]{2}' "$f" || true)
+  n=$(grep -cE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}|^[[:space:]]*- [0-9]{4}-[0-9]{2}-[0-9]{2}|^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$f" || true)
   if [ "$n" -eq 0 ]; then
     echo "  (no entries yet)"
   fi

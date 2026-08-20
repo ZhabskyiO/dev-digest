@@ -20,6 +20,7 @@ import {
   buildRepoMapDigest,
   buildRankNote,
   resolveAgentSkills,
+  resolveProjectContext,
   type StepLog,
 } from './prompt-context.js';
 
@@ -111,6 +112,19 @@ export class LocalReviewService {
       degraded.push('repo is imported but not indexed — no repo map or caller context in the prompt');
     }
 
+    // Project context (AC-28): the same resolver the PR path uses. `repoId` is
+    // `undefined` whenever `req.repo` was omitted or didn't resolve to an
+    // imported repo — `resolveProjectContext` then marks every attachment
+    // `wrong_repo` and returns no bodies (AC-25), which is correct, not a
+    // degradation of the resolver itself. Surface it here so the CLI explains
+    // why nothing was injected, instead of silently reviewing without context.
+    const projectContext = await resolveProjectContext(this.container, agent.id, repoId, log);
+    if (repoId === undefined && projectContext.details.length > 0) {
+      degraded.push(
+        `${projectContext.details.length} project-context attachment(s) skipped — no repo given`,
+      );
+    }
+
     // No run id here, so no `run_skills` attribution row — that table records
     // what a PERSISTED run used, and this run is never persisted.
     const skills = await resolveAgentSkills(this.container, agent.id);
@@ -127,6 +141,7 @@ export class LocalReviewService {
       ...(callers ? { callers } : {}),
       ...(repoMap ? { repoMap } : {}),
       ...(skills.bodies.length ? { skills: skills.bodies } : {}),
+      ...(projectContext.bodies.length ? { specs: projectContext.bodies } : {}),
       task: localTaskLine(req.mode, req.label),
       sessionId: `local:${req.mode}:${agent.name}`,
       onEvent: (e) => logger?.info({ kind: e.kind }, e.msg),

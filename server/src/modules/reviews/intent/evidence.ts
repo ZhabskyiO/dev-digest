@@ -76,7 +76,7 @@ const DOC_REF_RE = /[^\s()<>[\]"'`]+\.md\b/gi;
 // Allowlist: docs/** or specs/** at any depth, README.md at any depth, and
 // RFC*.md / ADR*.md filenames. NOTE: this comment deliberately avoids writing
 // the glob patterns literally with a trailing "*/" — that sequence closes a
-// block comment early (see the recurring-errors entry in server/insights.md).
+// block comment early (see the recurring-errors entry in server/insights/gotchas.md).
 function isAllowedDocRef(rel: string): boolean {
   const segments = rel.split('/');
   const base = segments[segments.length - 1] ?? '';

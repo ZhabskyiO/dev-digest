@@ -41,4 +41,4 @@ A flow is `specs/NN-name.flow.json`: `{ name, steps: [{ cmd, label, assert? }] }
 ## Docs
 
 Flow anatomy, env knobs, coverage table: [README.md](README.md) ·
-[../TESTING.md](../TESTING.md) · [insights.md](insights.md) · [docs/](docs/).
+[../TESTING.md](../TESTING.md) · [insights/INSIGHTS.md](insights/INSIGHTS.md) · [insights/gotchas.md](insights/gotchas.md) · [docs/](docs/).

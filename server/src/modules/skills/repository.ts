@@ -1,8 +1,11 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { z } from 'zod';
 
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { SkillSource, SkillType } from '@devdigest/shared';
+import type { ProjectContextRef, SkillSource, SkillType } from '@devdigest/shared';
+import { ProjectContextRef as ProjectContextRefSchema } from '@devdigest/shared';
+import { isConfigChange } from './helpers.js';
 
 /**
  * A1 — skills data-access. Owns `skills` and `skill_versions`. Never writes
@@ -35,7 +38,13 @@ export interface UpdateSkill {
   source?: SkillSource;
   body?: string;
   enabled?: boolean;
-  /** "What changed" note, recorded only when this patch snapshots a new body. */
+  /** Ordered project-context attachment refs (AC-39, AC-42). Order-sensitive:
+   *  a reorder with the same members still counts as a change. The caller
+   *  (SkillsService) is responsible for having already persisted the actual
+   *  attachment rows via `container.projectContext.setSkillContext` — this
+   *  field only drives the version-bump/snapshot decision here. */
+  context?: ProjectContextRef[];
+  /** "What changed" note, recorded only when this patch snapshots a new version. */
   versionLabel?: string;
 }
 
@@ -93,38 +102,67 @@ export class SkillsRepository {
   }
 
   /**
-   * Update a skill. Only a change to `body` bumps the version and snapshots the
-   * new body into skill_versions (reproducibility for eval) — toggling `enabled`
-   * or editing name/description/type/source alone does not.
+   * Update a skill. A change to `body`, to the ordered `context` attachment
+   * list, or to both bumps the version and snapshots the new state into
+   * `skill_versions` (AC-39, AC-42) — toggling `enabled` or editing
+   * name/description/type/source alone does not. `patch.context` itself is
+   * NOT written to the attachments table here (that's
+   * `container.projectContext.setSkillContext`'s job, called by the service
+   * before this method runs) — it only drives the version-bump decision and
+   * what gets embedded in the snapshot. The read (`getById`), the row UPDATE,
+   * and the `skill_versions` INSERT all run inside one transaction so a
+   * single save can never produce two version rows.
    */
   async update(workspaceId: string, id: string, patch: UpdateSkill): Promise<SkillRow | undefined> {
-    const existing = await this.getById(workspaceId, id);
-    if (!existing) return undefined;
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(t.skills)
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)));
+      if (!existing) return undefined;
 
-    // `isConfigChange` from ./helpers.js was not present yet when this was written;
-    // inlined here (same one-line check the spec describes) — swap for the shared
-    // helper once it lands.
-    const configChanged = patch.body !== undefined && patch.body !== existing.body;
-    const nextVersion = configChanged ? existing.version + 1 : existing.version;
+      const currentContext = await this.lastContext(tx, id);
+      const configChanged = isConfigChange(
+        { body: existing.body, context: currentContext },
+        { body: patch.body, context: patch.context },
+      );
+      const nextVersion = configChanged ? existing.version + 1 : existing.version;
+      // Reordering/adding/removing bumps the version with the NEW list;
+      // every other edit (rename, body-only change, …) carries the last
+      // snapshot's list forward unchanged — same "carry forward by default"
+      // rule as AgentsRepository.snapshotVersion.
+      const nextContext = patch.context ?? currentContext;
 
-    const [row] = await this.db
-      .update(t.skills)
-      .set({
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-        ...(patch.type !== undefined ? { type: patch.type } : {}),
-        ...(patch.source !== undefined ? { source: patch.source } : {}),
-        ...(patch.body !== undefined ? { body: patch.body } : {}),
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(configChanged ? { version: nextVersion } : {}),
-      })
-      .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
-      .returning();
+      const [row] = await tx
+        .update(t.skills)
+        .set({
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.description !== undefined ? { description: patch.description } : {}),
+          ...(patch.type !== undefined ? { type: patch.type } : {}),
+          ...(patch.source !== undefined ? { source: patch.source } : {}),
+          ...(patch.body !== undefined ? { body: patch.body } : {}),
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+          ...(configChanged ? { version: nextVersion } : {}),
+        })
+        .where(and(eq(t.skills.workspaceId, workspaceId), eq(t.skills.id, id)))
+        .returning();
 
-    // A label with no body change has nowhere to live — no snapshot is written,
-    // so it is dropped rather than attached to the previous version.
-    if (configChanged && row) await this.snapshotVersion(row, nextVersion, patch.versionLabel);
-    return row;
+      // A label with no config change has nowhere to live — no snapshot is
+      // written, so it is dropped rather than attached to the previous version.
+      if (configChanged && row) {
+        await tx
+          .insert(t.skillVersions)
+          .values({
+            skillId: row.id,
+            version: nextVersion,
+            body: row.body,
+            attachments: nextContext,
+            ...(patch.versionLabel ? { label: patch.versionLabel } : {}),
+          })
+          .onConflictDoNothing();
+      }
+      return row;
+    });
   }
 
   private async snapshotVersion(
@@ -141,6 +179,29 @@ export class SkillsRepository {
         ...(label ? { label } : {}),
       })
       .onConflictDoNothing();
+  }
+
+  /**
+   * The ordered attachment list recorded on the skill's most recent
+   * `skill_versions` snapshot, or `[]` if it has none yet (brand-new skill,
+   * or a legacy snapshot written before T16, whose `attachments` column is
+   * `null`). Reads through `tx` so it sees the transaction's own uncommitted
+   * state consistently with the row it's being compared against — mirrors
+   * `AgentsRepository.lastContext`.
+   */
+  private async lastContext(
+    tx: Parameters<Parameters<Db['transaction']>[0]>[0],
+    skillId: string,
+  ): Promise<ProjectContextRef[]> {
+    const [latest] = await tx
+      .select()
+      .from(t.skillVersions)
+      .where(eq(t.skillVersions.skillId, skillId))
+      .orderBy(desc(t.skillVersions.version))
+      .limit(1);
+    if (!latest || !latest.attachments) return [];
+    const parsed = z.array(ProjectContextRefSchema).safeParse(latest.attachments);
+    return parsed.success ? parsed.data : [];
   }
 
   // ---- skill_versions (immutable body snapshots) ---------------------------

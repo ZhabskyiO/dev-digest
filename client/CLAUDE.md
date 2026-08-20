@@ -35,5 +35,5 @@ not here.
 
 UI route map + API surface per route: [README.md](README.md) (mermaid).
 Cross-suite strategy: [../TESTING.md](../TESTING.md).
-Learned the hard way: [insights.md](insights.md) · Reference: [docs/](docs/) ·
+Learned the hard way: [insights/INSIGHTS.md](insights/INSIGHTS.md) · [insights/gotchas.md](insights/gotchas.md) · Reference: [docs/](docs/) ·
 Planned work: [specs/](specs/).

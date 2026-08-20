@@ -43,8 +43,9 @@ Follow [routing.md](routing.md):
 - If there are no reviewable changes → write a `PASS` state and stop.
 
 ### 2. Deterministic gates (cheap, fail-fast)
-Per [gate.md](gate.md) §1. For each package that has changed files, run the scripts that
-exist (`typecheck`, `test`; plus `lint` and `depcruise` **only if** the package defines them):
+Per [gate.md](gate.md) §1. Run `./scripts/verify.sh <changed packages>` — typecheck + unit for
+exactly the packages the diff touches (~20s for all five) — plus `lint` / `depcruise` **only if**
+that package actually defines them.
 - Any non-zero exit → **BLOCKED** immediately. Record which gate failed; skip the LLM passes.
 - These are the cheapest, highest-signal checks — they run first by design.
 
@@ -52,16 +53,19 @@ exist (`typecheck`, `test`; plus `lint` and `depcruise` **only if** the package 
 Per [routing.md](routing.md), split changed files into buckets and spawn **one analyzer
 subagent per bucket in parallel** (Agent tool). Give each subagent only its file slice + the
 skills for that bucket, and require structured findings (`{file, line, severity, skill,
-issue, fix}`) — no prose. Reuse the project's existing analyzers where they fit
-(`react-architecture-analyzer` for UI, `code-reviewer` for the security/contract pass).
+issue, fix}`) — no prose.
 
-- **UI bucket** → `frontend-architecture`, `react-best-practices`, `next-best-practices`,
-  `vercel-react-best-practices`; `react-testing-library` for test files.
-- **Backend bucket** → `onion-architecture`, `fastify-best-practices`, `drizzle-orm-patterns`,
-  `postgresql-table-design`, `nodejs-best-practices`.
+- **Structural pass** → the project's own **`architecture-reviewer`** agent (read-only, sonnet).
+  Do not re-derive onion/DI/contract rules in a generic subagent — that agent already encodes
+  them, cites the documented rule per finding, and refuses uncited opinions.
+- **UI bucket** → a `general-purpose` subagent carrying `frontend-architecture`,
+  `react-best-practices`, `next-best-practices`; `react-testing-library` for test files.
+- **Backend bucket** → a `general-purpose` subagent carrying `fastify-best-practices`,
+  `drizzle-orm-patterns`, `postgresql-table-design`.
 - **Both** → `typescript-expert`, `zod`, `security`, plus the `@devdigest/shared` contract-drift
   check.
-- Feed each subagent the touched package's `INSIGHTS.md` as extra review criteria.
+- Feed each subagent the touched module's `<module>/insights/` (`INSIGHTS.md` + `gotchas.md` at
+  the module root) as extra review criteria.
 
 For small diffs (≤ ~3 files, single bucket) skip the fan-out and review inline — the subagent
 overhead isn't worth it.

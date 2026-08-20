@@ -13,6 +13,7 @@ import {
   buildRepoMapDigest,
   buildRankNote,
   resolveAgentSkills,
+  resolveProjectContext,
 } from './prompt-context.js';
 import { IntentService, type PromptIntentSlot } from './intent/service.js';
 
@@ -249,6 +250,19 @@ export class ReviewRunExecutor {
         { kind: 'tool' },
       );
 
+      // T17 — project context (AC-20, AC-29, AC-30). Resolves the agent's
+      // effective attachment set into ordered document bodies for the
+      // prompt's `## Project context` slot, plus the paths actually
+      // injected (`specsRead`) and a per-document outcome for the trace
+      // (`details`). `resolveProjectContext` never throws (best-effort,
+      // same contract as every other builder in this file), so no
+      // try/catch here — one would only mask a genuine bug.
+      const projectContext = await runLog.step(
+        'Loading project context',
+        () => resolveProjectContext(this.container, agent.id, repo.id, runLog),
+        { kind: 'tool' },
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -269,6 +283,11 @@ export class ReviewRunExecutor {
         // L02 — linked, enabled skill bodies (already ordered). Same
         // omit-when-empty contract as callers/repoMap.
         ...(skillBodies.length ? { skills: skillBodies } : {}),
+        // T17 — attached project-context document bodies (already ordered).
+        // Same omit-when-empty contract: an empty array must NOT be passed,
+        // or the byte-identical-prompt guarantee for a run with no attached
+        // context (AC-26) breaks.
+        ...(projectContext.bodies.length ? { specs: projectContext.bodies } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -355,7 +374,14 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // AC-30 — the documents actually injected, in order (not the whole
+        // effective set; the per-document detail array below carries the
+        // omissions).
+        specs_read: projectContext.specsRead,
+        // AC-29 — per-document outcome (injected / missing /
+        // dropped_over_budget / truncated / wrong_repo / changed_unconfirmed)
+        // for every document in the effective context set.
+        project_context: projectContext.details,
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),

@@ -11,10 +11,6 @@ See also: `insights/gotchas.md` for known quirks at project start.
 
 2026-06-26 — `@modelcontextprotocol/sdk` v1.29.0 installs cleanly with pnpm under `"type":"module"` package. ref: mcp-server/package.json
 
-## What Doesn't Work
-
-2026-06-26 — `console.log` anywhere under `src/` corrupts the MCP stdio transport (stdout is the JSON-RPC channel). ALL output must go through `log.*` which routes to `console.error` (stderr). ref: mcp-server/src/log.ts:1
-
 ## Codebase Patterns
 
 2026-06-29 — Un-stubbing a tool follows the same DI shape as the real tools: add the endpoint method to `http/client.ts` (+ `DevDigestClient` type + `createClient()`), change the tool's signature to `register*(server, client, deps)`, resolve human inputs (repo + pr#) to a `pullId` via `core/resolve.resolvePullId`, then `client.<method>(pullId)`. The `get-blast-radius` tool now mirrors `get-findings` exactly. A tool registered as `register*(server)` with no client can only ever be a stub. ref: mcp-server/src/tools/get-blast-radius.ts:1
@@ -30,14 +26,6 @@ See also: `insights/gotchas.md` for known quirks at project start.
 2026-06-26 — `Finding` uses `start_line`/`end_line` (NOT `line`). `compactFinding` surfaces `start_line` as `line` for human-readable file:line output. ref: mcp-server/src/format.ts:55
 
 2026-06-26 — Conventions route requires UUID `repoId` — `GET /repos/:repoId/conventions` validates with `z.string().uuid()`. Passing a repo name will 400; must resolve name→id first via `GET /repos`. ref: server/src/modules/conventions/routes.ts:8
-
-## Tool & Library Notes
-
-2026-06-26 — pnpm install warns about `esbuild` build scripts being ignored — benign, esbuild is a transitive dep of tsx; approve with `pnpm approve-builds` if needed. ref: mcp-server/package.json
-
-## Recurring Errors & Fixes
-
-2026-06-26 — `noUncheckedIndexedAccess` in tsconfig requires guarding array[0] even after a `.length === 1` check — TypeScript still types it as `T | undefined`. Pattern: `const match = matches[0]; if (!match) return { error: ... }; return { repoId: match.id }`. ref: mcp-server/src/core/resolve.ts:54
 
 ## Session Notes
 
