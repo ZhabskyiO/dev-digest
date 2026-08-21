@@ -218,6 +218,18 @@ export interface FileRankRow {
   percentile: number;
 }
 
+/**
+ * Repository-wide endpoint fact for one file — T4 (onboarding tour): the
+ * generation-input read `getEndpointFacts` serves. Unlike `getFileFacts`
+ * (blast-scoped, reachable only via `getBlastRadius`'s changed-file set),
+ * this reads across the WHOLE indexed repo so an onboarding tour can supply
+ * "here are the real endpoints" (AC-52) without a changed-file set at all.
+ */
+export interface EndpointFactRow {
+  file: string;
+  endpoints: string[];
+}
+
 export interface RepoMapResult {
   text: string;
   tokens: number;
@@ -270,4 +282,13 @@ export interface RepoIntel {
     opts?: { exclude?: string[] },
   ): Promise<string[]>;
   getCriticalPaths(repoId: string): Promise<string[][]>;
+  /**
+   * Repository-wide endpoint facts (not diff/blast-scoped) — onboarding-tour
+   * generation input for AC-52's "drop any API entry not among the extracted
+   * facts" rule, and AC-3's "derive tour inputs solely from the repo-intel
+   * index" rule. Degraded array contract: `[]` when the flag is off or the
+   * repo has no indexed endpoint facts (a legitimate `facts_unavailable`
+   * case at the caller, not a bug here) — never throws.
+   */
+  getEndpointFacts(repoId: string, limit?: number): Promise<EndpointFactRow[]>;
 }

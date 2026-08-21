@@ -4,7 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord, PrFile, SmartDiff } from "@devdigest/shared";
 // 8×`../` reaches `client/` from here — same depth as the sibling
 // FindingCard test. `messages/` sits at the package root, one level above
-// `src/`. See client/insights.md.
+// `src/`. See client/insights/gotchas.md.
 import prReview from "../../../../../../../../messages/en/prReview.json";
 import shell from "../../../../../../../../messages/en/shell.json";
 import { SmartDiffViewer } from "./SmartDiffViewer";
@@ -84,13 +84,17 @@ const FINDING: FindingRecord = {
   dismissed_at: null,
 };
 
-function renderViewer(onSelectFinding?: (f: { id: string }) => void) {
+function renderViewer(
+  onSelectFinding?: (f: { id: string }) => void,
+  target?: { path: string; line: number } | null,
+) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ prReview, shell }}>
       <SmartDiffViewer
         prId="pr1"
         files={FILES}
         {...(onSelectFinding ? { onSelectFinding } : {})}
+        {...(target ? { target } : {})}
       />
     </NextIntlClientProvider>,
   );
@@ -192,5 +196,70 @@ describe("SmartDiffViewer", () => {
     renderViewer();
     expect(screen.getByText("Core logic")).toBeInTheDocument();
     expect(screen.queryByText(/findings/)).not.toBeInTheDocument();
+  });
+
+  it("shows the summary pill only on a file that carries a summary, and it is not a button (AC-44)", () => {
+    useSmartDiff.mockReturnValue({
+      data: {
+        ...SMART,
+        groups: SMART.groups.map((g) =>
+          g.role === "core"
+            ? {
+                ...g,
+                files: g.files.map((f) => ({ ...f, pseudocode_summary: "Rate-limits by IP." })),
+              }
+            : g,
+        ),
+      },
+      isLoading: false,
+    });
+    renderViewer();
+    expect(screen.getAllByText("summary")).toHaveLength(1);
+    const pill = screen.getByText("summary");
+    expect(pill.tagName).not.toBe("BUTTON");
+    expect(pill.getAttribute("tabindex")).toBeNull();
+    // Not a button anywhere in the accessibility tree either.
+    expect(screen.queryByRole("button", { name: "summary" })).not.toBeInTheDocument();
+  });
+
+  it('renders the "N of M files summarized" note only when some but not all files carry a summary (AC-37)', () => {
+    useSmartDiff.mockReturnValue({
+      data: {
+        ...SMART,
+        groups: SMART.groups.map((g) =>
+          g.role === "core"
+            ? {
+                ...g,
+                files: g.files.map((f) => ({ ...f, pseudocode_summary: "Rate-limits by IP." })),
+              }
+            : g,
+        ),
+      },
+      isLoading: false,
+    });
+    renderViewer();
+    expect(screen.getByText("1 of 3 files summarized")).toBeInTheDocument();
+  });
+
+  it('omits the "files summarized" note when no file carries a summary (AC-37)', () => {
+    // Default SMART fixture has `pseudocode_summary: null` on every file.
+    renderViewer();
+    expect(screen.queryByText(/files summarized/)).not.toBeInTheDocument();
+  });
+
+  it("expands the target file and scrolls to its line on arrival (AC-26)", () => {
+    // The lockfile is boilerplate, so it never auto-expands — proving this
+    // target reaches it (rather than one already open) is the real test.
+    const { container } = renderViewer(undefined, { path: "package-lock.json", line: 2 });
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    const code = container.textContent ?? "";
+    // Core file is open by default too, so the shared patch body now appears
+    // twice: once from `core`, once from the newly-expanded lockfile.
+    expect(code.split("const b = 2;").length - 1).toBe(2);
+  });
+
+  it("ignores a target file that isn't in this PR's smart-diff groups (AC-26 graceful degradation)", () => {
+    expect(() => renderViewer(undefined, { path: "no/such/file.ts", line: 1 })).not.toThrow();
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 });

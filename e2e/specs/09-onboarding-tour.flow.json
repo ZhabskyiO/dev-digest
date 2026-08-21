@@ -1,0 +1,21 @@
+{
+  "name": "Onboarding Tour page renders the seeded six-section tour",
+  "description": "From the seeded repo's PR list, follows the sidebar 'Onboarding Tour' nav item (AC-34) to the repo-scoped tour at /repos/:repoId/onboarding (AC-32) and confirms the in-page table of contents lists all six catalogue section headings (AC-36), the 'ON THIS PAGE' rail label renders, and one known row from each of T13's seeded local_setup/critical_paths/routes_and_apis sections is present. Read-only: no header action is ever clicked, so no model call is spent. Distinct from 06-onboarding, which covers the unscoped add-repository screen at plain /onboarding.",
+  "steps": [
+    { "cmd": ["open", "{BASE}/"], "label": "load the app root" },
+    { "cmd": ["wait", "--url", "/pulls"], "label": "root redirects to the seeded repo's PRs (repo becomes active)" },
+    { "cmd": ["find", "text", "Onboarding Tour", "click"], "label": "follow the sidebar nav item (AC-34) to the active repo's tour" },
+    { "cmd": ["wait", "--url", "/onboarding"], "label": "onboarding tour route reached" },
+    { "cmd": ["wait", "--load", "networkidle"], "label": "tour fetch settles" },
+    { "cmd": ["wait", "--text", "Architecture overview"], "label": "section 1/6 heading renders" },
+    { "cmd": ["wait", "--text", "Critical paths"], "label": "section 2/6 heading renders" },
+    { "cmd": ["wait", "--text", "Routes & APIs"], "label": "section 3/6 heading renders" },
+    { "cmd": ["wait", "--text", "How to run locally"], "label": "section 4/6 heading renders" },
+    { "cmd": ["wait", "--text", "Guided reading path"], "label": "section 5/6 heading renders" },
+    { "cmd": ["wait", "--text", "First tasks"], "label": "section 6/6 heading renders" },
+    { "cmd": ["wait", "--text", "ON THIS PAGE"], "label": "the in-page table of contents label renders (AC-36)" },
+    { "cmd": ["wait", "--text", "docker compose up -d postgres redis"], "label": "a known seeded local_setup command row is present" },
+    { "cmd": ["wait", "--text", "src/middleware/auth.ts"], "label": "a known seeded critical_paths row is present" },
+    { "cmd": ["wait", "--text", "/payments/charges/:id"], "label": "a known seeded routes_and_apis entry is present" }
+  ]
+}

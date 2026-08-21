@@ -135,6 +135,7 @@
   "editor": {
     "tabs": {
       "config": "Config",
+      "context": "Context",
       "preview": "Preview",
       "stats": "Stats",
       "versions": "Versions"

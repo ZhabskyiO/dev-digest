@@ -1,5 +1,9 @@
+import { createHash } from 'node:crypto';
+import { readFile, realpath } from 'node:fs/promises';
 import type { Container } from '../../platform/container.js';
-import type { UnifiedDiff } from '@devdigest/shared';
+import type { ProjectContextTraceItem, UnifiedDiff } from '@devdigest/shared';
+import { planBudget } from '../_shared/context-budget.js';
+import { resolveInClone } from '../_shared/clone-path-guard.js';
 
 /**
  * Prompt-context builders — the repo-intel enrichment and skill resolution that
@@ -141,4 +145,186 @@ export async function resolveAgentSkills(
     ids: enabled.map((l) => l.skill.id),
     linkedCount: linked.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Project context (T15 — AC-16, AC-20..AC-28, AC-44)
+// ---------------------------------------------------------------------------
+
+/** `reviewRepo.getRepo`'s resolved row shape, used only for its `clonePath`. */
+type RepoRow = NonNullable<Awaited<ReturnType<Container['reviewRepo']['getRepo']>>>;
+
+export interface ResolvedProjectContext {
+  /** Document bodies, in persisted order. Passed verbatim as `specs` to
+   *  `reviewPullRequest`/`assemblePrompt` — reviewer-core wraps each one
+   *  (`wrapUntrusted('spec-N', …)`) and applies the injection guard itself.
+   *  This module never wraps, never truncates the guard text, and never
+   *  filters on content — only on outcome. */
+  bodies: string[];
+  /** The same documents' paths, in the same order, for the run trace's
+   *  "Specs read" field (AC-30). */
+  specsRead: string[];
+  /** One entry per document in the effective context set, in persisted
+   *  order, for the run trace's project-context detail (AC-29). */
+  details: ProjectContextTraceItem[];
+}
+
+function sha256Hex(buf: Buffer): string {
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+/**
+ * Reads `relPath` against `realRoot` (already `realpath`-resolved) through
+ * the shared `resolveInClone` containment guard (`../_shared/
+ * clone-path-guard.js`), also used by `ProjectContextService`. Never throws —
+ * returns `null` for anything that fails any check, which this function's
+ * only caller treats as `missing` (AC-22).
+ */
+async function readClonePath(realRoot: string, relPath: string): Promise<Buffer | null> {
+  const real = await resolveInClone(realRoot, relPath);
+  if (real === null) return null;
+  return readFile(real).catch(() => null);
+}
+
+/**
+ * Resolves an agent's effective project-context set (AC-16) into what a
+ * review run actually needs: ordered document bodies for the prompt's
+ * `## Project context` slot, the paths read (for the trace's "Specs read"
+ * field), and a per-document outcome for the run trace (AC-29). Consumed
+ * identically by the PR path, the local (no-PR) path, and any future CI
+ * path (AC-28) — this is the ONE place that decides what an LLM reads from
+ * project context.
+ *
+ * Per document, in persisted order:
+ *   1. `helpers.planBudget` runs FIRST, over the FULL effective document set
+ *      (`effective.documents`, unfiltered) using each document's persisted
+ *      token estimate — the exact same input `ProjectContextService.
+ *      effectiveContext` budgets over for AC-40's `dropped_paths` preview.
+ *      This is deliberate, not incidental: budgeting over a pre-filtered
+ *      subset (as this function used to) let a `wrong_repo`/`missing`
+ *      document silently "free up" budget space that the preview had
+ *      already counted as spent, so the preview's `dropped_paths` and this
+ *      function's `dropped_over_budget` set could name different documents
+ *      for the same effective set. Calling `planBudget` on the identical
+ *      input here is what makes `EffectiveProjectContext.dropped_paths`'s own
+ *      contract doc ("the same tail... AC-23's run-time drop would produce")
+ *      actually true.
+ *   2. Only a document `planBudget` marks `injected` is examined further —
+ *      `repo_id !== repoId` → `wrong_repo`, skip (AC-25). `repoId` is
+ *      `undefined` for a local review with no resolved repo — every
+ *      attachment is `wrong_repo` in that case, so the prompt is unchanged.
+ *      A document `planBudget` already dropped is reported
+ *      `dropped_over_budget` without a live filesystem check — spending an
+ *      FS read (or a wrong-repo compare) on a document that can never be
+ *      injected regardless of its own readability is wasted work.
+ *   3. Read fresh from the clone (`readClonePath`'s resolve-then-recheck-
+ *      after-realpath guard) → failure → `missing`, overriding the budget's
+ *      `injected` verdict for that one document (AC-22).
+ *   4. Hash the content JUST READ (never the last scan's stored hash — a
+ *      run may happen with no rescan in between) and compare to the
+ *      attachment's recorded `attached_hash` → differ → flag `changed: true`
+ *      and still inject the new bytes (AC-44).
+ *   5. Truncate to `config.projectContextDocCharCap` → flag `truncated: true`
+ *      (AC-24).
+ *
+ * No model call anywhere (AC-27). The whole function is best-effort: an
+ * empty effective set (or any unexpected throw — a DB error resolving the
+ * repo, `effectiveContext` itself failing) degrades to `{bodies: [],
+ * specsRead: [], details: []}` rather than failing the run, matching every
+ * other builder in this file.
+ */
+export async function resolveProjectContext(
+  container: Container,
+  agentId: string,
+  repoId: string | undefined,
+  log: StepLog,
+): Promise<ResolvedProjectContext> {
+  const empty: ResolvedProjectContext = { bodies: [], specsRead: [], details: [] };
+
+  try {
+    const effective = await container.projectContext.effectiveContext(agentId);
+    if (effective.documents.length === 0) return empty;
+
+    const charCap = container.config.projectContextDocCharCap;
+
+    // Same input, same call, as `ProjectContextService.effectiveContext`'s
+    // own `planBudget` call — see this function's doc comment above for why
+    // that identity is load-bearing, not incidental.
+    const { injected } = planBudget(effective.documents, container.config.projectContextBudgetTokens);
+    const budgetInjected = new Set(injected);
+
+    const bodies: string[] = [];
+    const specsRead: string[] = [];
+    const details: ProjectContextTraceItem[] = [];
+
+    // Resolved lazily, at most once — every document that reaches the
+    // filesystem-read step below shares `repoId` by construction (the
+    // wrong_repo check runs first and `continue`s otherwise).
+    let realRoot: string | null | undefined;
+
+    for (const doc of effective.documents) {
+      if (repoId === undefined || doc.repo_id !== repoId) {
+        details.push({ path: doc.path, tokens: doc.tokens, outcome: 'wrong_repo' });
+        continue;
+      }
+
+      if (!budgetInjected.has(doc)) {
+        details.push({ path: doc.path, tokens: doc.tokens, outcome: 'dropped_over_budget' });
+        continue;
+      }
+
+      if (realRoot === undefined) {
+        const repo: RepoRow | undefined = await container.reviewRepo.getRepo(repoId);
+        realRoot =
+          repo && repo.clonePath !== null ? await realpath(repo.clonePath).catch(() => null) : null;
+      }
+      if (realRoot === null) {
+        details.push({ path: doc.path, tokens: doc.tokens, outcome: 'missing' });
+        continue;
+      }
+
+      const buf = await readClonePath(realRoot, doc.path);
+      if (buf === null) {
+        details.push({ path: doc.path, tokens: doc.tokens, outcome: 'missing' });
+        continue;
+      }
+
+      const currentHash = sha256Hex(buf);
+      const owner =
+        doc.source === 'skill' && doc.skill_id !== undefined
+          ? { skillId: doc.skill_id }
+          : { agentId };
+      const attachment = await container.projectContextRepo.getAttachment(owner, doc.repo_id, doc.path);
+      const changed = attachment !== undefined && attachment.attachedHash !== currentHash;
+
+      let text = buf.toString('utf8');
+      let truncated = false;
+      if (text.length > charCap) {
+        text = text.slice(0, charCap);
+        truncated = true;
+      }
+
+      bodies.push(text);
+      specsRead.push(doc.path);
+      const outcome = changed ? 'changed_unconfirmed' : truncated ? 'truncated' : 'injected';
+      details.push({
+        path: doc.path,
+        tokens: doc.tokens,
+        outcome,
+        ...(truncated ? { truncated: true } : {}),
+        ...(changed ? { changed: true } : {}),
+      });
+    }
+
+    log.info(
+      `project context: ${bodies.length}/${effective.documents.length} document(s) injected`,
+    );
+
+    return { bodies, specsRead, details };
+  } catch (err) {
+    // Never let a project-context failure fail the run — degrade to no
+    // context at all, same contract as every other builder in this file.
+    log.info(`project context: resolution failed — ${(err as Error).message}`);
+    return empty;
+  }
 }

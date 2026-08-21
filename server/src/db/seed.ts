@@ -8,6 +8,7 @@ import {
   PERFORMANCE_REVIEWER_PROMPT,
   TEST_QUALITY_REVIEWER_PROMPT,
 } from './seed-prompts.js';
+import { Onboarding, type Onboarding as OnboardingT } from '@devdigest/shared';
 
 /** Default provider/model for the built-in reviewer agents. */
 const DEFAULT_PROVIDER = 'openrouter' as const;
@@ -96,6 +97,191 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
   }
   const repoId = repo!.id;
 
+  // ---- onboarding tour (demo repo, read-only browser flow fixture) ----
+  // Inserted directly against `t.onboarding` — the module's repository
+  // (`OnboardingRepository`, the only OTHER file allowed to touch this
+  // table) intentionally reads/writes `json` as `unknown` and never
+  // Onboarding.parse()s it, so it can't be reused here as the validation
+  // step this task requires. `Onboarding.parse()` below is that check: a
+  // payload that doesn't parse cleanly makes the stored row the "legacy row"
+  // edge case (service.ts / repository.ts doc comment) and the read path
+  // silently treats it as absent, so the browser flow (T14) would see an
+  // empty state instead of a tour with no error anywhere.
+  //
+  // Deliberately NO `repo_index_state` row for this repo (see T13's task
+  // brief): a stored tour is served regardless of index state, and seeding
+  // one would make every other repo-intel consumer believe this demo repo is
+  // indexed while its symbol tables are actually empty.
+  const onboardingPayload: OnboardingT = {
+    sections: [
+      {
+        kind: 'architecture',
+        title: 'Architecture overview',
+        body:
+          '**payments-api** is a Node + TypeScript service fronting Stripe. Requests enter ' +
+          'through `src/server.ts`, pass middleware (auth, rate-limit), and route to ' +
+          '`src/api/public/*`. Persistence is Postgres via a thin `db` client; Redis backs ' +
+          'sessions and the new rate-limit buckets.',
+        diagram: `flowchart LR
+  client[client] --> server[src/server.ts]
+  server --> middleware[middleware]
+  server --> api["src/api/public/*"]
+  middleware --> redis[(redis)]
+  api --> postgres[(postgres)]`,
+        links: null,
+      },
+      {
+        kind: 'critical_paths',
+        title: 'Critical paths',
+        items: [
+          { path: 'src/server.ts', why: 'App bootstrap + middleware chain' },
+          {
+            path: 'src/api/public/index.ts',
+            why: 'Public router — unauthenticated surface',
+          },
+          { path: 'src/middleware/auth.ts', why: 'Token validation, used by 14 routes' },
+          { path: 'src/lib/redis.ts', why: 'Shared Redis singleton — reuse this' },
+        ],
+        diagram: null,
+        links: null,
+      },
+      {
+        kind: 'routes_and_apis',
+        title: 'Routes & APIs',
+        diagram: null,
+        items: [
+          {
+            surface: 'frontend',
+            group: 'Admin Dashboard',
+            method: null,
+            route: '/dashboard',
+            source_path: 'src/frontend/dashboard/index.tsx',
+            note: 'Static admin UI for recent charges and webhook activity',
+          },
+          {
+            surface: 'api',
+            group: 'Public API',
+            method: 'POST',
+            route: '/public/webhooks',
+            source_path: 'src/api/public/webhooks.ts',
+            note: 'Stripe webhook receiver, signature-verified',
+          },
+          {
+            surface: 'api',
+            group: 'Payments',
+            method: 'POST',
+            route: '/payments/charges',
+            source_path: 'src/api/payments/charges.ts',
+            note: 'Creates a Stripe charge; behind auth middleware',
+          },
+          {
+            surface: 'api',
+            group: 'Payments',
+            method: 'GET',
+            route: '/payments/charges/:id',
+            source_path: 'src/api/payments/charges.ts',
+            note: null,
+          },
+          {
+            surface: 'api',
+            group: 'Users',
+            method: 'GET',
+            route: '/users',
+            source_path: 'src/api/users.ts',
+            note: 'Rate-limited list endpoint',
+          },
+        ],
+        links: null,
+      },
+      {
+        kind: 'local_setup',
+        title: 'How to run locally',
+        items: [
+          { command: 'pnpm install' },
+          { command: 'cp .env.example .env # add OPENAI + STRIPE keys' },
+          { command: 'docker compose up -d postgres redis' },
+          { command: 'pnpm dev # http://localhost:3000' },
+        ],
+        diagram: null,
+        links: null,
+      },
+      {
+        kind: 'reading_path',
+        title: 'Guided reading path',
+        items: [
+          {
+            path: 'src/server.ts',
+            rationale: 'See the whole request lifecycle in one file',
+          },
+          {
+            path: 'src/api/public/index.ts',
+            rationale: 'Understand the public contract before touching it',
+          },
+          {
+            path: 'src/middleware/auth.ts',
+            rationale: 'Auth touches almost everything downstream',
+          },
+        ],
+        diagram: null,
+        links: null,
+      },
+      {
+        kind: 'first_tasks',
+        title: 'First tasks',
+        items: [
+          {
+            title: 'Add a /health readiness probe',
+            target: 'src/api/public/health.ts',
+            complexity: 'low',
+          },
+          {
+            title: 'Backfill tests for the rate limiter',
+            target: 'test/ratelimit.test.ts',
+            complexity: 'medium',
+          },
+          {
+            title: 'Document the webhook signature flow',
+            target: 'specs/',
+            complexity: 'low',
+          },
+        ],
+        diagram: null,
+        links: null,
+      },
+    ],
+    generated_at: '2026-08-18T10:00:00.000Z',
+    indexed_revision: 'f3a9c7d1e8b4025619bc9a4e7f18cd2b6a0d3e5a',
+    indexed_file_count: 12450,
+    provider: DEFAULT_PROVIDER,
+    model: DEFAULT_MODEL,
+  };
+  // `Onboarding`'s `indexed_revision` is a bare `z.string()` (no length/format
+  // constraint), so a malformed sha (e.g. 39 hex chars instead of 40) parses
+  // fine and only breaks the demo silently: `OnboardingService.getTour`
+  // compares it against `repo_index_state.lastIndexedSha` to derive `stale`
+  // (service.ts), and a sha that can never match a real one renders the
+  // seeded tour permanently stale. Check the actual shape here, not by eye.
+  if (!/^[0-9a-f]{40}$/.test(onboardingPayload.indexed_revision)) {
+    throw new Error(
+      `seed: onboardingPayload.indexed_revision must be a 40-char lowercase hex sha, got ` +
+        `${JSON.stringify(onboardingPayload.indexed_revision)} (length ${onboardingPayload.indexed_revision.length})`,
+    );
+  }
+  // Validate in the seed, not by eye — see the doc comment above.
+  const validatedOnboarding = Onboarding.parse(onboardingPayload);
+
+  const [existingOnboarding] = await db
+    .select({ repoId: t.onboarding.repoId })
+    .from(t.onboarding)
+    .where(eq(t.onboarding.repoId, repoId));
+  if (!existingOnboarding) {
+    await db.insert(t.onboarding).values({
+      repoId,
+      json: validatedOnboarding,
+      generatedAt: new Date(validatedOnboarding.generated_at),
+    });
+  }
+
   // ---- PR #482 (rate limiting) ----
   let [pr] = await db
     .select()
@@ -182,7 +368,7 @@ export async function seed(db: Db): Promise<{ workspaceId: string; userId: strin
 
   // ---- built-in skills (L02: Test Quality Reviewer's rubrics) ----
   // Bodies are directive markdown instructions (skills are read as trusted
-  // instructions once enabled) — see server/insights.md for why these are
+  // instructions once enabled) — see server/insights/INSIGHTS.md for why these are
   // inserted directly against `t.skills` rather than via SkillsRepository.insert
   // (that call also writes a `skill_versions` row; seeded rows deliberately don't
   // get one, matching how seedAgents bypasses AgentsRepository).

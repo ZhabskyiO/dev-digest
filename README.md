@@ -23,6 +23,12 @@ project context into reviews) lives inside the server at
 [`server/src/modules/repo-intel`](server/src/modules/repo-intel). Only
 **Postgres** runs in Docker; the API and web app run on the host via `pnpm dev`.
 
+<!-- updated from: server/src/modules/onboarding/service.ts, server/src/modules/onboarding/routes.ts, client/src/app/repos/[repoId]/onboarding -->
+The **Onboarding Tour** (`server/src/modules/onboarding`, served at
+`/repos/:repoId/onboarding`) turns `repo-intel` index facts plus clone evidence
+into a six-section guided tour of a repository in one grounded LLM call;
+rereading a stored tour costs no model call.
+
 ## Architecture
 
 ```mermaid

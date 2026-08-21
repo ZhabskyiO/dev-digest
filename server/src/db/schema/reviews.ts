@@ -9,11 +9,12 @@ import {
   doublePrecision,
   index,
   check,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { now } from './_shared';
 import { workspaces } from './core';
 import { pullRequests } from './pulls';
-import type { IntentSource, RiskArea } from '@devdigest/shared';
+import type { IntentSource, PrBriefRecord, RiskArea } from '@devdigest/shared';
 
 // ============================================================ Review & findings
 
@@ -118,5 +119,56 @@ export const prBrief = pgTable('pr_brief', {
   prId: uuid('pr_id')
     .primaryKey()
     .references(() => pullRequests.id, { onDelete: 'cascade' }),
-  json: jsonb('json').notNull(),
+  /**
+   * The commit this row was derived from. Defaults to `''`, never a real
+   * sha — mirrors `pr_intent.head_sha` above: `''` can never equal a real
+   * `pull_requests.head_sha`, so any pre-existing row (or one inserted
+   * before this column existed) is a guaranteed cache miss and gets
+   * regenerated rather than silently reused.
+   */
+  headSha: text('head_sha').notNull().default(''),
+  provider: text('provider'),
+  model: text('model'),
+  tokensIn: integer('tokens_in').notNull().default(0),
+  tokensOut: integer('tokens_out').notNull().default(0),
+  /**
+   * Nullable: null means "unknown price", rendered as `—` and never `$0.00` —
+   * same rule as `pr_intent.cost_usd` / `agent_runs.cost_usd`.
+   */
+  costUsd: doublePrecision('cost_usd'),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * COUNTS ONLY — `{ summarized_files, changed_files }`. Never widen this to
+   * carry `status`/`reason`/`blast`: those are read-time (AC-13/AC-14),
+   * resolved fresh from `container.blast` and from `reviews`/`findings` on
+   * every request. See `PrBriefRecord`'s own doc comment
+   * (`src/vendor/shared/contracts/pr-brief.ts`) for why a column for either
+   * would be a regression, not a feature.
+   */
+  json: jsonb('json').$type<PrBriefRecord>().notNull(),
+  // No index on head_sha: the only access path is `WHERE pr_id = $1`, already
+  // served by the PK above — same reasoning as `pr_intent.head_sha`.
 });
+
+export const prFileSummary = pgTable(
+  'pr_file_summary',
+  {
+    prId: uuid('pr_id')
+      .notNull()
+      .references(() => pullRequests.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    headSha: text('head_sha').notNull(),
+    summary: text('summary').notNull(),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.prId, t.path] }),
+    // Declared here (not hand-appended to a migration) so `pnpm db:generate`
+    // and its snapshot stay the source of truth for this constraint.
+    check('pr_file_summary_len_chk', sql`length(${t.summary}) <= 200`),
+    // No index on head_sha: the PK's leftmost prefix (pr_id) already serves
+    // the only access path — "all summaries for this PR" — and the sha is
+    // compared in application code after that lookup, same reasoning as
+    // `pr_intent.head_sha` above.
+  ],
+);

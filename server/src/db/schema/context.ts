@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable,
   uuid,
@@ -9,9 +10,13 @@ import {
   vector,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/pg-core';
+import { now } from './_shared';
 import { workspaces } from './core';
 import { repos } from './repos';
+import { agents } from './agents';
+import { skills } from './skills';
 
 // ============================================================ Context & codebase
 
@@ -124,3 +129,81 @@ export const onboarding = pgTable('onboarding', {
   json: jsonb('json').notNull(),
   generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ============================================================ Project context (T3)
+
+/**
+ * One row per scanned `specs/**` / `docs/**` / `insights.md` document found in a
+ * repo clone. `contentHash` + `tokens` let the reader (T4) decide whether a
+ * previously-scanned document changed without re-reading its bytes. No body
+ * column — the document text is never persisted here, only re-read from the
+ * clone on demand (AC-12).
+ */
+export const projectContextDocuments = pgTable(
+  'project_context_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    type: text('type', { enum: ['specs', 'docs', 'insights'] }).notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    contentHash: text('content_hash').notNull(),
+    tokens: integer('tokens').notNull(),
+    scannedAt: timestamp('scanned_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('project_context_documents_repo_path_uq').on(t.repoId, t.path),
+    // TEXT + CHECK, not a PG enum — same rationale as pr_intent.confidence in
+    // reviews.ts: the enum{} above is TS-only, this is the DB-level guarantee.
+    check(
+      'project_context_documents_type_chk',
+      sql`${t.type} IN ('specs','docs','insights')`,
+    ),
+  ],
+);
+
+/**
+ * Records that a document is attached to an agent's or a skill's context set —
+ * never the document's own text (AC-12). Exactly one of `agentId`/`skillId` is
+ * set per row (enforced by the CHECK below); `attachedHash`/`attachedSize`/
+ * `attachedRevision` snapshot what was attached *at attach time* purely for
+ * drift detection in the UI, not as a content store.
+ */
+export const contextAttachments = pgTable(
+  'context_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+    skillId: uuid('skill_id').references(() => skills.id, { onDelete: 'cascade' }),
+    repoId: uuid('repo_id')
+      .notNull()
+      .references(() => repos.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    order: integer('order').notNull().default(0),
+    attachedHash: text('attached_hash').notNull(),
+    attachedSize: integer('attached_size').notNull(),
+    attachedRevision: text('attached_revision').notNull(),
+    createdAt: now(),
+  },
+  (t) => [
+    check(
+      'context_attachments_target_chk',
+      sql`(${t.agentId} IS NOT NULL) <> (${t.skillId} IS NOT NULL)`,
+    ),
+    uniqueIndex('context_attachments_agent_repo_path_uq')
+      .on(t.agentId, t.repoId, t.path)
+      .where(sql`${t.agentId} IS NOT NULL`),
+    uniqueIndex('context_attachments_skill_repo_path_uq')
+      .on(t.skillId, t.repoId, t.path)
+      .where(sql`${t.skillId} IS NOT NULL`),
+    index('context_attachments_repo_path_idx').on(t.repoId, t.path),
+    index('context_attachments_skill_id_idx')
+      .on(t.skillId)
+      .where(sql`${t.skillId} IS NOT NULL`),
+  ],
+);

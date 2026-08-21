@@ -13,8 +13,10 @@ import {
   buildRepoMapDigest,
   buildRankNote,
   resolveAgentSkills,
+  resolveProjectContext,
 } from './prompt-context.js';
 import { IntentService, type PromptIntentSlot } from './intent/service.js';
+import { BriefService } from './brief/index.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -49,6 +51,7 @@ export type RunOutcome = {
  */
 export class ReviewRunExecutor {
   private intentService: IntentService;
+  private briefService: BriefService;
 
   constructor(
     private container: Container,
@@ -56,6 +59,7 @@ export class ReviewRunExecutor {
     private agents: Container['agentsRepo'],
   ) {
     this.intentService = new IntentService(container);
+    this.briefService = new BriefService(container);
   }
 
   /**
@@ -85,6 +89,16 @@ export class ReviewRunExecutor {
     // mark the rows failed and persist the buffered log so it survives a reload.
     const failAll = async (msg: string) => {
       for (const { runId, agent } of jobs) {
+        // Trace first, terminal status second — same barrier as the success
+        // path: `failed` in `agent_runs` must never be visible before the
+        // trace explaining the failure is readable.
+        await this.repo
+          // No `skillBodies` in scope here on purpose: this is the PRE-WORK
+          // failure path (diff load itself failed) — execution never reached
+          // per-agent processing, so no skill was ever resolved or attached.
+          // `skills: null` in traceFromBuffer's default is accurate, not a gap.
+          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
+          .catch(() => undefined);
         await this.repo
           .completeAgentRun(runId, {
             status: 'failed',
@@ -98,13 +112,6 @@ export class ReviewRunExecutor {
             grounding: '0/0 passed',
             error: msg,
           })
-          .catch(() => undefined);
-        await this.repo
-          // No `skillBodies` in scope here on purpose: this is the PRE-WORK
-          // failure path (diff load itself failed) — execution never reached
-          // per-agent processing, so no skill was ever resolved or attached.
-          // `skills: null` in traceFromBuffer's default is accurate, not a gap.
-          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
           .catch(() => undefined);
         this.container.runBus.complete(runId);
       }
@@ -169,6 +176,25 @@ export class ReviewRunExecutor {
           `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
         );
       }
+    }
+
+    // T15 — per-file summaries (AC-31), derived ONCE per executeRuns, exactly
+    // like intent above and for the same reason: it's shared across every
+    // queued agent in this batch, not per-agent state. Placed AFTER the loop
+    // (not before it, alongside diff/intent) so it never delays any agent's
+    // review behind an optional model call. `summarizeChangedFilesForRun`
+    // already swallows every internal failure and returns normally (D5); this
+    // try/catch is defense in depth so that even an unexpected throw here can
+    // NEVER reach `failAll` above, which would fail every queued run in this
+    // batch for what is an optional enrichment, not the review itself.
+    try {
+      await runLog.step(
+        'Summarizing changed files',
+        () => this.briefService.summarizeChangedFilesForRun(workspaceId, pull.id, runLog),
+        { kind: 'tool' },
+      );
+    } catch (err) {
+      runLog.info(`File summaries step threw unexpectedly (ignored): ${(err as Error).message}`);
     }
   }
 
@@ -249,6 +275,19 @@ export class ReviewRunExecutor {
         { kind: 'tool' },
       );
 
+      // T17 — project context (AC-20, AC-29, AC-30). Resolves the agent's
+      // effective attachment set into ordered document bodies for the
+      // prompt's `## Project context` slot, plus the paths actually
+      // injected (`specsRead`) and a per-document outcome for the trace
+      // (`details`). `resolveProjectContext` never throws (best-effort,
+      // same contract as every other builder in this file), so no
+      // try/catch here — one would only mask a genuine bug.
+      const projectContext = await runLog.step(
+        'Loading project context',
+        () => resolveProjectContext(this.container, agent.id, repo.id, runLog),
+        { kind: 'tool' },
+      );
+
       // ---- Engine: assemble → single-pass → grounding -----------------------
       // The pure review pipeline lives in @devdigest/reviewer-core (shared with
       // the CI runner). The service owns only I/O: repo-intel context resolution
@@ -269,6 +308,11 @@ export class ReviewRunExecutor {
         // L02 — linked, enabled skill bodies (already ordered). Same
         // omit-when-empty contract as callers/repoMap.
         ...(skillBodies.length ? { skills: skillBodies } : {}),
+        // T17 — attached project-context document bodies (already ordered).
+        // Same omit-when-empty contract: an empty array must NOT be passed,
+        // or the byte-identical-prompt guarantee for a run with no attached
+        // context (AC-26) breaks.
+        ...(projectContext.bodies.length ? { specs: projectContext.bodies } : {}),
         // PR author's description/body — untrusted; assemblePrompt wraps +
         // truncates it. Omitted when the PR has no body.
         ...(pull.body ? { prDescription: pull.body } : {}),
@@ -315,20 +359,13 @@ export class ReviewRunExecutor {
       // the timeline colors on, NOT the model's self-reported verdict.
       const blockers = countBlockers(keptFindings, agent.ciFailOn);
 
-      // ---- Observability: agent_runs + ONE run_traces document --------------
-      await this.repo.completeAgentRun(runId, {
-        status: 'done',
-        durationMs,
-        tokensIn,
-        tokensOut,
-        costUsd,
-        findingsCount: findingRows.length,
-        grounding,
-        score: outcome.review.score,
-        blockers,
-        error: null,
-      });
-
+      // ---- Observability: ONE run_traces document, THEN agent_runs --------
+      // Order matters and is load-bearing: the terminal status in `agent_runs`
+      // is the barrier everything else waits on (tests poll it; tooling treats
+      // done/failed as "this run's record is complete"). Writing it before the
+      // trace document opens a window where a run reads as finished but
+      // `GET /runs/:id/trace` still 404s. Persist the trace first so terminal
+      // status always means the trace is readable.
       const trace: RunTrace = {
         config: {
           agent: agent.name,
@@ -355,13 +392,33 @@ export class ReviewRunExecutor {
         })),
         raw_output: outcome.raw,
         memory_pulled: [],
-        specs_read: [],
+        // AC-30 — the documents actually injected, in order (not the whole
+        // effective set; the per-document detail array below carries the
+        // omissions).
+        specs_read: projectContext.specsRead,
+        // AC-29 — per-document outcome (injected / missing /
+        // dropped_over_budget / truncated / wrong_repo / changed_unconfirmed)
+        // for every document in the effective context set.
+        project_context: projectContext.details,
         // Persisted log = the run's FULL event buffer (incl. shared pre-work:
         // diff load + intent), not just events recorded inside this method.
         log: runLog.logFor(runId),
       };
       runLog.info('Run complete; trace persisted');
       await this.repo.saveRunTrace(runId, trace);
+
+      await this.repo.completeAgentRun(runId, {
+        status: 'done',
+        durationMs,
+        tokensIn,
+        tokensOut,
+        costUsd,
+        findingsCount: findingRows.length,
+        grounding,
+        score: outcome.review.score,
+        blockers,
+        error: null,
+      });
       this.container.runBus.complete(runId);
 
       return { review, findings: findingRows, grounding, raw: outcome.review };
@@ -372,6 +429,17 @@ export class ReviewRunExecutor {
       const status = cancelled ? 'cancelled' : 'failed';
       const msg = cancelled ? 'Cancelled by user' : (err as Error).message;
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
+      // Trace first, terminal status second — see the success path.
+      await this.repo
+        .saveRunTrace(
+          runId,
+          // `skillBodies` may already be populated here — the "Loading skills"
+          // step (and its run_skills write) can have completed before a LATER
+          // step (e.g. the LLM call) threw. Thread it through so the trace
+          // reflects what was actually attached, not a blanket null.
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, skillBodies),
+        )
+        .catch(() => undefined);
       await this.repo
         .completeAgentRun(runId, {
           status,
@@ -385,16 +453,6 @@ export class ReviewRunExecutor {
           grounding: '0/0 passed',
           error: msg,
         })
-        .catch(() => undefined);
-      await this.repo
-        .saveRunTrace(
-          runId,
-          // `skillBodies` may already be populated here — the "Loading skills"
-          // step (and its run_skills write) can have completed before a LATER
-          // step (e.g. the LLM call) threw. Thread it through so the trace
-          // reflects what was actually attached, not a blanket null.
-          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, skillBodies),
-        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;

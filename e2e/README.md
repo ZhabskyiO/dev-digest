@@ -100,3 +100,4 @@ a CI artifact by `.github/workflows/e2e-web.yml`).
 | `05-pr-diff` | PR #482 → Files changed tab → seeded file renders in the diff viewer |
 | `06-onboarding` | `/onboarding` → add-repository form renders (no submit) |
 | `07-settings` | `/settings/api-keys` + `/settings/models` → section titles render |
+| `09-onboarding-tour` | sidebar "Onboarding Tour" nav item → repo-scoped `/repos/:repoId/onboarding` (the seeded tour, distinct from `06-onboarding`'s unscoped `/onboarding` add-repository screen) → six section headings + "ON THIS PAGE" + a known seeded row per section render |

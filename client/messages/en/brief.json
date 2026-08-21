@@ -10,6 +10,47 @@
   "overlap": "{count} overlap",
   "unavailable": "Brief not available yet.",
   "unavailableHint": "Run a review or open the PR to compute it.",
+  "empty": {
+    "title": "No brief yet",
+    "hint": "Generate one to see the derived intent, risk areas, blast radius, and a verdict for this PR.",
+    "tokenNotice": "Generating a brief calls the model and spends tokens."
+  },
+  "generate": "Generate brief",
+  "generating": "Generating…",
+  "refresh": "Refresh brief",
+  "generateFailed": "Couldn't generate the brief. The previous one, if any, is unchanged.",
+  "dismiss": "Dismiss",
+  "stale": {
+    "title": "This brief is out of date",
+    "commits": "{count, plural, one {# commit has landed on this pull request since this brief was generated} other {# commits have landed on this pull request since this brief was generated}}",
+    "unknownCommits": "New commits have landed on this pull request since this brief was generated."
+  },
+  "degraded": {
+    "title": "This brief is incomplete",
+    "reason": "Some data could not be computed for this pull request."
+  },
+  "verdict": {
+    "request_changes": "Request changes",
+    "approve": "Approve",
+    "comment": "Comment",
+    "findings": "Findings",
+    "blockers": "Blockers",
+    "score": "Score"
+  },
+  "footer": {
+    "cost": "Cost",
+    "costUnknown": "—",
+    "tokens": "Tokens",
+    "summarized": "{n} of {m} files summarized"
+  },
+  "riskAreas": {
+    "expand": "Show explanation",
+    "collapse": "Hide explanation"
+  },
+  "reviewFocus": {
+    "title": "Read these first",
+    "open": "Open {file} at line {line}"
+  },
   "intent": {
     "inScope": "In scope",
     "outOfScope": "Out of scope",

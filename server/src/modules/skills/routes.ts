@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { SkillImportRequest, SkillSource, SkillType } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
+import { ContextRefBody } from '../_shared/context-ref.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { SkillsService } from './service.js';
 
@@ -57,8 +58,19 @@ const UpdateSkillBody = z.object({
   body: z.string().min(1).optional(),
   source: SkillSource.optional(),
   enabled: z.boolean().optional(),
-  /** "What changed" note for the snapshot this edit creates. Ignored when the
-   *  body is unchanged, because no snapshot is written then. */
+  /** The skill's ordered project-context attachment set (AC-13, AC-39,
+   *  AC-42). Sent through this same update — not a separate route — so a
+   *  body-and-attachments edit is one save and at most one version snapshot.
+   *  Built from `_shared/context-ref.ts`'s constrained `ContextRefBody`
+   *  (uuid `repo_id` + path-traversal-guarded `path`), not the unrefined
+   *  mirrored `ProjectContextRef` contract — see that file's doc comment.
+   *  `PUT /agents/:id/context` (`modules/project-context/routes.ts`) uses
+   *  the identical schema for the same reason: this is the one other write
+   *  route persisting caller-supplied clone-relative paths. */
+  context: z.array(ContextRefBody).optional(),
+  /** "What changed" note for the snapshot this edit creates. Ignored when
+   *  neither the body nor the attachment set changed, because no snapshot is
+   *  written then. */
   version_label: z.string().max(120).optional(),
 });
 

@@ -52,6 +52,9 @@
     "blockers": " · {count} blockers"
   },
   "smartDiff": {
+    "summaryLabel": "What this does:",
+    "summaryPill": "summary",
+    "summarizedNote": "{n} of {m} files summarized",
     "largeTitle": "This PR is large ({lines} changed lines)",
     "largeBody": "Consider splitting it into smaller, focused PRs for easier review:",
     "filesCount": "{count, plural, one {# file} other {# files}}",

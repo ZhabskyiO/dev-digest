@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { SkillSource, SkillType } from './knowledge.js';
+import { ProjectContextRef } from './project-context.js';
 
 /**
  * Skills Studio: versioned skill bodies, import preview/request, and usage
@@ -8,15 +9,24 @@ import { SkillSource, SkillType } from './knowledge.js';
  * redefining them.
  */
 
-/** One row from `skill_versions` — an immutable body snapshot at a version.
- *  `label` is the author's optional "what changed" note, absent on snapshots
- *  written before labels existed. */
+/** One row from `skill_versions` — an immutable body + attachment-set
+ *  snapshot at a version. `label` is the author's optional "what changed"
+ *  note, absent on snapshots written before labels existed.
+ *
+ *  `attachments` is the ordered project-context document list attached to
+ *  the skill at snapshot time (AC-39). Nullish, NOT `.default([])`: every
+ *  pre-existing `skill_versions` row has no `attachments` column value at
+ *  all (the DB column is nullable for exactly this reason), and
+ *  `undefined` must be a distinct, successfully-parsed value for those rows
+ *  rather than silently coerced to `[]` — same backward-compatibility
+ *  reasoning as `RunTrace.project_context` in `contracts/trace.ts`. */
 export const SkillVersion = z.object({
   skill_id: z.string(),
   version: z.number().int(),
   body: z.string(),
   label: z.string().nullable(),
   created_at: z.string(),
+  attachments: z.array(ProjectContextRef).nullish(),
 });
 export type SkillVersion = z.infer<typeof SkillVersion>;
 

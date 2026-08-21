@@ -1,4 +1,11 @@
-import type { Agent, AgentVersion, CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import type {
+  Agent,
+  AgentVersion,
+  CiFailOn,
+  Provider,
+  ProjectContextRef,
+  ReviewStrategy,
+} from '@devdigest/shared';
 import { AgentVersionConfig } from '@devdigest/shared';
 import type { AgentRow, AgentVersionRow } from './repository.js';
 
@@ -52,26 +59,42 @@ export interface ConfigChangePatch {
   strategy?: ReviewStrategy;
   ciFailOn?: CiFailOn;
   repoIntel?: boolean;
+  /** Ordered project-context attachment refs (AC-19). Order-sensitive: a
+   *  reorder with the same members still counts as a change. */
+  context?: ProjectContextRef[];
+}
+
+/**
+ * The pre-patch state `isConfigChange` compares against. `context` is not a
+ * column on `agents` — it lives on the *last* `agent_versions` snapshot — so
+ * callers resolve it themselves (see `AgentsRepository.lastContext`) and pass
+ * it in here rather than this function reaching for it.
+ */
+export type ConfigChangeExisting = Pick<
+  AgentRow,
+  | 'name'
+  | 'description'
+  | 'provider'
+  | 'model'
+  | 'systemPrompt'
+  | 'strategy'
+  | 'ciFailOn'
+  | 'repoIntel'
+> & {
+  context?: ProjectContextRef[];
+};
+
+/** Order-sensitive equality for two ordered attachment-ref lists. */
+function sameOrderedRefs(a: ProjectContextRef[], b: ProjectContextRef[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((ref, i) => ref.repo_id === b[i]?.repo_id && ref.path === b[i]?.path);
 }
 
 /**
  * True when a patch changes config (vs. just toggling `enabled`) relative to the
  * existing row — a config change bumps the version and snapshots agent_versions.
  */
-export function isConfigChange(
-  existing: Pick<
-    AgentRow,
-    | 'name'
-    | 'description'
-    | 'provider'
-    | 'model'
-    | 'systemPrompt'
-    | 'strategy'
-    | 'ciFailOn'
-    | 'repoIntel'
-  >,
-  patch: ConfigChangePatch,
-): boolean {
+export function isConfigChange(existing: ConfigChangeExisting, patch: ConfigChangePatch): boolean {
   return (
     (patch.name !== undefined && patch.name !== existing.name) ||
     (patch.description !== undefined && patch.description !== existing.description) ||
@@ -81,6 +104,7 @@ export function isConfigChange(
     (patch.strategy !== undefined && patch.strategy !== existing.strategy) ||
     (patch.ciFailOn !== undefined && patch.ciFailOn !== existing.ciFailOn) ||
     (patch.repoIntel !== undefined && patch.repoIntel !== existing.repoIntel) ||
+    (patch.context !== undefined && !sameOrderedRefs(existing.context ?? [], patch.context)) ||
     patch.outputSchema !== undefined
   );
 }

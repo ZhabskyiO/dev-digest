@@ -57,4 +57,4 @@ Covers prompt assembly, the grounding gate, `toReview` selection, and a full `ru
 ## Docs
 
 Pipeline diagram + public API: [README.md](README.md) · [../TESTING.md](../TESTING.md)
-[insights.md](insights.md) · [docs/](docs/) · [specs/](specs/).
+[insights/INSIGHTS.md](insights/INSIGHTS.md) · [insights/gotchas.md](insights/gotchas.md) · [docs/](docs/) · [specs/](specs/).

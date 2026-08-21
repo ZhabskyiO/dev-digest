@@ -8,10 +8,13 @@ import { useQuery } from "@tanstack/react-query";
 import type { BlastRadiusResult } from "@devdigest/shared";
 import { api } from "@/lib/api";
 
-export function useBlastRadius(prId: string | null | undefined) {
+export function useBlastRadius(
+  prId: string | null | undefined,
+  opts?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ["pr-blast", prId],
     queryFn: () => api.get<BlastRadiusResult>(`/pulls/${prId}/blast`),
-    enabled: prId != null,
+    enabled: prId != null && (opts?.enabled ?? true),
   });
 }

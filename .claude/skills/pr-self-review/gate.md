@@ -5,23 +5,30 @@ The logic that turns findings into a PASS/BLOCKED verdict. Read with [SKILL.md](
 
 ## 1. Deterministic gates (run before any LLM pass)
 
-Cheapest, highest-signal, no tokens. Run **per package that has changed files**, in this
-order; the first non-zero exit → **BLOCKED**, skip the rest.
+Cheapest, highest-signal, no tokens. **Every package here uses pnpm** — never `npm`, which would
+resolve against the wrong lockfile. Run in this order; the first non-zero exit → **BLOCKED**,
+skip the rest.
 
-| Order | Gate | Command (per package) | Condition |
-|-------|------|------------------------|-----------|
-| 1 | Typecheck | `npm run typecheck` | always (every package defines it) |
-| 2 | Lint | `npm run lint` | **only if** the package defines a `lint` script |
-| 3 | Arch graph | `npm run depcruise` (in `server/`) | **only if** `server/.dependency-cruiser.cjs` exists |
-| 4 | Tests | `npm run test` | always |
+| Order | Gate | Command | Condition |
+|-------|------|---------|-----------|
+| 1 | Typecheck + unit tests | `./scripts/verify.sh <changed packages>` | always |
+| 2 | Integration tests | `./scripts/verify.sh --it server` | **only if** the diff touches DB-backed `server/` code (needs Docker) |
+| 3 | Lint | `cd <pkg> && pnpm lint` | **only if** that package defines a `lint` script |
+| 4 | Arch graph | `cd server && pnpm depcruise` | **only if** `server/.dependency-cruiser.cjs` exists |
+
+`verify.sh` takes package names (`server client reviewer-core mcp-server e2e`) and runs typecheck
+plus the unit suite for each, condensed to one line per check — ~20s for all five. It deliberately
+excludes `*.it.test.ts`; that is what step 2 is for.
 
 Notes grounded in this repo (verify before relying on them — scripts change):
-- No package currently defines a `lint` script → step 2 is skipped today. If one is added, it
+- No package currently defines a `lint` script → step 3 is skipped today. If one is added, it
   runs automatically.
-- `depcruise` is **not yet wired** (`server/.dependency-cruiser.cjs` absent). The
-  `onion-architecture` skill ships the config + scripts; once added, this gate enforces the
-  inward-only dependency rule for free and a new `error`-level edge becomes a hard fail.
+- `depcruise` is **not yet wired** (`server/.dependency-cruiser.cjs` absent, and no `depcruise`
+  script — see `server/insights/gotchas.md`, 2026-08-07). The `onion-architecture` skill ships the config;
+  once added, this gate enforces the inward-only dependency rule for free and a new `error`-level
+  edge becomes a hard fail. Until then, treat "run depcruise" as a no-op and say so.
 - `reviewer-core` test script passes with no tests (`--passWithNoTests`); that is not a failure.
+- Browser e2e (`./scripts/e2e.sh`) is **not** part of this gate — it spins up a whole stack.
 
 ## 2. Severity scale (normalize every skill onto this)
 

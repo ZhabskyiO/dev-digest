@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { ProjectContextTraceItem } from './project-context.js';
+
 /**
  * Run trace. The ENTIRE trace of one run is persisted as a SINGLE
  * jsonb document in `run_traces` (not per-row). Live events stream via SSE
@@ -93,6 +95,13 @@ export const RunTrace = z.object({
   memory_pulled: z.array(MemoryPulled),
   specs_read: z.array(z.string()),
   log: z.array(RunLogLine),
+  /**
+   * Per-document project-context outcome detail (AC-29). Nullish, not just
+   * optional-with-default: traces persisted before this feature have no such
+   * key at all, and `getRunTrace` casts the stored jsonb rather than
+   * re-parsing it — so `undefined` is a real runtime value here (AC-33).
+   */
+  project_context: z.array(ProjectContextTraceItem).nullish(),
 });
 export type RunTrace = z.infer<typeof RunTrace>;
 

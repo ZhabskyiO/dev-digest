@@ -11,7 +11,7 @@ import { isDisallowedIp, looksLikeHtml } from '../../_shared/net-guards.js';
  * Security is the entire point of this file: this is a server-side fetch of
  * an attacker-controlled address (any URL the PR author's body happens to
  * contain). Mandatory reuse, per the Intent Layer plan (R-3) and the recorded
- * insight in `server/insights.md` (2026-08-04, the skills URL-import route):
+ * insight in `server/insights/INSIGHTS.md` (2026-08-04, the skills URL-import route):
  * the SSRF guard below mirrors `SkillsService.fetchUrlBody`
  * (`modules/skills/service.ts:239`) exactly — http(s) only, DNS-resolve the
  * hostname BEFORE fetching and reject loopback/private/link-local (including

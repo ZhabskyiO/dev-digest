@@ -5,7 +5,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@devdigest/ui";
-import type { RunTrace, FindingRecord } from "@devdigest/shared";
+import type { RunTrace, FindingRecord, ProjectContextOutcome } from "@devdigest/shared";
 import { PROMPT_COLORS } from "../../constants";
 import { formatSeconds, formatTokens } from "../../helpers";
 import { formatCostUsd } from "@/lib/format";
@@ -16,6 +16,23 @@ import { ToolCallRow } from "../ToolCallRow";
 import { PromptBlock } from "../PromptBlock";
 import { FindingsSection } from "../FindingsSection";
 import { Row, Stat } from "../atoms";
+
+/** Badge tone per project-context run-time outcome (AC-29, AC-30). */
+const PROJECT_CONTEXT_OUTCOME_TONE: Record<ProjectContextOutcome, { color: string; bg: string }> = {
+  injected: { color: "var(--ok)", bg: "var(--ok-bg)" },
+  missing: { color: "var(--text-muted)", bg: "var(--bg-hover)" },
+  dropped_over_budget: { color: "var(--warn)", bg: "var(--warn-bg)" },
+  truncated: { color: "var(--warn)", bg: "var(--warn-bg)" },
+  wrong_repo: { color: "var(--crit)", bg: "var(--crit-bg)" },
+  changed_unconfirmed: { color: "var(--crit)", bg: "var(--crit-bg)" },
+};
+
+/** Fallback tone for a persisted `outcome` string outside the known union —
+ *  an older trace, or one written by a future server (AC-33). Looking this
+ *  up must never throw: an unrecognised value degrades to this neutral tone
+ *  (the badge's label falls back to next-intl's own missing-message
+ *  handling, which never throws either) rather than blanking the drawer. */
+const UNKNOWN_OUTCOME_TONE = PROJECT_CONTEXT_OUTCOME_TONE.missing;
 
 export function TraceBody({ trace, findings }: { trace: RunTrace; findings: FindingRecord[] }) {
   const t = useTranslations("runs");
@@ -50,6 +67,38 @@ export function TraceBody({ trace, findings }: { trace: RunTrace; findings: Find
               )}
             </div>
           </Row>
+          {/* `project_context` is nullish, not `[]`, on every trace written before this
+              feature — omit the row entirely rather than render it empty (AC-33). */}
+          {trace.project_context != null && (
+            <Row label={t("trace.config.projectContext")}>
+              <div style={s.specsWrap}>
+                {trace.project_context.length === 0 ? (
+                  <span style={s.specsNone}>{t("trace.config.none")}</span>
+                ) : (
+                  trace.project_context.map((doc) => {
+                    // `doc` comes from persisted, client-unvalidated trace JSON — an
+                    // `outcome` outside the known union (an older trace, or one written
+                    // by a future server) must degrade to a neutral tone rather than
+                    // throw on `undefined.color` and blank the whole drawer (AC-33).
+                    const tone =
+                      (PROJECT_CONTEXT_OUTCOME_TONE as Partial<Record<string, { color: string; bg: string }>>)[
+                        doc.outcome
+                      ] ?? UNKNOWN_OUTCOME_TONE;
+                    return (
+                      <span key={doc.path} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span className="mono" style={s.spec}>
+                          {doc.path}
+                        </span>
+                        <Badge color={tone.color} bg={tone.bg} dot>
+                          {t(`trace.projectContext.outcome.${doc.outcome}`)}
+                        </Badge>
+                      </span>
+                    );
+                  })
+                )}
+              </div>
+            </Row>
+          )}
         </div>
       </TraceSection>
 

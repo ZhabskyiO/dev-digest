@@ -1,20 +1,13 @@
 import type { CSSProperties } from "react";
 
 export const s = {
-  /* Intent | Blast radius. `auto-fit` + a floor collapses the pair to one
-     column on a narrow viewport without a media query — inline style objects
-     cannot express one, and the two cards are equal-weight, so neither should
-     win the space when only one fits.
-
-     The floor is 560px, not 380: Blast Radius carries a five-stat row (new ·
-     touched · callers · endpoints · cron/jobs) that has to read as one line,
-     and below ~560px of card it wraps into an unreadable block. Paired with
-     the page's 1320px cap that gives each card ~640px. */
-  cardGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(560px, 1fr))",
-    gap: 24,
-    alignItems: "start",
+  /* The brief occupies the full content width. The Intent | Blast pair that
+     used to live here is now a grid INSIDE `BriefCard` (`s.pairGrid` there) —
+     while the brief and the blast card were siblings in a two-column grid the
+     brief only ever got half the width, which squeezed the verdict block and
+     stacked Intent inside that half. This rule now carries nothing but the
+     gap to the Description section below. */
+  briefRow: {
     marginBottom: 28,
   } satisfies CSSProperties,
   descriptionBox: {

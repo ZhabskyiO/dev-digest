@@ -33,6 +33,10 @@ import { type DepGraph, DepCruiseGraph } from '../adapters/depgraph/index.js';
 import { type Tokenizer, TiktokenTokenizer } from '../adapters/tokenizer/index.js';
 import { JiraTicketProvider } from '../adapters/tickets/jira.js';
 import { LinearTicketProvider } from '../adapters/tickets/linear.js';
+import { ProjectContextService } from '../modules/project-context/service.js';
+import { ProjectContextRepository } from '../modules/project-context/repository.js';
+import { OnboardingService } from '../modules/onboarding/service.js';
+import { BlastService } from '../modules/blast/service.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -57,6 +61,35 @@ export interface ContainerOverrides {
   tokenizer?: Tokenizer;
   /** Intent Layer tier (e), gated by INTENT_EXTERNAL_EVIDENCE — tests inject a MockTicketProvider. */
   tickets?: TicketProvider;
+  /** T11 (project-context routes) — tests inject a fake ProjectContextService so
+   *  route-smoke tests stay hermetic (no DB, no clone on disk). */
+  projectContext?: ProjectContextService;
+  /**
+   * The following three shared repositories (`agentsRepo`, `skillsRepo`,
+   * `reviewRepo`) previously had no override slot — every consumer got the
+   * real, DB-backed instance unconditionally. T11 adds these three so its
+   * route-smoke tests can assert cross-workspace rejection (agent/skill/repo
+   * ownership checks) without a real Postgres. Existing callers are
+   * unaffected: omitting the override keeps today's real-DB construction.
+   */
+  agentsRepo?: AgentsRepository;
+  skillsRepo?: SkillsRepository;
+  reviewRepo?: ReviewRepository;
+  /** `modules/reviews/prompt-context.ts::resolveProjectContext` reads
+   *  `projectContextRepo.getAttachment` directly (AC-44's attach-time-hash
+   *  comparison) — tests of that builder inject a fake here instead of a
+   *  real Postgres. */
+  projectContextRepo?: ProjectContextRepository;
+  /** T12 (onboarding routes) — tests inject a fake `OnboardingService` so
+   *  route-smoke tests stay hermetic (no DB, no clone on disk, no model
+   *  call), mirroring `ContainerOverrides.projectContext`. */
+  onboarding?: OnboardingService;
+  /** T12 (PR Brief `BriefService`) — `getBrief` calls `container.blast`
+   *  exactly once per read (blast + status + reason come back together on
+   *  `BlastRadiusResult`); tests inject a fake `BlastService` here so a brief
+   *  read-path test stays hermetic (no repo-intel index, no DB read for the
+   *  blast map), mirroring `ContainerOverrides.onboarding`. */
+  blast?: BlastService;
 }
 
 export class Container {
@@ -84,6 +117,10 @@ export class Container {
   private _tokenizer?: Tokenizer;
   private _priceBook?: PriceBook;
   private _tickets?: TicketProvider;
+  private _projectContext?: ProjectContextService;
+  private _projectContextRepo?: ProjectContextRepository;
+  private _onboarding?: OnboardingService;
+  private _blast?: BlastService;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -101,15 +138,69 @@ export class Container {
   }
 
   get agentsRepo(): AgentsRepository {
+    if (this.overrides.agentsRepo) return this.overrides.agentsRepo;
     return (this._agentsRepo ??= new AgentsRepository(this.db));
   }
 
   get skillsRepo(): SkillsRepository {
+    if (this.overrides.skillsRepo) return this.overrides.skillsRepo;
     return (this._skillsRepo ??= new SkillsRepository(this.db));
   }
 
   get reviewRepo(): ReviewRepository {
+    if (this.overrides.reviewRepo) return this.overrides.reviewRepo;
     return (this._reviewRepo ??= new ReviewRepository(this.db));
+  }
+
+  /**
+   * Project-context application service (T11 wiring for T9's
+   * `ProjectContextService`). Tests inject a fake via
+   * `ContainerOverrides.projectContext`.
+   */
+  get projectContext(): ProjectContextService {
+    if (this.overrides.projectContext) return this.overrides.projectContext;
+    return (this._projectContext ??= new ProjectContextService(this));
+  }
+
+  /**
+   * Direct repository access for project-context reads that have no
+   * corresponding `ProjectContextService` method — `GET /skills/:id/context`
+   * used to reach this directly from routes.ts, but that has since moved to
+   * `ProjectContextService.skillContext(skillId)` (the onion-layering fix
+   * for that route). The remaining, legitimate caller is
+   * `modules/reviews/prompt-context.ts::resolveProjectContext`, which reads
+   * `getAttachment` for AC-44's attach-time-hash comparison — a case where
+   * going through `container.projectContext` (the service) would be a
+   * cross-module reach into a sibling's write-oriented API for a single
+   * read, so this shared-repository getter (mirroring `agentsRepo`/
+   * `skillsRepo`/`reviewRepo` above) stays.
+   */
+  get projectContextRepo(): ProjectContextRepository {
+    if (this.overrides.projectContextRepo) return this.overrides.projectContextRepo;
+    return (this._projectContextRepo ??= new ProjectContextRepository(this.db));
+  }
+
+  /**
+   * Onboarding-tour application service (T12 wiring for T10's
+   * `OnboardingService`). Tests inject a fake via
+   * `ContainerOverrides.onboarding`.
+   */
+  get onboarding(): OnboardingService {
+    if (this.overrides.onboarding) return this.overrides.onboarding;
+    return (this._onboarding ??= new OnboardingService(this));
+  }
+
+  /**
+   * PR-impact map — reads only, no model call anywhere in its path (see
+   * `BlastService`'s own doc comment). LAZY, like every other adapter/service
+   * getter here: constructing it eagerly in the constructor would run at app
+   * build time and break any test that builds a `Container` from a *partial*
+   * `ContainerOverrides` object without a real DB (server/insights/gotchas.md,
+   * 2026-08-20). Tests inject a fake via `ContainerOverrides.blast`.
+   */
+  get blast(): BlastService {
+    if (this.overrides.blast) return this.overrides.blast;
+    return (this._blast ??= new BlastService(this));
   }
 
   get codeIndex(): CodeIndex {

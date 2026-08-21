@@ -1,24 +1,108 @@
 {
-  "title": "Project Context",
-  "chunks": "{count} chunks",
-  "reindex": "Re-index",
-  "indexing": "Indexing…",
-  "resync": "Resync",
-  "resyncing": "Resyncing…",
-  "indexStatus": "Index status: {status}",
-  "loadError": "Couldn’t load specs",
-  "kb": "{kb}kb",
-  "empty": {
-    "title": "No spec files yet",
-    "body": "Drop your PRDs, tech specs, and acceptance criteria under .devdigest/specs/. Every agent and the PR brief read them as grounding context."
+  "page": {
+    "title": "Project Context",
+    "crumb": "Project Context",
+    "subtitle": "Markdown discovered under this repository's clone — browse, preview, and rescan.",
+    "rescan": "Rescan",
+    "rescanning": "Rescanning…",
+    "loadError": "Couldn't load project context.",
+    "syncFailed": "Couldn't fetch the latest from origin — showing the clone as it was. ({reason})",
+    "scannedAt": "Scanned {time}",
+    "atRevision": "at {sha}",
+    "selectPrompt": {
+      "title": "Select a document",
+      "body": "Pick a document on the left to preview its content."
+    },
+    "empty": {
+      "notCloned": {
+        "title": "Repository not cloned yet",
+        "body": "Clone this repository to discover its specs, docs, and insights."
+      },
+      "noDocuments": {
+        "title": "No project context found",
+        "body": "DevDigest reads Markdown from {roots} folders at any depth in this repository, plus any file named {filenames}. Add one of these to {repo} and rescan."
+      }
+    },
+    "size": {
+      "bytes": "{count} B",
+      "kilobytes": "{count} KB"
+    },
+    "omitted": {
+      "byCount": "{count} document(s) omitted — over the discovery limit.",
+      "bySize": "{count} document(s) omitted — over the per-file size limit."
+    }
   },
-  "mode": {
-    "preview": "preview",
-    "edit": "edit"
+  "filter": {
+    "placeholder": "Filter documents…"
   },
-  "editor": {
-    "loadError": "Couldn’t load spec",
-    "save": "Save",
-    "saving": "Saving…"
+  "docType": {
+    "specs": "specs",
+    "docs": "docs",
+    "insights": "insights"
+  },
+  "tokens": {
+    "approx": "≈ {count} tokens",
+    "rowLabel": "{path} · ≈ {count} tokens"
+  },
+  "budget": {
+    "approx": "≈ {total} / {budget} tokens",
+    "overBudget": "Over budget",
+    "willDrop": "Over budget — these documents will not be injected:",
+    "advisory": "Advisory only — attaching, saving, and running are still allowed."
+  },
+  "attachments": {
+    "attachedCount": "{count} attached",
+    "attachedOfTotal": "{attached} of {total} attached",
+    "orderHint": "Order matters — earlier documents appear earlier in the assembled ## Project context block. Toggle to attach.",
+    "preview": "Preview",
+    "dragHandle": "Reorder {name} — press Space to pick up, arrow keys to move",
+    "usedByAgents": "Used by {count} agents",
+    "serializesAs": "Serializes as",
+    "empty": "No documents match this filter."
+  },
+  "drift": {
+    "badge": "Changed",
+    "viewChange": "View change",
+    "driftedForLabel": "Changed for:",
+    "detail": {
+      "title": "Drift detail",
+      "previous": "Attached version",
+      "current": "Current version",
+      "previousUnavailable": "The earlier version is no longer available in this clone. Showing the current content only.",
+      "truncatedNote": "This document is large — the comparison below is truncated and may not show every change.",
+      "confirm": "Confirm change",
+      "confirming": "Confirming…",
+      "close": "Close"
+    }
+  },
+  "preview": {
+    "loadError": "Couldn't load this document.",
+    "truncatedNote": "Preview truncated to the configured cap.",
+    "empty": {
+      "title": "Select a document",
+      "body": "Pick a document to preview its content."
+    },
+    "drawerTitle": "Document preview"
+  },
+  "agentTab": {
+    "title": "Project context",
+    "footerNote": "Injected as an untrusted block (## Project context) into every run.",
+    "noRepos": "Select a repository at the top left to attach project context.",
+    "attachedTitle": "Attached documents",
+    "inheritedTitle": "Inherited from skills",
+    "inheritedFrom": "via skill {skill}",
+    "browseTitle": "Documents in {repo}"
+  },
+  "skillSection": {
+    "title": "Project context to use",
+    "inheritHint": "Any agent using this skill inherits these documents.",
+    "repoHint": "Attaching from {repo}, the repository selected at the top left. Skills are shared across repositories — a document is skipped on any run against a repository other than the one it was attached from.",
+    "attachedTitle": "Attached documents",
+    "hiddenAttachments": "{count} more attached document(s) not shown here — from another repository, or no longer found by the last scan. They are kept on save.",
+    "noRepos": "Select a repository at the top left to attach project context.",
+    "browseTitle": "Documents in {repo}",
+    "save": "Save context",
+    "saving": "Saving…",
+    "savedToast": "Project context saved."
   }
 }

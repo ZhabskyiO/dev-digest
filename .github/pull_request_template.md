@@ -144,7 +144,7 @@ integration tests self-skip and prove nothing. -->
 ### Learnings
 
 - [ ] Anything non-obvious I hit is captured in the relevant module's
-      `insights.md` (see the insights protocol in `CLAUDE.md`) — so the next
+      the module's `insights/` folder (see the insights protocol in `CLAUDE.md`) — so the next
       person doesn't rediscover it
 
 ## Notes for the reviewer

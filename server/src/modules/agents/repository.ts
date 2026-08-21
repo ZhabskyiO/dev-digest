@@ -1,7 +1,8 @@
 import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client.js';
 import * as t from '../../db/schema.js';
-import type { CiFailOn, Provider, ReviewStrategy } from '@devdigest/shared';
+import type { CiFailOn, Provider, ProjectContextRef, ReviewStrategy } from '@devdigest/shared';
+import { AgentVersionConfig } from '@devdigest/shared';
 import { DEFAULT_AGENT_DESCRIPTION, INITIAL_AGENT_VERSION } from './constants.js';
 import { isConfigChange } from './helpers.js';
 
@@ -145,8 +146,23 @@ export class AgentsRepository {
     return row;
   }
 
-  private async snapshotVersion(row: AgentRow, version: number): Promise<void> {
+  /**
+   * Snapshot the agent's current config into `agent_versions`. `context` is
+   * only ever supplied explicitly by `bumpVersionWithContext` (the
+   * attachment-set change path); every other caller (insert / update) omits
+   * it, and this carries the LAST snapshot's ordered attachment list forward
+   * unchanged — so an unrelated config edit (e.g. renaming the agent) does
+   * not silently drop a previously recorded attachment list, and a
+   * brand-new agent with no prior snapshot gets `context: []` (`lastContext`
+   * on a missing agent returns `[]`).
+   */
+  private async snapshotVersion(
+    row: AgentRow,
+    version: number,
+    context?: ProjectContextRef[],
+  ): Promise<void> {
     const skills = await this.skillIdsForAgent(row.id);
+    const resolvedContext = context ?? (await this.lastContext(row.id));
     await this.db
       .insert(t.agentVersions)
       .values({
@@ -161,9 +177,65 @@ export class AgentsRepository {
           ci_fail_on: row.ciFailOn,
           repo_intel: row.repoIntel,
           skills,
+          context: resolvedContext,
         },
       })
       .onConflictDoNothing();
+  }
+
+  /**
+   * The ordered attachment list recorded on the agent's most recent config
+   * snapshot, or `[]` if it has none yet (brand-new agent, or a legacy
+   * snapshot whose `config_json` predates `context`, which
+   * `AgentVersionConfig.parse` defaults to `[]` via `.default([])`).
+   */
+  private async lastContext(agentId: string): Promise<ProjectContextRef[]> {
+    const [latest] = await this.db
+      .select()
+      .from(t.agentVersions)
+      .where(eq(t.agentVersions.agentId, agentId))
+      .orderBy(desc(t.agentVersions.version))
+      .limit(1);
+    if (!latest) return [];
+    const parsed = AgentVersionConfig.safeParse(latest.configJson);
+    return parsed.success ? parsed.data.context : [];
+  }
+
+  /**
+   * Record a new ordered project-context attachment list for an agent and
+   * bump its version (AC-19) — the version-history counterpart to how the
+   * ordered skill-id list is already snapshotted. Called by the
+   * project-context service (`setAgentContext`) via `container.agentsRepo`
+   * once it has persisted the attachment rows itself; this method takes the
+   * resulting ordered refs as an argument and never queries the attachments
+   * table (owned by that module, not this one).
+   *
+   * No-ops (returns the unchanged row, no new version) when the ordered
+   * list is identical to what's already snapshotted — order-sensitive via
+   * `isConfigChange`'s `context` comparison — so a redundant call (e.g. a
+   * retried request) doesn't inflate the version history.
+   */
+  async bumpVersionWithContext(
+    agentId: string,
+    orderedRefs: ProjectContextRef[],
+  ): Promise<AgentRow | undefined> {
+    const [existing] = await this.db.select().from(t.agents).where(eq(t.agents.id, agentId));
+    if (!existing) return undefined;
+
+    const currentContext = await this.lastContext(agentId);
+    if (!isConfigChange({ ...existing, context: currentContext }, { context: orderedRefs })) {
+      return existing;
+    }
+
+    const nextVersion = existing.version + 1;
+    const [row] = await this.db
+      .update(t.agents)
+      .set({ version: nextVersion })
+      .where(eq(t.agents.id, agentId))
+      .returning();
+
+    if (row) await this.snapshotVersion(row, nextVersion, orderedRefs);
+    return row;
   }
 
   // ---- agent_versions (immutable config snapshots) ------------------------

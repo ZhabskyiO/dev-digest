@@ -8,12 +8,17 @@
  *  - contracts/brief      Intent, BlastRadius, Risks, PrHistory, SmartDiff, PrBrief
  *  - contracts/blast      BlastRadiusResult — the index-backed PR impact map
  *                         (GET /pulls/:id/blast); distinct from brief's BlastRadius
+ *  - contracts/pr-brief   PrBriefDetail/PrBriefRecord, ReviewFocusEntry,
+ *                         BriefVerdictSummary — GET/POST /pulls/:id/brief
  *  - contracts/knowledge  Conformance, Onboarding, EvalRun/EvalCase, MemoryItem,
  *                         Skill/CommunitySkill, ConventionCandidate, Agent
  *  - contracts/conventions ConventionCandidateDetail, ConventionExtraction,
  *                         extract/update/create-skill DTOs
  *  - contracts/trace      RunTrace, RunEvent, RunLogLine (single-document trace)
  *  - contracts/platform   Settings, ConnTestResult, Repo, PrMeta/PrDetail, SpecFile, …
+ *  - contracts/project-context  ProjectContextDocument/Preview/ListResponse,
+ *                         ProjectContextRef/Attachment/Drift, EffectiveProjectContext,
+ *                         ProjectContextOutcome/TraceItem
  *  - adapters             adapter interfaces + ModelInfo
  *
  * Feature agents (A1–A6) and F2 import everything from here. The barrel is
@@ -26,12 +31,14 @@ export * from './contracts/local-review.js';
 export * from './contracts/brief.js';
 export * from './contracts/blast.js';
 export * from './contracts/intent.js';
+export * from './contracts/pr-brief.js';
 export * from './contracts/knowledge.js';
 export * from './contracts/conventions.js';
 export * from './contracts/skills-studio.js';
 export * from './contracts/agent-stats.js';
 export * from './contracts/trace.js';
 export * from './contracts/platform.js';
+export * from './contracts/project-context.js';
 export * from './contracts/why.js';
 export * from './contracts/eval-ci.js';
 export * from './contracts/observability.js';

@@ -9,7 +9,7 @@ import { Button, Dropdown, ErrorState, Skeleton, Icon, Badge } from "@devdigest/
 import type { Agent } from "@devdigest/shared";
 import { AppShell } from "../../../components/app-shell";
 import { AgentCard } from "../_components/AgentCard";
-import { AgentEditor } from "./_components/AgentEditor";
+import { AgentEditor, DEFAULT_TAB, TAB_KEYS } from "./_components/AgentEditor";
 import { useAgents, useAgent, useAgentStats, useUpdateAgent } from "../../../lib/hooks/agents";
 import { useAgentSkills } from "../../../lib/hooks/skills";
 import { ApiError } from "../../../lib/api";
@@ -42,8 +42,6 @@ function AgentListItem({
   );
 }
 
-const VALID_TABS = ["config", "skills", "stats"];
-
 export default function AgentEditorPage() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
@@ -54,7 +52,8 @@ export default function AgentEditorPage() {
   const { data: agent, isLoading, isError, error, refetch } = useAgent(id);
   const update = useUpdateAgent();
 
-  const tab = VALID_TABS.includes(search.get("tab") ?? "") ? search.get("tab")! : "config";
+  const requestedTab = search.get("tab") ?? "";
+  const tab = TAB_KEYS.includes(requestedTab) ? requestedTab : DEFAULT_TAB;
   const setTab = (t: string) => {
     const sp = new URLSearchParams(search.toString());
     sp.set("tab", t);

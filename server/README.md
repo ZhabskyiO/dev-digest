@@ -77,6 +77,9 @@ flowchart TB
   subgraph Intel["Repo intelligence"]
     repoIntel["repo-intel<br/>/repos/:id/index-state · /resync"]
   end
+  subgraph Onboarding["Onboarding tour"]
+    onboarding["onboarding<br/>/repos/:id/onboarding · /repos/:id/onboarding/generate"]
+  end
   subgraph Platform["Platform"]
     settings["settings<br/>/settings · /providers"]
     workspace["workspace<br/>/workspace"]
@@ -100,6 +103,15 @@ flowchart TB
 | `DEVDIGEST_CLONE_DIR` | `./clones` | imported-repo checkouts (git-ignored) |
 | `LOG_LEVEL` | `info` (`silent` in test) | pino level |
 | `NODE_ENV` | `development` | `test` → silent logs + global rate-limit disabled |
+| `ONBOARDING_PROMPT_TOKEN_BUDGET` | `28000` | token budget for the onboarding-tour generation prompt (repo skeleton + excerpts + endpoint facts) |
+| `ONBOARDING_EXCERPT_CHAR_CAP` / `ONBOARDING_MAX_EXCERPT_FILES` | `4000` / `10` | per-file char cap on a key-file excerpt / max excerpts injected into the prompt |
+| `ONBOARDING_MAX_ENDPOINT_FACTS` | `200` | max `repo-intel` endpoint facts (`RepoIntel.getEndpointFacts`) included in the prompt |
+| `ONBOARDING_MIN_SECTION_ITEMS` | `1` | min grounded items a section needs after dropping ungrounded ones; below this it's stored empty with an `insufficient_grounding` reason instead of backfilled |
+| `ONBOARDING_MAX_CRITICAL_PATHS` / `ONBOARDING_MAX_COMMANDS` / `ONBOARDING_MAX_READING_PATH` / `ONBOARDING_MAX_FIRST_TASKS` / `ONBOARDING_MAX_FRONTEND_ROUTES` / `ONBOARDING_MAX_API_ENDPOINTS` | `8` / `12` / `7` / `5` / `12` / `24` | per-section output caps on the generated tour, applied by `groundTour` (`onboarding/helpers.ts`) **after** grounding drops ungrounded items — a section under its cap may just have fewer grounded items, not an undertuned cap; a section left below `ONBOARDING_MIN_SECTION_ITEMS` is stored empty with `insufficient_grounding` instead of backfilled |
+| `ONBOARDING_GENERATION_TIMEOUT_MS` | `45000` | timeout for **one** provider attempt of the structured generation call, not the whole call — `maxRetries: 1` (service.ts) permits two sequential attempts, so raising this risks `2×` the value exceeding `JobRunner`'s 120s job timeout and reintroducing a timeout-then-retry loop that spends real money; never raise above half the job timeout |
+| `ONBOARDING_LANGUAGE` | `English` | language the generated onboarding tour is written in |
+
+<!-- updated from: server/src/platform/config.ts:78-119, server/.env.example:54-88, server/src/modules/onboarding/routes.ts -->
 
 Secrets (API keys, `GITHUB_TOKEN`) are **not** part of `AppConfig` — they go
 through `SecretsProvider` (`~/.devdigest/secrets.json`, mode `0600`, with

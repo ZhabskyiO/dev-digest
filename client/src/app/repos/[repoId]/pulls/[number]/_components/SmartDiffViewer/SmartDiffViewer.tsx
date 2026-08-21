@@ -32,6 +32,11 @@ interface SmartDiffViewerProps {
   commenting?: DiffCommentApi;
   /** Clicking a line's severity badge leaves the diff for the finding in full. */
   onSelectFinding?: (finding: LineFinding) => void;
+  /** A Brief review-focus entry's file:line target (AC-26) — expand the file
+   *  (if collapsed) and scroll to the line on arrival, reusing the same
+   *  open/scroll machinery as `jumpToFirstFinding` below. An unknown path
+   *  (not in this PR's smart-diff groups) is ignored — no crash, no scroll. */
+  target?: { path: string; line: number } | null;
 }
 
 /** Whether a file starts expanded. See AUTO_EXPAND_ROLES for why boilerplate never does. */
@@ -41,7 +46,7 @@ function opensByDefault(role: SmartDiffRole, file: SmartDiffFile): boolean {
   return file.additions + file.deletions <= AUTO_EXPAND_MAX_LINES;
 }
 
-export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: SmartDiffViewerProps) {
+export function SmartDiffViewer({ prId, files, commenting, onSelectFinding, target }: SmartDiffViewerProps) {
   const t = useTranslations("prReview");
   const tShell = useTranslations("shell");
   const { data: smart, isLoading } = useSmartDiff(prId);
@@ -51,6 +56,23 @@ export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: Sm
   // it jumps to. Keep the two in step (see the note on the lib helper).
   const { data: reviews } = usePrReviews(prId);
   const currentFindings = React.useMemo(() => findingsFromLatestRunPerAgent(reviews), [reviews]);
+
+  /* How many of the PR's changed files carry a model-authored summary, out of
+     the total — derived from the smart-diff response itself so it always
+     agrees with what the pill renders below. Computed here (not inline in the
+     JSX) because it spans every group, not just one. */
+  const { summarizedCount, totalFileCount } = React.useMemo(() => {
+    if (!smart) return { summarizedCount: 0, totalFileCount: 0 };
+    let summarized = 0;
+    let total = 0;
+    for (const group of smart.groups) {
+      for (const file of group.files) {
+        total += 1;
+        if (file.pseudocode_summary != null) summarized += 1;
+      }
+    }
+    return { summarizedCount: summarized, totalFileCount: total };
+  }, [smart]);
 
   const patchByPath = React.useMemo(
     () => new Map(files.map((f) => [f.path, f])),
@@ -81,6 +103,19 @@ export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: Sm
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     setScrollTo(null);
   }, [scrollTo]);
+
+  /* AC-26: a Review Focus entry's file:line target drives the same
+     expand-then-scroll path as clicking a findings badge. Guarded on `smart`
+     being loaded (the groups list is what "known path" means here) and on
+     the path actually existing in this PR's diff — a stale or unknown
+     `?file=` degrades to a no-op rather than a crash or empty scroll. */
+  React.useEffect(() => {
+    if (!target || !smart) return;
+    const known = smart.groups.some((group) => group.files.some((f) => f.path === target.path));
+    if (!known) return;
+    setOpenPaths((prev) => ({ ...prev, [target.path]: true }));
+    setScrollTo({ path: target.path, line: target.line });
+  }, [target, smart]);
 
   if (isLoading || !smart) {
     return (
@@ -129,6 +164,12 @@ export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: Sm
         </div>
       )}
 
+      {summarizedCount > 0 && summarizedCount < totalFileCount && (
+        <div style={s.summarizedNote}>
+          {t("smartDiff.summarizedNote", { n: summarizedCount, m: totalFileCount })}
+        </div>
+      )}
+
       {smart.groups.map((group) => {
         const role = ROLE_STYLE[group.role];
         return (
@@ -159,6 +200,7 @@ export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: Sm
                 <FileCard
                   key={file.path}
                   file={prFile}
+                  summary={file.pseudocode_summary}
                   {...(commenting ? { commenting } : {})}
                   annotations={annotations}
                   {...(onSelectFinding ? { onSelectFinding } : {})}
@@ -167,22 +209,33 @@ export function SmartDiffViewer({ prId, files, commenting, onSelectFinding }: Sm
                     setOpenPaths((prev) => ({ ...prev, [file.path]: !(prev?.[file.path] ?? false) }))
                   }
                   headerExtra={
-                    annotations.total > 0 ? (
-                      <button
-                        type="button"
-                        style={s.findingsBtn}
-                        title={t("smartDiff.jumpToFinding")}
-                        onClick={(e) => {
-                          // The card header is itself a click target — without
-                          // this the badge would toggle the card closed again.
-                          e.stopPropagation();
-                          jumpToFirstFinding(file);
-                        }}
-                      >
-                        <Icon.AlertOctagon size={12} aria-hidden="true" />
-                        {t("smartDiff.findingsBadge", { count: annotations.total })}
-                      </button>
-                    ) : undefined
+                    <>
+                      {file.pseudocode_summary != null && (
+                        // Non-interactive on purpose (AC-44): the ONLY signal
+                        // a collapsed file carries a summary, since the
+                        // "What this does:" row only renders while expanded.
+                        // No onClick, no tabIndex — a click here just toggles
+                        // the card behind it, same as clicking blank header
+                        // space.
+                        <span style={s.summaryPill}>{t("smartDiff.summaryPill")}</span>
+                      )}
+                      {annotations.total > 0 && (
+                        <button
+                          type="button"
+                          style={s.findingsBtn}
+                          title={t("smartDiff.jumpToFinding")}
+                          onClick={(e) => {
+                            // The card header is itself a click target — without
+                            // this the badge would toggle the card closed again.
+                            e.stopPropagation();
+                            jumpToFirstFinding(file);
+                          }}
+                        >
+                          <Icon.AlertOctagon size={12} aria-hidden="true" />
+                          {t("smartDiff.findingsBadge", { count: annotations.total })}
+                        </button>
+                      )}
+                    </>
                   }
                 />
               );

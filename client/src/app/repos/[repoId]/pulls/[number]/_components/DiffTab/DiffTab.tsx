@@ -21,9 +21,13 @@ interface DiffTabProps {
   canComment?: boolean;
   /** Clicking a severity badge leaves the diff for the finding in full. */
   onOpenFinding?: (findingId: string) => void;
+  /** A Brief review-focus entry's file:line target — expand and scroll to it
+   *  on arrival. Only Smart order (the default) consumes it; Original order
+   *  has no controlled-expand mechanism to hook the scroll into. */
+  targetFileLine?: { path: string; line: number } | null;
 }
 
-export function DiffTab({ prId, filesCount, files, canComment, onOpenFinding }: DiffTabProps) {
+export function DiffTab({ prId, filesCount, files, canComment, onOpenFinding, targetFileLine }: DiffTabProps) {
   const t = useTranslations("prReview");
   const { data: reviews } = usePrReviews(prId);
   const { data: runs } = usePrRuns(prId);
@@ -145,6 +149,7 @@ export function DiffTab({ prId, filesCount, files, canComment, onOpenFinding }: 
           files={files}
           commenting={commenting}
           {...(selectFinding ? { onSelectFinding: selectFinding } : {})}
+          {...(targetFileLine ? { target: targetFileLine } : {})}
         />
       ) : (
         <DiffViewer

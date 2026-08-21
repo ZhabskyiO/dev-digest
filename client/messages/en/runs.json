@@ -33,8 +33,19 @@
       "provider": "Provider",
       "memoryPulled": "Memory pulled",
       "specsRead": "Specs read",
+      "projectContext": "Project context",
       "items": "{count, plural, one {# item} other {# items}}",
       "none": "none"
+    },
+    "projectContext": {
+      "outcome": {
+        "injected": "injected",
+        "missing": "missing",
+        "dropped_over_budget": "dropped (over budget)",
+        "truncated": "truncated",
+        "wrong_repo": "wrong repo",
+        "changed_unconfirmed": "changed (unconfirmed)"
+      }
     },
     "stat": {
       "duration": "DURATION",
@@ -47,7 +58,7 @@
       "skills": "Skills (dynamic)",
       "memory": "Memory (dynamic)",
       "repoMap": "Repo skeleton — repo-intel (dynamic)",
-      "specs": "Project context (dynamic)",
+      "specs": "Project context — attached specs (untrusted)",
       "callers": "Callers of changed symbols — repo-intel (dynamic)",
       "user": "User / diff (dynamic)",
       "tokenCount": "~{count, plural, one {# token} other {# tokens}}",

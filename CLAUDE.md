@@ -47,9 +47,12 @@ Each dir has its own `CLAUDE.md`; read it before working in that dir.
 
 ## Insights protocol
 
-Before working in a module, read its `insights.md` and the root one — treat
-entries as high-confidence unless the code contradicts them. At the end of a
-task run `/engineering-insights` to capture what was learned. Writing nothing is
+Every module keeps an `insights/` folder with two halves: `INSIGHTS.md` (what
+works, codebase patterns, session notes, open questions) and `gotchas.md` (what
+doesn't work, tool & library quirks, error → cause → fix). Before working in a
+module, read its `insights/` folder and the root one — treat entries as
+high-confidence unless the code contradicts them. At the end of a task run
+`/engineering-insights` to capture what was learned. Writing nothing is
 correct when nothing new or important came up; never duplicate, overwrite, or
 delete an existing entry.
 
@@ -58,10 +61,12 @@ delete an existing entry.
 Architecture and per-package diagrams: [README.md](README.md).
 Test strategy across all suites: [TESTING.md](TESTING.md).
 Reviewer system prompts: [docs/agent-prompts/](docs/agent-prompts/).
-Hard-won debugging notes: [insights.md](insights.md).
+Hard-won debugging notes: [insights/gotchas.md](insights/gotchas.md) ·
+what works and why: [insights/INSIGHTS.md](insights/INSIGHTS.md).
 
 Convention for every package: `README.md` = human explanation ·
 `docs/` = durable reference · `specs/` = work not yet built ·
-`insights.md` = append-only log of things learned the hard way.
+`insights/` = append-only log of things learned the hard way, split into
+`INSIGHTS.md` and `gotchas.md`.
 When an insight starts causing repeat mistakes, promote it into the relevant
-`CLAUDE.md` and leave the detail behind in `insights.md`.
+`CLAUDE.md` and leave the detail behind in `insights/`.
