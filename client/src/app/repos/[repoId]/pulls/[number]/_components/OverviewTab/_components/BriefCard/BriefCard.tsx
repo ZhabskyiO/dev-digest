@@ -74,18 +74,24 @@ export function BriefCard({
 
   const hasBrief = data != null;
   const label =
-    generate.isPending ? t("generating") : hasBrief ? t("refresh") : t("generate");
+    generate.isPending ? t("generating") : hasBrief ? t("regenerate") : t("generate");
 
-  // Referenced once, rendered at whichever of the two sites below is active
-  // (empty state or the brief's own controls row) — never both at once, so
-  // this is the single control in the file wired to the generate mutation's
-  // trigger (the mechanical guard for AC-43).
+  // Referenced once, rendered at whichever of the three sites below is
+  // active (empty state, the stale notice, or the brief's own controls row)
+  // — never two at once, so this is the single control in the file wired to
+  // the generate mutation's trigger (the mechanical guard for AC-43).
+  //
+  // Generate vs Regenerate is the `force` flag: the empty state's `Generate
+  // brief` posts without it (the server is idempotent for the current head),
+  // while an existing brief's `Regenerate brief` posts `?force=true` so a
+  // reviewer who pushed new commits can actually refresh what the card
+  // shows — without it a stale brief would come back unchanged.
   const generateButton = (
     <Button
       kind={hasBrief ? "secondary" : "primary"}
       icon="RefreshCw"
       disabled={prId == null || generate.isPending}
-      onClick={() => generate.mutate()}
+      onClick={() => generate.mutate({ force: hasBrief })}
     >
       {label}
     </Button>
@@ -151,21 +157,31 @@ export function BriefCard({
 
   return (
     <div style={s.wrap}>
-      <div style={s.controlsRow}>
-        {generateButton}
-        {errorAlert}
-      </div>
-
-      {isStale && (
+      {/* The ONE regenerate control moves INTO the stale notice when the
+          brief is out of date (AC-12: "a stale notice with a regenerate
+          action") and otherwise sits in the controls row — it is never
+          rendered at both sites, so AC-43's single-control rule holds. */}
+      {isStale ? (
         <div role="status" style={s.notice("warn")}>
           <Icon.Clock size={14} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
-          <span>
-            <span style={s.noticeTitle}>{t("stale.title")}</span>
-            {" — "}
-            {staleCommits == null
-              ? t("stale.unknownCommits")
-              : t("stale.commits", { count: staleCommits })}
-          </span>
+          <div style={s.staleBody}>
+            <span>
+              <span style={s.noticeTitle}>{t("stale.title")}</span>
+              {" — "}
+              {staleCommits == null
+                ? t("stale.unknownCommits")
+                : t("stale.commits", { count: staleCommits })}
+            </span>
+            <div style={s.controlsRow}>
+              {generateButton}
+              {errorAlert}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={s.controlsRow}>
+          {generateButton}
+          {errorAlert}
         </div>
       )}
 

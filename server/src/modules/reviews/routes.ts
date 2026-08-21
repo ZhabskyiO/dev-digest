@@ -11,6 +11,7 @@ import {
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
+import { z } from 'zod';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
 import { LocalReviewService } from './local-review.js';
@@ -25,11 +26,18 @@ import { BriefService } from './brief/index.js';
  *   GET    /pulls/:id/intent                           → the derived PR intent (L03), or null
  *   POST   /pulls/:id/intent/recalculate               → force a fresh derivation (spends tokens)
  *   GET    /pulls/:id/brief                            → the persisted PR Brief, or null
- *   POST   /pulls/:id/brief/generate                   → force a fresh brief (spends tokens)
+ *   POST   /pulls/:id/brief/generate[?force=true]      → generate the brief; one model call (spends tokens)
  *   GET    /pulls/:id/smart-diff                       → reviewer-ordered files (deterministic, no LLM)
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
+/** `?force=true` regenerates an existing brief; absent or `false` is idempotent
+ *  for the current head; any other value is a 400 (strict enum on purpose).
+ *  A string enum rather than
+ *  `z.coerce.boolean()` — that coercion turns the literal `"false"` into
+ *  `true`. */
+const BriefGenerateQuery = z.object({ force: z.enum(['true', 'false']).optional() });
+
 export default async function reviewsRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();
   const { container } = app;
@@ -227,19 +235,37 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     },
   );
 
-  // ---- Force a fresh brief (the ONE manual trigger, spends tokens) --------
+  // ---- Generate the brief (the ONE manual trigger, spends tokens) ---------
+  // Exactly ONE model call per generation (the batched file summaries); the
+  // intent is READ from `pr_intent`, never re-derived here — that is
+  // `POST /pulls/:id/intent/recalculate`'s job, above.
+  //
+  // `?force=true` regenerates unconditionally (the Overview tab's
+  // `Regenerate` control). Without it the call is idempotent for the current
+  // head: an existing brief for `pull.head_sha` is returned with no model
+  // call, so the empty-state `Generate brief` is safe to press twice.
+  //
   // Non-nullable response by design: unlike the GET, "nothing came back" here
   // means the generation failed, and the service raises a 502 rather than
   // answering 200 with the stale row.
   app.post(
     '/pulls/:id/brief/generate',
     {
-      schema: { params: IdParams, response: { 200: PrBriefDetail } },
+      schema: {
+        params: IdParams,
+        querystring: BriefGenerateQuery,
+        response: { 200: PrBriefDetail },
+      },
       config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
     },
     async (req) => {
       const { workspaceId } = await getContext(container, req);
-      return briefService.generate(workspaceId, req.params.id, req.log);
+      return briefService.generate(
+        workspaceId,
+        req.params.id,
+        { force: req.query.force === 'true' },
+        req.log,
+      );
     },
   );
 

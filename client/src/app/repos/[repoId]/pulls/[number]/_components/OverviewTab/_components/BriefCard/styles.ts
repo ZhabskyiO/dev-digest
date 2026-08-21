@@ -99,6 +99,15 @@ export const s = {
     fontWeight: 600,
     color: "var(--text-primary)",
   } satisfies CSSProperties,
+  /* Text + the regenerate control stacked inside the stale notice — the one
+     state where the control lives in the notice rather than the controls
+     row above the brief (see BriefCard's own comment on AC-12 / AC-43). */
+  staleBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    minWidth: 0,
+  } satisfies CSSProperties,
 
   /* Empty state — no brief generated yet. Built by hand rather than with
      `@devdigest/ui`'s `EmptyState` primitive: that component always renders

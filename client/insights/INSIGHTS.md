@@ -218,6 +218,16 @@ Conventions and architectural decisions specific to this repo.
   `server/src/modules/project-context/service.ts`, not just the feature as a
   whole — the caps are per-endpoint, not per-resource.
 
+- 2026-08-21 — `BriefCard.tsx` has exactly ONE token-spending control (AC-43),
+  held in a single `generateButton` node and rendered at ONE of three sites:
+  the empty state (`Generate brief`, `mutate({ force: false })`), the stale
+  notice (`Regenerate brief`, `mutate({ force: true })` — AC-12 wants the
+  regenerate action IN the notice), or the controls row (same Regenerate,
+  when current). NEVER add a second button wired to `useGenerateBrief` — the
+  test asserts `getAllByRole('button', { name: /regenerate brief/i })` has
+  length 1. `force` is what makes regeneration actually refresh: without
+  `?force=true` the server returns the existing brief for the current head.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.

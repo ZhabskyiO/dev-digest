@@ -472,6 +472,27 @@ Conventions and architectural decisions specific to this repo.
   when at least one call spent tokens) — never blank, never a delimited
   "both" string. The intent call's own provider/model is separately and
   fully recorded on `pr_intent`, so nothing is lost by this simplification.
+  └ 2026-08-21 correction: superseded — `generate()` now makes ONE model
+    call (the `risk_brief` file-summaries call), so `pr_brief.provider/model`
+    is simply that call's pair; there is no fallback to the intent call
+    because the brief never makes one (see the next entry).
+
+- 2026-08-21 — The PR Brief is built from ARTIFACTS, never the diff. ALWAYS
+  keep `brief/service.ts::generate` at exactly ONE `completeStructured` call:
+  the intent is READ from `pr_intent` (`reviewRepo.getIntent`) and passed to
+  the model as an input; NEVER call `IntentService.recalculate` from the
+  brief — re-deriving intent is `POST /pulls/:id/intent/recalculate`'s job,
+  a separate, separately rate-limited endpoint. NEVER pass `pr_files.patch`
+  into the brief prompt: `brief/evidence.ts` (pure) is the only renderer of
+  the model's input and its input type has no `patch` field on purpose; it
+  takes the intent, `container.blast.blastForPull` (read best-effort inside
+  generation — a throw becomes "unavailable", never a failed brief), grouped
+  diff stats via `classifyPath`, and finding titles. Budget is pinned by
+  `BRIEF_EVIDENCE_MAX_CHARS` (30 000) with a saturated-worst-case unit test
+  in `test/brief-evidence.test.ts` (measured 29 077 chars ≈ 7.3k tokens) —
+  change a cap, re-measure, update the constant's comment.
+  `POST …/brief/generate` is idempotent for the current head unless
+  `?force=true` (`routes.ts::BriefGenerateQuery`).
 
 ## Session Notes
 

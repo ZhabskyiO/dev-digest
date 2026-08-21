@@ -347,6 +347,31 @@ Quirks of dependencies, tooling, and the local environment.
   `server/CLAUDE.md`'s unit-test command is not inherited by the `related`
   subcommand.
 
+- 2026-08-21 — NEVER use `z.coerce.boolean()` for a boolean query-string flag:
+  `z.coerce` is `Boolean(value)`, so the literal string `"false"` coerces to
+  `true` and `?force=false` would force. Declare the flag as
+  `z.enum(['true', 'false']).optional()` and compare `=== 'true'` in the handler
+  (`modules/reviews/routes.ts::BriefGenerateQuery`).
+
+- 2026-08-21 — `MockLLMProvider` (`adapters/mocks.ts:84,100`) reports a FIXED
+  `tokensIn: 100 / tokensOut: 50 / costUsd: 0.001` on every call. NEVER seed a
+  DB row with 100/50 tokens in a test that asserts those numbers were "not
+  folded in" — `expect(x).toBeLessThan(100)` passes/fails by coincidence.
+  Seed a distinctive figure (e.g. 777) and assert the exact mock totals.
+
+- 2026-08-21 — `classifyPath` (`smart-diff/constants.ts::CLASSIFY_RULES`) puts
+  `app|server|main|bootstrap|entry.ts`, any `index.ts`, and `config|settings.ts`
+  in `wiring`, and `*.test.ts` in `boilerplate`. A test fixture that needs a
+  `core` path must avoid those basenames — `src/app.ts` is NOT core; use
+  something like `src/payments/charge.ts`.
+
+- 2026-08-21 — `Finding.severity` is `CRITICAL | WARNING | SUGGESTION`
+  (`vendor/shared/contracts/findings.ts::Severity`), NOT
+  `critical/high/medium/low/info`. A `Record<string, number>` rank table keyed
+  by the lowercase tiers typechecks fine and silently ranks everything equal
+  (`?? 9`). ALWAYS type such tables `Record<Finding['severity'], number>` so a
+  wrong key is a compile error (`brief/evidence.ts::SEVERITY_RANK`).
+
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.

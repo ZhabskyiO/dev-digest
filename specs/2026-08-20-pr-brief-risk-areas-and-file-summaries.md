@@ -141,8 +141,8 @@ Verified in code. Acceptance criteria below are about the **delta only**.
   is already in flight, THEN the system **shall** return the result of the in-flight
   derivation instead of starting a second one.
   _(observable: integration test — fire two concurrent generate requests; the injected model
-  mock records exactly one intent derivation and exactly one batched file-summaries call
-  (two calls total, matching the generation budget), not two of each)_
+  mock records exactly ONE `completeStructured` call (the batched file-summaries call — the
+  whole generation budget), not two)_
 - **AC-6**: IF brief generation fails, THEN the system **shall** respond with an error
   status and **shall not** overwrite or delete any previously persisted brief.
   _(observable: integration test — generate once successfully, force the model mock to
@@ -376,6 +376,7 @@ Verified in code. Acceptance criteria below are about the **delta only**.
 |---|---|---|
 | PR has never been briefed | `200 + null`; empty state with `Generate brief` | AC-1, AC-2 |
 | User double-clicks `Generate brief` | Deduped to one derivation; one model call | AC-5, AC-4 |
+| `Generate brief` pressed again for a head that already has a brief (no `force`) | Existing brief returned, zero model calls; only `?force=true` (the `Regenerate` control) regenerates | AC-3, AC-9 |
 | Generation fails (provider down, no key, timeout) | Error status, previous brief preserved, inline client error | AC-6, AC-7 |
 | Generation abused / hammered | 429 after 3/min | AC-8 |
 | New commits pushed after the brief was generated | Stale notice + regenerate; content stays visible | AC-11, AC-12 |
@@ -406,12 +407,13 @@ Verified in code. Acceptance criteria below are about the **delta only**.
 | Brief JSON persisted before the contract widened | Still parses | AC-41 |
 | Reviewer opens Files-changed on a PR with no brief and no review | Groups render as today, no summary rows, zero tokens | AC-32, AC-34 |
 | Same PR briefed concurrently from two browser tabs | Deduped server-side; both tabs converge on the same brief | AC-5 |
-| Generation partially succeeds (intent ok, file summaries fail) | Brief persists what it derived; missing summaries behave as AC-34 | AC-14, AC-34 |
+| The one model call fails | Error status, prior brief untouched — there is no "partial" success: the summaries call IS the generation | AC-6 |
+| No intent has been derived for the PR yet | Brief still generates; the model is told `intent: (not derived yet)` and the card shows the intent as not derived | AC-14 |
 | File carries a summary but its row is collapsed | Path and +N/−N counts only; the row appears on expand | AC-50 |
 | User regenerates while an old brief is displayed | Old brief stays visible until the new one lands; no flash of empty state | accepted: no dedicated AC — falls out of AC-4 + AC-6 (nothing is deleted before the replacement arrives). Recorded here so it is not lost. |
 | PR closed or merged mid-generation | Generation completes and persists normally; no special casing | accepted: no handling |
 | Repository deleted / PR row removed mid-generation | Cascade delete on `pr_id` removes the brief | accepted: existing FK behaviour |
-| Reviewer wants to re-derive only the intent, not the whole brief | Not offered — one token-spending control regenerates the whole brief | AC-43 |
+| Reviewer wants the intent re-derived | `POST /pulls/:id/intent/recalculate` — a separate endpoint; the brief READS the persisted intent and never re-derives it itself | AC-43 |
 | Reviewer clicks the `summary` pill expecting it to generate one | Nothing happens; it is a non-interactive indicator and only appears where a summary exists | AC-44 |
 | Brief is stale but the PR's commit list is unavailable | Stale notice still renders, without the commit count — the notice is never suppressed for want of the count | AC-12, AC-45 |
 
@@ -422,9 +424,15 @@ Verified in code. Acceptance criteria below are about the **delta only**.
 - **Cost containment.** Reading the Overview tab and the Files-changed tab **must** cost
   zero tokens (AC-9, AC-32). The only token spend is the explicit generate action and the
   automatic derivation inside a review run.
-- **Generation budget.** One brief generation must issue at most **two** model calls
-  regardless of PR size: one for the intent/risk-area block and one batched call covering
-  all summarized files. Per-file fan-out is forbidden.
+- **Generation budget.** One brief generation issues exactly **one** `completeStructured`
+  call regardless of PR size: the batched call covering all summarized files. The intent is
+  an INPUT read from `pr_intent`, never re-derived by the brief (re-deriving it is the
+  separate `POST /pulls/:id/intent/recalculate`). The model reads ready-made artifacts only —
+  intent, blast-radius summary + per-symbol map, grouped diff stats, finding titles — and
+  never a patch body: a mid-sized PR's diff alone is 5–15k tokens, and the whole brief
+  input must fit in **8k tokens** (`BRIEF_EVIDENCE_MAX_CHARS` in `brief/evidence.ts` pins
+  the evidence ceiling; a unit test measures the saturated worst case). Per-file fan-out is
+  forbidden.
 - **Rate limit.** Brief generation: **3 requests/minute**, matching the existing intent
   recalculate fence. There is no per-agent fan-out to amortise the call over.
 - **Latency.** `GET` of the brief and `GET` of the smart-diff: **p95 < 300 ms** on a
@@ -644,7 +652,9 @@ treat them as fixed inputs.
   grounding rule (every entry cites a file in the PR's changed-file set) stands as the
   mechanism that keeps it honest.
 - **D3 — Per-file summaries come from one batched model call inside brief generation, plus
-  automatically during a review run.** They are persisted, keyed by head sha, and merged
+  automatically during a review run.** That call is the brief's ONLY model call and is
+  written from artifacts (intent, blast, grouped diff stats, findings) — never from patch
+  text. They are persisted, keyed by head sha, and merged
   into the smart-diff response on read. The Files-changed tab's zero-token guarantee
   (AC-32) is confirmed as a hard constraint, not a preference.
 - **D4 — The risk-area widening is file references *and* explanation, both new work.** The
@@ -652,8 +662,10 @@ treat them as fixed inputs.
   prototype, not a shipping build: today's intent card renders flat icon + label chips.
   AC-15 to AC-21 therefore describe genuinely new behaviour, not a restyle.
 - **D5 — Exactly one token-spending control lives on the Overview tab.** The brief-level
-  generate/refresh regenerates the whole brief; the intent block's separate `Recalculate`
-  is removed. Recorded as a goal and enforced by AC-43.
+  `Generate brief` / `Regenerate brief` control (`?force=true` for the latter) regenerates the
+  brief; the intent block's separate `Recalculate` is removed. The brief reads the persisted
+  intent as an input and does not re-derive it — intent recalculation stays a separate
+  endpoint, not part of the brief's budget. Recorded as a goal and enforced by AC-43.
 - **D6 — The per-run verdict banners stay on the Agent-runs tab.** The Overview one is a
   new PR-level aggregate over the latest run per agent (AC-27, AC-28). The two coexist by
   design and there is no duplication to resolve — they answer different questions ("what
