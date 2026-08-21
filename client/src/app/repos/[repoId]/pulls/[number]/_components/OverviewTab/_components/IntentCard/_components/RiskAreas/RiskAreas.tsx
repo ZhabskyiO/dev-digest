@@ -70,7 +70,10 @@ function RiskAreaChip({
 }) {
   const t = useTranslations("brief");
   const [expanded, setExpanded] = React.useState(false);
-  const style = RISK_AREA_STYLE[area.kind];
+  // `area.kind` is server data that is never Zod-parsed client-side
+  // (`api.get` casts, `lib/api.ts:62`) — fall back to a neutral entry before
+  // dereferencing rather than throwing on an out-of-union value.
+  const style = RISK_AREA_STYLE[area.kind] ?? RISK_AREA_STYLE.other;
   const Glyph = Icon[style.icon];
   const hasExplanation = Boolean(area.explanation);
   const fileRefs = area.file_refs ?? [];
@@ -105,27 +108,33 @@ function RiskAreaChip({
         </p>
       )}
 
-      {fileRefs.length > 0 && repoFullName && (
+      {fileRefs.length > 0 && (
         <ul style={s.fileRefList}>
-          {fileRefs.map((ref, i) => (
-            <li key={`${ref.path}-${i}`}>
-              <a
-                href={githubBlobUrl(
-                  repoFullName,
-                  headSha,
-                  ref.path,
-                  ref.start_line ?? undefined,
-                  ref.end_line ?? undefined,
+          {fileRefs.map((ref, i) => {
+            const label = `${ref.path}${ref.start_line != null ? `:${ref.start_line}` : ""}`;
+            return (
+              <li key={`${ref.path}-${i}`}>
+                {repoFullName ? (
+                  <a
+                    href={githubBlobUrl(
+                      repoFullName,
+                      headSha,
+                      ref.path,
+                      ref.start_line ?? undefined,
+                      ref.end_line ?? undefined,
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={s.fileRefLink}
+                  >
+                    {label}
+                  </a>
+                ) : (
+                  <span style={s.fileRefLink}>{label}</span>
                 )}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={s.fileRefLink}
-              >
-                {ref.path}
-                {ref.start_line != null ? `:${ref.start_line}` : ""}
-              </a>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </li>

@@ -3,11 +3,9 @@ import { Icon } from "@devdigest/ui";
 import type { RiskAreaKind } from "@devdigest/shared";
 
 /**
- * One icon + accent per `RiskAreaKind`. TEMPORARY DUPLICATE of the map still
- * defined in `../../IntentCard.tsx` (this component does not own that file —
- * a later task removes the original once it switches over to `<RiskAreas>`).
- * Exhaustive by construction: keyed by the union, so widening `RiskAreaKind`
- * in the shared contract fails typecheck here until an icon is chosen.
+ * One icon + accent per `RiskAreaKind`. Exhaustive by construction: keyed by
+ * the union, so widening `RiskAreaKind` in the shared contract fails
+ * typecheck here until an icon is chosen.
  */
 export const RISK_AREA_STYLE: Record<
   RiskAreaKind,

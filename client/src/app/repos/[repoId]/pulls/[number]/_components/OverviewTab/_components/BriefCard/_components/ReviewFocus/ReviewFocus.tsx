@@ -35,7 +35,11 @@ export function ReviewFocus({ entries, onOpenFileLine }: ReviewFocusProps) {
       <SectionLabel icon="Eye">{t("reviewFocus.title")}</SectionLabel>
       <ul style={s.list}>
         {entries.map((entry, i) => {
-          const sev = SEV[entry.severity];
+          // `entry.severity` comes from server data that is never Zod-parsed
+          // client-side (`api.get` casts, `lib/api.ts:62`) — fall back to a
+          // neutral entry before dereferencing rather than throwing on an
+          // out-of-union value.
+          const sev = SEV[entry.severity] ?? SEV.INFO;
           return (
             <li key={`${entry.file}:${entry.line}:${i}`} style={s.item}>
               <button

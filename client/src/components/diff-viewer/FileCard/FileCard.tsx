@@ -110,7 +110,7 @@ export function FileCard({
       {open && (
         <div style={s.fileBody}>
           {summary && (
-            <div style={s.fileSummary}>
+            <div style={s.fileSummary} title={summary}>
               <span style={s.fileSummaryLabel}>{tPrReview("smartDiff.summaryLabel")}</span>{" "}
               {summary}
             </div>

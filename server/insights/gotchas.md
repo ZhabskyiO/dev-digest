@@ -18,6 +18,36 @@ quirks, and error → cause → fix records. Newest at the top.
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
+- 2026-08-21 — NEVER key a service-level `static readonly inFlight = new
+  Map<string, Promise<T>>()` dedupe cache by an id ALONE (e.g. `pr_id`) when
+  the entry point is workspace-scoped — `BriefService.generate`
+  (`modules/reviews/brief/service.ts`) originally did the ownership check
+  (`getPull`/`getRepo`, workspace-scoped) INSIDE `doGenerate`, but the
+  `inFlight.get(prId)` short-circuit sat in front of that, in `generate`
+  itself. Because the map carries no workspace, a caller in workspace B
+  hitting `generate(workspaceB, prId)` while workspace A's generation for the
+  same `prId` was still running joined A's in-flight promise and got back
+  A's full result — no ownership check ever ran for B. `IntentService
+  .recalculate`'s identical `inFlight` shape (`intent/service.ts`) was
+  already correctly ordered (ownership resolved by the caller before entering
+  `recalculate`), so this class of bug is a per-instance ordering hazard, not
+  a shape problem with the pattern itself. Fix: resolve+check ownership
+  BEFORE the map lookup, in the SAME public method that owns the map lookup
+  — never leave it inside the private "do the work" method the map wraps.
+  Whenever adding a new `static inFlight`-style dedupe keyed by a bare id,
+  audit that the very first lines of the public entry point are the
+  workspace/tenant check, not the map read.
+  └ The only test that catches an ordering regression like this is a REAL
+    concurrency test: start caller A, wait for its call to genuinely reach
+    the model call (a `SlowLLM extends MockLLMProvider` with a real
+    `setTimeout` delay inside `completeStructured`, not `vi.useFakeTimers()`
+    — same technique `reviews.it.test.ts`'s own `inFlight`-dedupe test
+    already uses), THEN fire caller B and assert it rejects while A's promise
+    is still pending. A sequential test (call A, await it, then call B) never
+    exercises the map at all and passes identically whether the ownership
+    check is above or below the lookup — see
+    `server/test/brief-service.it.test.ts`.
+
 - 2026-08-07 — NEVER write a literal glob pattern containing `*/` (e.g.
   `` `*/docs/**` ``) inside a `/** … */` JSDoc block comment — the `*/`
   sequence closes the comment early, and `tsc` then tries to parse the rest of

@@ -56,6 +56,25 @@ d('skill attachment versioning', () => {
       })
       .returning();
     repoId = repoRow!.id;
+
+    /* The two docs written to the clone above must ALSO exist as discovered
+       `project_context_documents` rows. `buildAttachmentRows` gates every ref
+       on `getDocument(repo_id, path)` and SKIPS a ref that resolves to no
+       discovered document — deliberately, so a path that merely survives
+       `resolveInClone`'s containment check (`.git/config`) can never be
+       attached. That skip is silent ("degrade, never block"), so without these
+       rows a PUT still answers 200 while persisting no attachment at all, and
+       only a test that reads the attachment rows back can see it. */
+    await pg.handle.db.insert(t.projectContextDocuments).values(
+      ['docs/a.md', 'docs/b.md'].map((p) => ({
+        repoId,
+        path: p,
+        type: 'docs' as const,
+        sizeBytes: 7,
+        contentHash: `seed-${p}`,
+        tokens: 3,
+      })),
+    );
   });
 
   afterAll(async () => {

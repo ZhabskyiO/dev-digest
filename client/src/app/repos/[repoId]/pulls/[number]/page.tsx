@@ -72,9 +72,9 @@ export default function PRDetailPage() {
   const fileParam = search.get("file");
   const lineParam = search.get("line");
   const targetFileLine = React.useMemo(() => {
-    if (!fileParam) return null;
-    const line = Number(lineParam);
-    if (!Number.isFinite(line)) return null;
+    if (!fileParam || !lineParam) return null;
+    const line = Number.parseInt(lineParam, 10);
+    if (!Number.isInteger(line) || line < 1) return null;
     return { path: fileParam, line };
   }, [fileParam, lineParam]);
   const setParams = (entries: Record<string, string | null>) => {

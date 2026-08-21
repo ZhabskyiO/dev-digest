@@ -33,7 +33,7 @@
 
 import React from "react";
 import { useTranslations } from "next-intl";
-import { SectionLabel, Skeleton, Icon, Button, CircularScore } from "@devdigest/ui";
+import { Skeleton, Icon, Button, CircularScore } from "@devdigest/ui";
 import type { PrBriefDetail, BriefVerdictSummary, PrCommit } from "@devdigest/shared";
 import { usePrBrief, useGenerateBrief } from "@/lib/hooks/brief";
 import { formatCostUsd, formatTokensCompact } from "@/lib/format";
@@ -212,7 +212,10 @@ function commitsSince(commits: PrCommit[], sha: string): number | null {
  * placeholder itself. */
 function VerdictBlock({ summary }: { summary: BriefVerdictSummary }) {
   const t = useTranslations("brief");
-  const meta = VERDICT_META[summary.verdict];
+  // `summary.verdict` is server data that is never Zod-parsed on the client
+  // (`api.get` casts, `lib/api.ts:62`) — fall back to a neutral entry before
+  // dereferencing rather than letting an out-of-union value throw here.
+  const meta = VERDICT_META[summary.verdict] ?? VERDICT_META.comment;
   const VIcon = Icon[meta.icon];
   return (
     <div style={s.verdictBox}>

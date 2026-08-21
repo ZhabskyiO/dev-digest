@@ -36,7 +36,7 @@ import { renderPrompt } from '../../../platform/prompts.js';
 import { wrapUntrusted } from '../../../platform/prompt.js';
 import { NotFoundError, ExternalServiceError } from '../../../platform/errors.js';
 import { resolveFeatureModel } from '../../settings/feature-models.js';
-import type { PullRow } from '../repository.js';
+import type { PullRow, RepoRow } from '../repository.js';
 import { findingsFromLatestRunPerAgent, findingRowToDto } from '../helpers.js';
 import { IntentService } from '../intent/service.js';
 import { BriefRepository } from './repository.js';
@@ -222,12 +222,29 @@ export class BriefService {
    * generation or touch the prior persisted row.
    */
   async generate(workspaceId: string, prId: string, logger?: Logger): Promise<PrBriefDetail> {
+    // SECURITY: this ownership check MUST run before the `inFlight` map
+    // lookup, and MUST NOT move below it. `inFlight` is keyed by `prId`
+    // alone — it carries no workspace scoping — so a caller in workspace B
+    // that joined the map FIRST would receive workspace A's full
+    // `PrBriefDetail` (intent, blast paths, finding titles, cost) with no
+    // ownership check ever having run for B. Resolving `pull`/`repo`
+    // workspace-scoped here, ahead of the map, and threading them into
+    // `doGenerate` (which never re-resolves them) closes that window: a
+    // foreign-workspace caller now throws `NotFoundError` right here, before
+    // it ever touches the dedupe map or the in-flight promise. Mirrors
+    // `ReviewService.recalculateIntent`, which resolves the pull's workspace
+    // ownership before entering `IntentService.recalculate`'s own dedupe.
+    const pull = await this.repo.getPull(workspaceId, prId);
+    if (!pull) throw new NotFoundError('Pull request not found');
+    const repo = await this.repo.getRepo(pull.repoId);
+    if (!repo) throw new NotFoundError('Repo not found');
+
     const joined = BriefService.inFlight.get(prId);
     if (joined) {
       logger?.info({ prId }, 'Brief generation already in flight for this PR — joining it');
       return joined;
     }
-    const derivation = this.doGenerate(workspaceId, prId, logger).finally(() => {
+    const derivation = this.doGenerate(workspaceId, pull, repo, logger).finally(() => {
       BriefService.inFlight.delete(prId);
     });
     BriefService.inFlight.set(prId, derivation);
@@ -298,15 +315,19 @@ export class BriefService {
     return findingCounts;
   }
 
+  /**
+   * `pull`/`repo` are resolved and ownership-checked by the caller
+   * (`generate`, ahead of its `inFlight` map lookup) — this method must
+   * never re-resolve them itself, or it reopens the workspace-scope window
+   * `generate`'s ordering closes.
+   */
   private async doGenerate(
     workspaceId: string,
-    prId: string,
+    pull: PullRow,
+    repo: RepoRow,
     logger?: Logger,
   ): Promise<PrBriefDetail> {
-    const pull = await this.repo.getPull(workspaceId, prId);
-    if (!pull) throw new NotFoundError('Pull request not found');
-    const repo = await this.repo.getRepo(pull.repoId);
-    if (!repo) throw new NotFoundError('Repo not found');
+    const prId = pull.id;
 
     // No runIds → no SSE stream / no fake agent_run row, same shape as
     // `ReviewService.recalculateIntent`'s own RunLogger — the evidence lines
@@ -427,10 +448,24 @@ export class BriefService {
 
       // Model output is untrusted: a reply naming a path outside the
       // selected set is dropped rather than persisted (never invent a
-      // `pr_file_summary` row for a file we didn't ask about).
+      // `pr_file_summary` row for a file we didn't ask about). The prompt
+      // only *asks* for one entry per file — it does not guarantee one — so
+      // a duplicate `path` is also de-duplicated here, keeping the first
+      // occurrence: `upsertFileSummaries` does a multi-row
+      // `INSERT ... ON CONFLICT (pr_id, path) DO UPDATE`, and Postgres
+      // raises 21000 ("ON CONFLICT DO UPDATE command cannot affect row a
+      // second time") if two rows in the same statement share a conflict
+      // key, aborting the whole upsert silently (this method's own catch
+      // swallows it).
       const selectedPaths = new Set(selected.map((c) => c.path));
+      const seenPaths = new Set<string>();
       const rows = res.data.summaries
         .filter((s) => selectedPaths.has(s.path))
+        .filter((s) => {
+          if (seenPaths.has(s.path)) return false;
+          seenPaths.add(s.path);
+          return true;
+        })
         .map((s) => ({ path: s.path, summary: truncateSummary(s.summary) }));
 
       await this.briefRepo.upsertFileSummaries(pull.id, pull.headSha, rows);
