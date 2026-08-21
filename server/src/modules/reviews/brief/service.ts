@@ -1,13 +1,22 @@
 /**
  * `BriefService` — orchestrates the PR Brief: read-time composition
- * (`getBrief`) and generation (`generate`, `generateFileSummaries`).
+ * (`getBrief`) and generation (`generate`, `summarizeChangedFilesForRun`).
  *
  * Onion rules: this file reaches other capabilities ONLY through
  * `container.*` (never `import { BlastService } from '../../blast/service.js'`
- * — see `container.blast`, the lazy facade T12 adds to the composition
- * root) and through its own module's pure helpers (`compose.ts`,
- * `summaries.ts`) / repository (`brief/repository.ts`). It never imports
+ * — see `container.blast`, the lazy facade the composition root exposes)
+ * and through its own module's pure helpers (`compose.ts`, `summaries.ts`,
+ * `evidence.ts`) / repository (`brief/repository.ts`). It never imports
  * `db/schema` or `drizzle-orm` directly.
+ *
+ * The brief is BUILT FROM ARTIFACTS, never from the raw diff. Generation
+ * reads what the rest of the system already derived — the persisted intent
+ * (`pr_intent`), the blast-radius map (the index), grouped diff stats over
+ * `pr_files` (counts only), and the findings that already passed the
+ * grounding gate — and hands those to `evidence.ts`, the one place that
+ * renders the model's input. No `pr_files.patch` body is ever passed to a
+ * model from this module: a mid-sized PR's diff alone is 5–15k tokens, and
+ * the brief's whole input has to fit in ~8k.
  *
  * The two public entry points have very different cost profiles by design:
  *
@@ -16,16 +25,20 @@
  *    live from `reviews`/`findings`/`pr_files` (pure functions in
  *    `compose.ts`) and from ONE `container.blast.blastForPull` call, which
  *    already carries `blast` + `status` + `reason` together
- *    (`BlastRadiusResult`). `container.blast` is referenced ONLY here, never
- *    from `generate`/`generateFileSummaries` — a re-index therefore flips
- *    `degraded` → `ready` on the very next read, with no regeneration
- *    (AC-13), and a review run that completes after generation shows up in
- *    `verdict_summary`/`review_focus` on the next read too (AC-49).
- *  - `generate` spends up to TWO model calls (a forced intent re-derive, then
- *    a best-effort batched file-summaries call) and persists ONLY the head
- *    sha, provenance and a counts-only record — never a blast snapshot, a
- *    verdict, or a review-focus list (AC-14). It never reads
- *    `container.blast` at all: the index being unusable must never stop a
+ *    (`BlastRadiusResult`). A re-index therefore flips `degraded` → `ready`
+ *    on the very next read, with no regeneration (AC-13), and a review run
+ *    that completes after generation shows up in `verdict_summary`/
+ *    `review_focus` on the next read too (AC-49).
+ *  - `generate` spends EXACTLY ONE model call — the batched per-file
+ *    summaries (`completeStructured`, schema `FileSummaries`) — and persists
+ *    ONLY the head sha, provenance and a counts-only record; never a blast
+ *    snapshot, a verdict, or a review-focus list (AC-14). It NEVER re-derives
+ *    the intent: the intent is an input artifact read from `pr_intent` as-is.
+ *    Re-deriving it is `POST /pulls/:id/intent/recalculate`'s job
+ *    (`ReviewService.recalculateIntent`), a separate, separately rate-limited
+ *    endpoint — the brief must never spend that call on the caller's behalf.
+ *    Generation reads the blast map BEST-EFFORT as evidence only: a failed or
+ *    `degraded` read is reported to the model as such and can never stop a
  *    brief from being generated.
  */
 import { z } from 'zod';
@@ -33,12 +46,10 @@ import type { Container } from '../../../platform/container.js';
 import { RunLogger } from '../../../platform/run-logger.js';
 import type { Logger } from '../run-executor.js';
 import { renderPrompt } from '../../../platform/prompts.js';
-import { wrapUntrusted } from '../../../platform/prompt.js';
 import { NotFoundError, ExternalServiceError } from '../../../platform/errors.js';
 import { resolveFeatureModel } from '../../settings/feature-models.js';
-import type { PullRow, RepoRow } from '../repository.js';
+import type { PullRow, IntentRow } from '../repository.js';
 import { findingsFromLatestRunPerAgent, findingRowToDto } from '../helpers.js';
-import { IntentService } from '../intent/service.js';
 import { BriefRepository } from './repository.js';
 import {
   composeReviewFocus,
@@ -46,17 +57,19 @@ import {
   changedLinesFromPatches,
   type LatestAgentRun,
 } from './compose.js';
-import { selectFilesToSummarize, truncateSummary } from './summaries.js';
-import type { PrBriefDetail, Finding, Verdict } from '@devdigest/shared';
+import { selectFilesToSummarize, truncateSummary, type SummarizableFile } from './summaries.js';
+import { renderBriefEvidence, type FindingHint } from './evidence.js';
+import type {
+  PrBriefDetail,
+  Finding,
+  Verdict,
+  BlastRadiusResult,
+} from '@devdigest/shared';
 
-/** One `pr_files` row, as `container.reviewRepo.getPrFiles` returns it — no
- *  exported alias exists on `ReviewRepository` for the element type, so this
- *  is derived from the method's own return type (same trick
- *  `modules/onboarding/service.ts` uses for `RepoRow`) rather than importing
- *  `db/schema` directly, which would break this module's onion layering. */
-type PrFileRow = Awaited<ReturnType<Container['reviewRepo']['getPrFiles']>>[number];
-
-/** One `reviewsForPull` entry — same derivation trick as `PrFileRow` above. */
+/** One `reviewsForPull` entry — derived from the method's own return type
+ *  rather than importing `db/schema` directly, which would break this
+ *  module's onion layering (same trick `modules/onboarding/service.ts` uses
+ *  for `RepoRow`). */
 type ReviewWithFindings = Awaited<ReturnType<Container['reviewRepo']['reviewsForPull']>>[number];
 
 /** The matching Zod schema for `file-summaries.md`'s documented output shape
@@ -67,11 +80,36 @@ const FileSummariesResult = z.object({
 });
 type FileSummariesResult = z.infer<typeof FileSummariesResult>;
 
-/** What `generateFileSummaries` hands back so `generate` can fold its
- *  tokens/cost into the brief's totals and know how many summaries actually
- *  landed (for `PrBriefRecord.summarized_files`). Zeroed/nulled out on any
- *  failure or when there was nothing worth summarizing — the caller never
- *  has to branch on whether the call happened. */
+export interface GenerateOptions {
+  /**
+   * `false` (the default) makes generation IDEMPOTENT for the current head:
+   * when a brief already exists for the PR's current `head_sha` it is
+   * returned as-is with no model call. `true` regenerates regardless — the
+   * Overview tab's `Regenerate` control sends `?force=true`.
+   */
+  force?: boolean;
+}
+
+/**
+ * Everything the ONE model call reads, gathered in one place so a manual
+ * regenerate (`doGenerate`) and the review-run hook
+ * (`summarizeChangedFilesForRun`) can never drift on what "the artifacts"
+ * are. Deliberately carries NO `patch` field — `PrFileRow.patch` is read by
+ * `getBrief` for `changedLinesFromPatches` (a line-set, for review focus)
+ * and nowhere else in this module.
+ */
+interface BriefArtifacts {
+  files: SummarizableFile[];
+  findings: Map<string, FindingHint[]>;
+  intent: IntentRow | undefined;
+  blast: BlastRadiusResult | null;
+}
+
+/** What `generateFileSummaries` hands back so `doGenerate` can persist the
+ *  call's provenance and know how many summaries actually landed (for
+ *  `PrBriefRecord.summarized_files`). Zeroed/nulled out on any failure or
+ *  when there was nothing worth summarizing — the caller never has to branch
+ *  on whether the call happened. */
 interface FileSummariesOutcome {
   tokensIn: number;
   tokensOut: number;
@@ -127,7 +165,7 @@ export class BriefService {
 
   /**
    * In-flight `generate` derivations, keyed by `pr_id`. MUST be `static` —
-   * `BriefService` is instantiated once at plugin scope (T13) but that is
+   * `BriefService` is instantiated once at plugin scope but that is
    * incidental; an instance field would dedupe nothing if a caller ever
    * constructed a second instance, exactly the reasoning
    * `IntentService.inFlight`'s own comment gives. Entries are always removed
@@ -173,8 +211,7 @@ export class BriefService {
     if (!row) return null;
 
     // ONE blast call — carries `blast` + `status` + `reason` together, so a
-    // re-index is reflected here with no regeneration (AC-13). Never call
-    // `container.blast` anywhere else in this class.
+    // re-index is reflected here with no regeneration (AC-13).
     const [blast, reviews, files, intent] = await Promise.all([
       this.container.blast.blastForPull(workspaceId, prId),
       this.repo.reviewsForPull(prId),
@@ -208,43 +245,59 @@ export class BriefService {
   }
 
   // ---------------------------------------------------------------------
-  // Generation — up to two model calls, one persisted write (AC-6, AC-14).
+  // Generation — exactly one model call, one persisted write (AC-6, AC-14).
   // ---------------------------------------------------------------------
 
   /**
-   * Force a fresh brief for one PR: re-derive intent (model call 1), then
-   * best-effort per-file summaries (model call 2), then ONE `upsertBrief`.
+   * Generate the brief for one PR from its artifacts: ONE batched
+   * `completeStructured` call for the per-file summaries, then ONE
+   * `upsertBrief`. The intent is READ from `pr_intent`, never re-derived.
+   *
+   * `force: false` (default) short-circuits when a brief already exists for
+   * the PR's current head — the empty-state `Generate brief` control is safe
+   * to press twice. `force: true` regenerates unconditionally.
    *
    * Concurrent callers for the same PR share ONE derivation (AC-5) — same
-   * dedupe shape as `IntentService.recalculate`. THROWS on intent failure
-   * (the route answers 502); a file-summaries failure is swallowed inside
-   * `generateFileSummaries` and never reaches here, so it can never abort
-   * generation or touch the prior persisted row.
+   * dedupe shape as `IntentService.recalculate`. THROWS on model failure
+   * (the route answers 502) and never touches the prior persisted row on
+   * that path (AC-6).
    */
-  async generate(workspaceId: string, prId: string, logger?: Logger): Promise<PrBriefDetail> {
+  async generate(
+    workspaceId: string,
+    prId: string,
+    opts: GenerateOptions = {},
+    logger?: Logger,
+  ): Promise<PrBriefDetail> {
     // SECURITY: this ownership check MUST run before the `inFlight` map
     // lookup, and MUST NOT move below it. `inFlight` is keyed by `prId`
     // alone — it carries no workspace scoping — so a caller in workspace B
     // that joined the map FIRST would receive workspace A's full
     // `PrBriefDetail` (intent, blast paths, finding titles, cost) with no
-    // ownership check ever having run for B. Resolving `pull`/`repo`
-    // workspace-scoped here, ahead of the map, and threading them into
-    // `doGenerate` (which never re-resolves them) closes that window: a
+    // ownership check ever having run for B. Resolving `pull`
+    // workspace-scoped here, ahead of the map, and threading it into
+    // `doGenerate` (which never re-resolves it) closes that window: a
     // foreign-workspace caller now throws `NotFoundError` right here, before
     // it ever touches the dedupe map or the in-flight promise. Mirrors
     // `ReviewService.recalculateIntent`, which resolves the pull's workspace
     // ownership before entering `IntentService.recalculate`'s own dedupe.
     const pull = await this.repo.getPull(workspaceId, prId);
     if (!pull) throw new NotFoundError('Pull request not found');
-    const repo = await this.repo.getRepo(pull.repoId);
-    if (!repo) throw new NotFoundError('Repo not found');
+
+    if (!opts.force) {
+      const existing = await this.briefRepo.getBriefRow(workspaceId, prId);
+      if (existing && existing.headSha === pull.headSha) {
+        logger?.info({ prId }, 'Brief already exists for the current head — returning it (no model call)');
+        const detail = await this.getBrief(workspaceId, prId);
+        if (detail) return detail;
+      }
+    }
 
     const joined = BriefService.inFlight.get(prId);
     if (joined) {
       logger?.info({ prId }, 'Brief generation already in flight for this PR — joining it');
       return joined;
     }
-    const derivation = this.doGenerate(workspaceId, pull, repo, logger).finally(() => {
+    const derivation = this.doGenerate(workspaceId, pull, logger).finally(() => {
       BriefService.inFlight.delete(prId);
     });
     BriefService.inFlight.set(prId, derivation);
@@ -253,11 +306,12 @@ export class BriefService {
 
   /**
    * Best-effort per-file summaries for one PR, hooked into a review run
-   * (T15's `run-executor.ts`) rather than a full `POST /brief/generate`.
-   * Assembles the SAME inputs `doGenerate` does and delegates to the still
-   * private `generateFileSummaries` — the ONE place that owns "at most 20
-   * core/wiring files, one batched call" (AC-36). A run hook and a manual
-   * brief regenerate must never fork that selection logic into two places.
+   * (`run-executor.ts`) rather than a full `POST /brief/generate`. Gathers
+   * the SAME artifacts `doGenerate` does (`collectArtifacts`) and delegates
+   * to the still-private `generateFileSummaries` — the ONE place that owns
+   * "at most 20 core/wiring files, one batched call" (AC-36). A run hook and
+   * a manual brief regenerate must never fork that selection logic into two
+   * places.
    *
    * WRITES `pr_file_summary` ONLY. Never creates or touches a `pr_brief`
    * row — doing so here would break AC-1 ("no brief yet" ⇒ `200` + `null`)
@@ -265,18 +319,13 @@ export class BriefService {
    * via `POST /pulls/:id/brief/generate`. Do not "helpfully" call
    * `upsertBrief` from this method for any reason.
    *
-   * Never reads `container.blast` (consistent with `generate`/`doGenerate`
-   * — a run hook has even less reason to touch the index than a manual
-   * brief regenerate does).
-   *
    * NEVER THROWS. Every failure — a PR that can't be resolved in this
-   * workspace, a DB error assembling `files`/`findingCounts`, or the model
-   * call itself (already caught inside `generateFileSummaries`) — is caught
-   * HERE and logged, so a run's per-file-summaries step can never fail the
-   * run it's attached to. A caller's own try/catch around this call (T15
-   * mirrors the existing intent-derivation step, which wraps its own call
-   * in one) is belt-and-braces, not load-bearing — this method's own catch
-   * is what actually guarantees the run continues.
+   * workspace, a DB error assembling the artifacts, or the model call itself
+   * (already caught inside `generateFileSummaries`) — is caught HERE and
+   * logged, so a run's per-file-summaries step can never fail the run it's
+   * attached to. A caller's own try/catch around this call is belt-and-
+   * braces, not load-bearing — this method's own catch is what actually
+   * guarantees the run continues.
    */
   async summarizeChangedFilesForRun(workspaceId: string, prId: string, runLog: RunLogger): Promise<void> {
     try {
@@ -286,13 +335,12 @@ export class BriefService {
         return;
       }
 
-      const files = await this.repo.getPrFiles(pull.id);
-      const findingCounts = await this.collectFindingCounts(pull.id);
+      const artifacts = await this.collectArtifacts(workspaceId, pull, runLog);
 
       // `generateFileSummaries` has its own try/catch and never throws;
-      // this outer one exists for the assembly above (getPull/getPrFiles/
-      // collectFindingCounts), none of which is otherwise guarded here.
-      await this.generateFileSummaries(pull, files, findingCounts, runLog);
+      // this outer one exists for the assembly above (getPull/
+      // collectArtifacts), none of which is otherwise guarded here.
+      await this.generateFileSummaries(pull, artifacts, runLog);
     } catch (err) {
       runLog.error(
         `Brief file summaries (run hook) failed, run continues: ${(err as Error).message}`,
@@ -301,32 +349,63 @@ export class BriefService {
   }
 
   /**
-   * Per-path finding counts from the PR's current latest-per-agent findings
-   * — the ranking input `selectFilesToSummarize` needs. Shared by
+   * The artifacts one model call reads — see `BriefArtifacts`. Shared by
    * `doGenerate` and `summarizeChangedFilesForRun` so the two callers can
-   * never drift on how a "risky file" is counted.
+   * never drift on what evidence a summary is written from.
+   *
+   * The blast read is BEST-EFFORT: a throw is logged and yields `null`
+   * (rendered as "unavailable" by `evidence.ts`), and a `degraded`/`partial`
+   * result is passed through with its `reason` — the index being unusable
+   * must never stop a brief from being generated (AC-14).
    */
-  private async collectFindingCounts(prId: string): Promise<ReadonlyMap<string, number>> {
-    const reviews = await this.repo.reviewsForPull(prId);
-    const findingCounts = new Map<string, number>();
-    for (const finding of findingsFromLatestRunPerAgent(reviews)) {
-      findingCounts.set(finding.file, (findingCounts.get(finding.file) ?? 0) + 1);
+  private async collectArtifacts(
+    workspaceId: string,
+    pull: PullRow,
+    runLog: RunLogger,
+  ): Promise<BriefArtifacts> {
+    const [fileRows, reviews, intent, blast] = await Promise.all([
+      this.repo.getPrFiles(pull.id),
+      this.repo.reviewsForPull(pull.id),
+      this.repo.getIntent(pull.id),
+      this.container.blast.blastForPull(workspaceId, pull.id).catch((err: unknown) => {
+        runLog.info(
+          `Brief evidence: blast radius unavailable (brief still generates without it) — ${(err as Error).message}`,
+        );
+        return null;
+      }),
+    ]);
+
+    // Counts only — `patch` is deliberately left behind here, the one
+    // boundary that keeps a diff body out of the brief's model input.
+    const files: SummarizableFile[] = fileRows.map((f) => ({
+      path: f.path,
+      additions: f.additions,
+      deletions: f.deletions,
+    }));
+
+    const findings = new Map<string, FindingHint[]>();
+    for (const finding of findingsFromLatestRunPerAgent(reviews).map(findingRowToDto)) {
+      const hint: FindingHint = { severity: finding.severity, title: finding.title, line: finding.start_line };
+      const list = findings.get(finding.file);
+      if (list) list.push(hint);
+      else findings.set(finding.file, [hint]);
     }
-    return findingCounts;
+
+    if (!intent) runLog.info('Brief evidence: no intent derived for this PR yet — generating without it');
+    else if (intent.headSha !== pull.headSha) {
+      runLog.info('Brief evidence: intent was derived at an earlier head — using it as-is (re-derive via /intent/recalculate)');
+    }
+
+    return { files, findings, intent, blast };
   }
 
   /**
-   * `pull`/`repo` are resolved and ownership-checked by the caller
-   * (`generate`, ahead of its `inFlight` map lookup) — this method must
-   * never re-resolve them itself, or it reopens the workspace-scope window
-   * `generate`'s ordering closes.
+   * `pull` is resolved and ownership-checked by the caller (`generate`,
+   * ahead of its `inFlight` map lookup) — this method must never re-resolve
+   * it itself, or it reopens the workspace-scope window `generate`'s
+   * ordering closes.
    */
-  private async doGenerate(
-    workspaceId: string,
-    pull: PullRow,
-    repo: RepoRow,
-    logger?: Logger,
-  ): Promise<PrBriefDetail> {
+  private async doGenerate(workspaceId: string, pull: PullRow, logger?: Logger): Promise<PrBriefDetail> {
     const prId = pull.id;
 
     // No runIds → no SSE stream / no fake agent_run row, same shape as
@@ -334,37 +413,14 @@ export class BriefService {
     // still reach the server's structured stdout logger.
     const runLog = new RunLogger(this.container.runBus, [], logger, { prId });
 
-    // ---- model call 1: forced intent re-derive ------------------------
-    // THROWS on failure — this is what lets the route answer 502 instead of
-    // silently keeping a stale brief. D5 ("intent can never fail a review")
-    // does not apply to a manual, single-PR generation.
-    await new IntentService(this.container).recalculate(workspaceId, pull, repo, runLog);
-    // Read back the just-persisted provenance for this call's tokens/cost —
-    // `recalculate` returns only the prompt-slot shape, not provenance.
-    const intentRow = await this.repo.getIntent(pull.id);
+    const artifacts = await this.collectArtifacts(workspaceId, pull, runLog);
 
-    const files = await this.repo.getPrFiles(pull.id);
-    const findingCounts = await this.collectFindingCounts(pull.id);
-
-    // ---- model call 2: best-effort file summaries ---------------------
-    const summaries = await this.generateFileSummaries(pull, files, findingCounts, runLog);
-
-    // ---- costs: sum of the non-null costs of the calls actually made ---
-    const tokensIn = (intentRow?.tokensIn ?? 0) + summaries.tokensIn;
-    const tokensOut = (intentRow?.tokensOut ?? 0) + summaries.tokensOut;
-    const costs = [intentRow?.costUsd, summaries.costUsd].filter(
-      (c): c is number => c !== null && c !== undefined,
-    );
-    const costUsd = costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null;
-    // Provider/model is a single pair on `pr_brief` even though the two
-    // calls resolve independent Settings entries (`review_intent`,
-    // `risk_brief`) and may legitimately differ. The summaries call is what
-    // `risk_brief` names, so it wins when it ran; the intent call's
-    // provider/model is the fallback so the column is never both-null when
-    // at least one call actually spent tokens (intent's own choice is also
-    // recorded separately on `pr_intent`).
-    const provider = summaries.provider ?? intentRow?.provider ?? null;
-    const model = summaries.model ?? intentRow?.model ?? null;
+    // ---- THE model call: batched file summaries from the artifacts -----
+    // Throws through `generateFileSummaries`' `rethrow` so the route can
+    // answer 502 instead of silently persisting a brief with no summaries
+    // behind a manual, single-PR generation. A run hook keeps the
+    // best-effort swallow (D5: the review must never fail over enrichment).
+    const summaries = await this.generateFileSummaries(pull, artifacts, runLog, { rethrow: true });
 
     // ---- ONE write, at the very end (AC-6) ----------------------------
     // Counts only — never a blast snapshot, a verdict, or a review-focus
@@ -372,46 +428,47 @@ export class BriefService {
     // is structurally incapable of carrying any of those.
     await this.briefRepo.upsertBrief(pull.id, {
       headSha: pull.headSha,
-      provider,
-      model,
-      tokensIn,
-      tokensOut,
-      costUsd,
-      json: { summarized_files: summaries.summarizedCount, changed_files: files.length },
+      provider: summaries.provider,
+      model: summaries.model,
+      tokensIn: summaries.tokensIn,
+      tokensOut: summaries.tokensOut,
+      costUsd: summaries.costUsd,
+      json: { summarized_files: summaries.summarizedCount, changed_files: artifacts.files.length },
     });
 
     runLog.result(
-      `Brief generated for PR #${pull.number} — ${summaries.summarizedCount}/${files.length} files summarized`,
+      `Brief generated for PR #${pull.number} — ${summaries.summarizedCount}/${artifacts.files.length} files summarized`,
     );
 
-    // Compose the response through the same read path GET uses (blast is
-    // read here for the FIRST time in this whole call — see this class's
-    // header comment for why that split matters).
+    // Compose the response through the same read path GET uses.
     const detail = await this.getBrief(workspaceId, prId);
     if (!detail) throw new ExternalServiceError('Brief was generated but could not be read back');
     return detail;
   }
 
   /**
-   * Best-effort per-file summaries: `selectFilesToSummarize` (at most 20,
-   * AC-36) → ONE batched `completeStructured` call → `truncateSummary` each
-   * reply → drop any path the model returned that wasn't asked for → ONE
-   * `upsertFileSummaries` write. NEVER fans out per file.
+   * The brief's ONE model call: `selectFilesToSummarize` (at most 20, AC-36)
+   * → `renderBriefEvidence` (artifacts only, never a patch) → ONE batched
+   * `completeStructured` call → `truncateSummary` each reply → drop any path
+   * the model returned that wasn't asked for → ONE `upsertFileSummaries`
+   * write. NEVER fans out per file.
    *
-   * Every failure (model call, schema validation inside the adapter,
-   * network) is caught HERE and logged — never rethrown — so a summaries
-   * failure can never abort `generate` or touch a prior brief.
+   * Failure handling is the caller's choice: by default every failure
+   * (model call, schema validation inside the adapter, network) is caught
+   * HERE and logged so a review run is never failed by enrichment;
+   * `rethrow: true` (manual generation) surfaces it as an
+   * `ExternalServiceError` instead, leaving any prior brief untouched.
    */
   private async generateFileSummaries(
     pull: PullRow,
-    files: readonly PrFileRow[],
-    findingCounts: ReadonlyMap<string, number>,
+    artifacts: BriefArtifacts,
     runLog: RunLogger,
+    opts: { rethrow?: boolean } = {},
   ): Promise<FileSummariesOutcome> {
-    const selected = selectFilesToSummarize(
-      files.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions })),
-      findingCounts,
-    );
+    const findingCounts = new Map<string, number>();
+    for (const [path, hints] of artifacts.findings) findingCounts.set(path, hints.length);
+
+    const selected = selectFilesToSummarize(artifacts.files, findingCounts);
     if (selected.length === 0) {
       runLog.info('Brief file summaries: no core/wiring files to summarize — skipping the model call');
       return NO_SUMMARIES;
@@ -425,18 +482,28 @@ export class BriefService {
       );
       const llm = await this.container.llm(provider);
 
-      const patchByPath = new Map(files.map((f) => [f.path, f.patch] as const));
-      const filesBlock = selected
-        .map((candidate) => {
-          const patch = patchByPath.get(candidate.path);
-          const content = patch && patch.length > 0 ? patch : '(no patch available for this file)';
-          return `path: ${candidate.path}\n${wrapUntrusted(`diff:${candidate.path}`, content)}`;
-        })
-        .join('\n\n');
+      const intentRow = artifacts.intent;
+      const evidence = renderBriefEvidence({
+        title: pull.title,
+        intent: intentRow
+          ? {
+              intent: intentRow.intent,
+              in_scope: intentRow.inScope,
+              out_of_scope: intentRow.outOfScope,
+              risk_areas: intentRow.riskAreas,
+            }
+          : null,
+        intentIsCurrent: intentRow?.headSha === pull.headSha,
+        blast: artifacts.blast,
+        files: artifacts.files,
+        selected,
+        findings: artifacts.findings,
+      });
 
       const prompt = await renderPrompt('file-summaries.md', {
         count: String(selected.length),
-        files: filesBlock,
+        context: evidence.context,
+        files: evidence.files,
       });
 
       const res = await llm.completeStructured<FileSummariesResult>({
@@ -455,8 +522,7 @@ export class BriefService {
       // `INSERT ... ON CONFLICT (pr_id, path) DO UPDATE`, and Postgres
       // raises 21000 ("ON CONFLICT DO UPDATE command cannot affect row a
       // second time") if two rows in the same statement share a conflict
-      // key, aborting the whole upsert silently (this method's own catch
-      // swallows it).
+      // key, aborting the whole upsert.
       const selectedPaths = new Set(selected.map((c) => c.path));
       const seenPaths = new Set<string>();
       const rows = res.data.summaries
@@ -483,12 +549,13 @@ export class BriefService {
         summarizedCount: rows.length,
       };
     } catch (err) {
-      // Best-effort, per the spec's "partially succeeds" edge case: a
-      // failure here is logged and leaves the brief without summaries — it
-      // must never fail the whole generation.
-      runLog.error(
-        `Brief file summaries failed (brief still generates without them): ${(err as Error).message}`,
-      );
+      const message = (err as Error).message;
+      if (opts.rethrow) {
+        throw new ExternalServiceError(`Brief generation failed: ${message}`);
+      }
+      // Best-effort (run hook): logged and the run continues without
+      // summaries — it must never fail the review it's attached to.
+      runLog.error(`Brief file summaries failed (run continues without them): ${message}`);
       return NO_SUMMARIES;
     }
   }

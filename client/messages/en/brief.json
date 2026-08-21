@@ -17,7 +17,7 @@
   },
   "generate": "Generate brief",
   "generating": "Generating…",
-  "refresh": "Refresh brief",
+  "regenerate": "Regenerate brief",
   "generateFailed": "Couldn't generate the brief. The previous one, if any, is unchanged.",
   "dismiss": "Dismiss",
   "stale": {
