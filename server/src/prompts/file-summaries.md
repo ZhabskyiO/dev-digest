@@ -103,7 +103,7 @@ Files (3 to summarize):
 path: src/payments/charge.ts
 role: core · +30/-4 · 1 finding
 changed symbols: withBackoff (function, added, 1 caller); chargeCard (function, modified, 4 callers, POST /api/orders)
-findings: [medium] Retry loop has no upper bound on total wait time (line 42)
+findings: [WARNING] Retry loop has no upper bound on total wait time (line 42)
 </untrusted>
 
 <untrusted source="file:2">

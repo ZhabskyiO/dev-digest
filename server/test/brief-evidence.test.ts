@@ -90,7 +90,7 @@ const BASE: BriefEvidenceInput = {
   findings: new Map<string, FindingHint[]>([
     [
       'src/payments/charge.ts',
-      [{ severity: 'medium', title: 'Retry loop has no upper bound on total wait time', line: 42 }],
+      [{ severity: 'WARNING', title: 'Retry loop has no upper bound on total wait time', line: 42 }],
     ],
   ]),
 };
@@ -116,7 +116,7 @@ describe('renderBriefEvidence — artifacts in, never a patch', () => {
     expect(files).toContain(
       'changed symbols: withBackoff (function, added, 1 caller); chargeCard (function, modified, 4 callers, POST /api/orders)',
     );
-    expect(files).toContain('findings: [medium] Retry loop has no upper bound on total wait time (line 42)');
+    expect(files).toContain('findings: [WARNING] Retry loop has no upper bound on total wait time (line 42)');
     expect(files).toContain('<untrusted source="file:2">\npath: src/payments/config.ts');
     expect(files).toContain('role: wiring · +3/-0 · 0 findings');
     // The unselected lockfile never gets a block.
@@ -158,7 +158,7 @@ describe('renderBriefEvidence — artifacts in, never a patch', () => {
       symbol({ name: `sym${i}`, file: path, caller_count: i }),
     );
     const hints: FindingHint[] = Array.from({ length: MAX_FINDINGS_PER_FILE + 2 }, (_, i) => ({
-      severity: i === 0 ? 'low' : 'high',
+      severity: i === 0 ? 'SUGGESTION' : 'CRITICAL',
       title: `Finding ${i}`,
       line: i + 1,
     }));
@@ -171,10 +171,10 @@ describe('renderBriefEvidence — artifacts in, never a patch', () => {
     });
     expect(files).toContain('… and 3 more');
     expect((files.match(/sym\d+ \(/g) ?? []).length).toBe(MAX_SYMBOLS_PER_FILE);
-    // Highest severity first, so the lone `low` is what the cap drops.
+    // Highest severity first, so the lone `SUGGESTION` is what the cap drops.
     expect(files).toContain('… and 2 more');
     expect(files).not.toContain('Finding 0 (line 1)');
-    expect((files.match(/\[high\]/g) ?? []).length).toBe(MAX_FINDINGS_PER_FILE);
+    expect((files.match(/\[CRITICAL\]/g) ?? []).length).toBe(MAX_FINDINGS_PER_FILE);
   });
 
   it('stays under BRIEF_EVIDENCE_MAX_CHARS with EVERY cap saturated on a 20-file PR', () => {
@@ -197,7 +197,7 @@ describe('renderBriefEvidence — artifacts in, never a patch', () => {
       paths.map((p) => [
         p,
         Array.from({ length: MAX_FINDINGS_PER_FILE + 4 }, (_, i): FindingHint => ({
-          severity: 'critical',
+          severity: 'CRITICAL',
           title: long(300, `A very long finding title ${i} `),
           line: 99999,
         })),

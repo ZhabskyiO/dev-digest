@@ -46,7 +46,7 @@ import type { Container } from '../../../platform/container.js';
 import { RunLogger } from '../../../platform/run-logger.js';
 import type { Logger } from '../run-executor.js';
 import { renderPrompt } from '../../../platform/prompts.js';
-import { NotFoundError, ExternalServiceError } from '../../../platform/errors.js';
+import { AppError, NotFoundError, ExternalServiceError } from '../../../platform/errors.js';
 import { resolveFeatureModel } from '../../settings/feature-models.js';
 import type { PullRow, IntentRow } from '../repository.js';
 import { findingsFromLatestRunPerAgent, findingRowToDto } from '../helpers.js';
@@ -551,6 +551,10 @@ export class BriefService {
     } catch (err) {
       const message = (err as Error).message;
       if (opts.rethrow) {
+        // An `AppError` already carries its own status — a `ConfigError`
+        // from `resolveFeatureModel`/`container.llm` (no key, unknown model)
+        // must stay a 500, not masquerade as an upstream-provider 502.
+        if (err instanceof AppError) throw err;
         throw new ExternalServiceError(`Brief generation failed: ${message}`);
       }
       // Best-effort (run hook): logged and the run continues without

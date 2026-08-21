@@ -31,8 +31,9 @@ import { BriefService } from './brief/index.js';
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
 const FINDING_ACTIONS = ['accept', 'dismiss'] as const;
-/** `?force=true` regenerates an existing brief; anything else (or absent) is
- *  idempotent for the current head. A string enum rather than
+/** `?force=true` regenerates an existing brief; absent or `false` is idempotent
+ *  for the current head; any other value is a 400 (strict enum on purpose).
+ *  A string enum rather than
  *  `z.coerce.boolean()` — that coercion turns the literal `"false"` into
  *  `true`. */
 const BriefGenerateQuery = z.object({ force: z.enum(['true', 'false']).optional() });

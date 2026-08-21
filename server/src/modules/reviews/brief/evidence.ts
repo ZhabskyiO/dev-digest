@@ -24,7 +24,7 @@
  */
 
 import { wrapUntrusted } from '@devdigest/reviewer-core';
-import type { Intent, BlastRadiusResult, BlastSymbol, SmartDiffRole } from '@devdigest/shared';
+import type { Intent, Finding, BlastRadiusResult, BlastSymbol, SmartDiffRole } from '@devdigest/shared';
 import { classifyPath } from '../smart-diff/index.js';
 import type { SummarizableFile, SummaryCandidate } from './summaries.js';
 
@@ -68,7 +68,7 @@ export const BRIEF_EVIDENCE_MAX_CHARS = 30_000;
 
 /** One finding, reduced to what a file summary can use — never the rationale. */
 export interface FindingHint {
-  severity: string;
+  severity: Finding['severity'];
   title: string;
   line: number;
 }
@@ -148,11 +148,14 @@ function clamp(text: string, max: number): string {
   return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed;
 }
 
-const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+// Keyed by the REAL `Severity` enum (`contracts/findings.ts`: CRITICAL | WARNING |
+// SUGGESTION) — typed against it so a renamed tier fails typecheck instead of
+// silently ranking last.
+const SEVERITY_RANK: Record<Finding['severity'], number> = { CRITICAL: 0, WARNING: 1, SUGGESTION: 2 };
 
 function renderFindings(hints: readonly FindingHint[]): string {
   const top = [...hints]
-    .sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9))
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
     .slice(0, MAX_FINDINGS_PER_FILE)
     .map((h) => `[${clamp(h.severity, 12)}] ${clamp(h.title, MAX_FINDING_TITLE_CHARS)} (line ${h.line})`);
   const more = hints.length - top.length;

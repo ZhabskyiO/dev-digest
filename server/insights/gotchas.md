@@ -365,6 +365,13 @@ Quirks of dependencies, tooling, and the local environment.
   `core` path must avoid those basenames — `src/app.ts` is NOT core; use
   something like `src/payments/charge.ts`.
 
+- 2026-08-21 — `Finding.severity` is `CRITICAL | WARNING | SUGGESTION`
+  (`vendor/shared/contracts/findings.ts::Severity`), NOT
+  `critical/high/medium/low/info`. A `Record<string, number>` rank table keyed
+  by the lowercase tiers typechecks fine and silently ranks everything equal
+  (`?? 9`). ALWAYS type such tables `Record<Finding['severity'], number>` so a
+  wrong key is a compile error (`brief/evidence.ts::SEVERITY_RANK`).
+
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
