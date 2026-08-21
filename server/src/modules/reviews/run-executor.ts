@@ -89,6 +89,16 @@ export class ReviewRunExecutor {
     // mark the rows failed and persist the buffered log so it survives a reload.
     const failAll = async (msg: string) => {
       for (const { runId, agent } of jobs) {
+        // Trace first, terminal status second — same barrier as the success
+        // path: `failed` in `agent_runs` must never be visible before the
+        // trace explaining the failure is readable.
+        await this.repo
+          // No `skillBodies` in scope here on purpose: this is the PRE-WORK
+          // failure path (diff load itself failed) — execution never reached
+          // per-agent processing, so no skill was ever resolved or attached.
+          // `skills: null` in traceFromBuffer's default is accurate, not a gap.
+          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
+          .catch(() => undefined);
         await this.repo
           .completeAgentRun(runId, {
             status: 'failed',
@@ -102,13 +112,6 @@ export class ReviewRunExecutor {
             grounding: '0/0 passed',
             error: msg,
           })
-          .catch(() => undefined);
-        await this.repo
-          // No `skillBodies` in scope here on purpose: this is the PRE-WORK
-          // failure path (diff load itself failed) — execution never reached
-          // per-agent processing, so no skill was ever resolved or attached.
-          // `skills: null` in traceFromBuffer's default is accurate, not a gap.
-          .saveRunTrace(runId, this.traceFromBuffer(runId, pull, agent, '0/0 passed'))
           .catch(() => undefined);
         this.container.runBus.complete(runId);
       }
@@ -356,20 +359,13 @@ export class ReviewRunExecutor {
       // the timeline colors on, NOT the model's self-reported verdict.
       const blockers = countBlockers(keptFindings, agent.ciFailOn);
 
-      // ---- Observability: agent_runs + ONE run_traces document --------------
-      await this.repo.completeAgentRun(runId, {
-        status: 'done',
-        durationMs,
-        tokensIn,
-        tokensOut,
-        costUsd,
-        findingsCount: findingRows.length,
-        grounding,
-        score: outcome.review.score,
-        blockers,
-        error: null,
-      });
-
+      // ---- Observability: ONE run_traces document, THEN agent_runs --------
+      // Order matters and is load-bearing: the terminal status in `agent_runs`
+      // is the barrier everything else waits on (tests poll it; tooling treats
+      // done/failed as "this run's record is complete"). Writing it before the
+      // trace document opens a window where a run reads as finished but
+      // `GET /runs/:id/trace` still 404s. Persist the trace first so terminal
+      // status always means the trace is readable.
       const trace: RunTrace = {
         config: {
           agent: agent.name,
@@ -410,6 +406,19 @@ export class ReviewRunExecutor {
       };
       runLog.info('Run complete; trace persisted');
       await this.repo.saveRunTrace(runId, trace);
+
+      await this.repo.completeAgentRun(runId, {
+        status: 'done',
+        durationMs,
+        tokensIn,
+        tokensOut,
+        costUsd,
+        findingsCount: findingRows.length,
+        grounding,
+        score: outcome.review.score,
+        blockers,
+        error: null,
+      });
       this.container.runBus.complete(runId);
 
       return { review, findings: findingRows, grounding, raw: outcome.review };
@@ -420,6 +429,17 @@ export class ReviewRunExecutor {
       const status = cancelled ? 'cancelled' : 'failed';
       const msg = cancelled ? 'Cancelled by user' : (err as Error).message;
       runLog.error(cancelled ? 'Run cancelled by user' : `Run failed: ${msg}`);
+      // Trace first, terminal status second — see the success path.
+      await this.repo
+        .saveRunTrace(
+          runId,
+          // `skillBodies` may already be populated here — the "Loading skills"
+          // step (and its run_skills write) can have completed before a LATER
+          // step (e.g. the LLM call) threw. Thread it through so the trace
+          // reflects what was actually attached, not a blanket null.
+          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, skillBodies),
+        )
+        .catch(() => undefined);
       await this.repo
         .completeAgentRun(runId, {
           status,
@@ -433,16 +453,6 @@ export class ReviewRunExecutor {
           grounding: '0/0 passed',
           error: msg,
         })
-        .catch(() => undefined);
-      await this.repo
-        .saveRunTrace(
-          runId,
-          // `skillBodies` may already be populated here — the "Loading skills"
-          // step (and its run_skills write) can have completed before a LATER
-          // step (e.g. the LLM call) threw. Thread it through so the trace
-          // reflects what was actually attached, not a blanket null.
-          this.traceFromBuffer(runId, pull, agent, '0/0 passed', Date.now() - start, skillBodies),
-        )
         .catch(() => undefined);
       this.container.runBus.complete(runId);
       throw err;
