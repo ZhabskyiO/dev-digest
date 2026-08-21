@@ -39,6 +39,7 @@ export function FileCard({
   open: openProp,
   onToggle,
   headerExtra,
+  summary,
 }: {
   file: PrFile;
   commenting?: DiffCommentApi;
@@ -51,8 +52,14 @@ export function FileCard({
   onToggle?: () => void;
   /** Extra header content (Smart Diff's findings badge) rendered before the stat. */
   headerExtra?: React.ReactNode;
+  /** Model-authored one-line "what this does" summary for this file. Rendered
+   *  as inert plain text (no rich-markup interpretation) directly beneath the
+   *  header, only while the card is expanded. Omit, `null`, or empty renders
+   *  nothing. */
+  summary?: string | null;
 }) {
   const t = useTranslations("shell");
+  const tPrReview = useTranslations("prReview");
   const [openState, setOpenState] = React.useState(
     (file.additions ?? 0) + (file.deletions ?? 0) <= AUTO_EXPAND_MAX_LINES
   );
@@ -102,6 +109,12 @@ export function FileCard({
       </div>
       {open && (
         <div style={s.fileBody}>
+          {summary && (
+            <div style={s.fileSummary}>
+              <span style={s.fileSummaryLabel}>{tPrReview("smartDiff.summaryLabel")}</span>{" "}
+              {summary}
+            </div>
+          )}
           {lines.length === 0 ? (
             <div style={s.noDiff}>{t("diffViewer.noDiffText")}</div>
           ) : (

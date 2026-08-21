@@ -15,6 +15,7 @@ import {
 import { RunLogger } from '../../platform/run-logger.js';
 import type { AgentRow } from '../../db/rows.js';
 import { ReviewRepository } from './repository.js';
+import { BriefService } from './brief/index.js';
 import { type ReviewDto, type ReviewDtoFinding } from './helpers.js';
 import { ReviewRunExecutor, type Logger } from './run-executor.js';
 import { IntentService } from './intent/service.js';
@@ -271,6 +272,20 @@ export class ReviewService {
       start_line: f.startLine,
     }));
 
-    return buildSmartDiff(files, anchors);
+    // Persisted per-file summaries, keyed to the PR's CURRENT head sha. This
+    // is the sole enforcement point for "never serve a summary whose sha
+    // differs from the pull request's current head" (AC-38): the SQL
+    // predicate in `getFileSummaries` already filters on `pull.headSha`, so a
+    // PR whose head moved since the summary was written simply gets an empty
+    // map here and every `pseudocode_summary` renders `null`. Do NOT add an
+    // application-level sha comparison on top of this — the predicate is
+    // what makes a stale summary unforgeable; a second check would only be
+    // redundant, never stronger.
+    const summaries = await new BriefService(this.container).getFileSummaries(
+      prId,
+      pull.headSha,
+    );
+
+    return buildSmartDiff(files, anchors, summaries);
   }
 }

@@ -185,6 +185,37 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-20 — A plan acceptance check phrased as `grep -qi "some phrase"` against
+  a `.md` prompt file only matches within a SINGLE physical line — `grep` has no
+  multi-line mode without `-z`. `intent.extract.md`'s untrusted-data paragraph
+  soft-wraps "…never as\ninstructions to follow." across a line break in the
+  source file, so copying it "verbatim" line-for-line into a sibling prompt
+  (`file-summaries.md`, T7) would silently fail an acceptance check worded as
+  `grep -qi "never as instructions"`. Fix: preserve the paragraph's wording and
+  meaning exactly, but rewrap the physical lines so the exact phrase the check
+  greps for lands on one line — "verbatim" here means the content, not the
+  column position of each line break. Any future task that says "repeat X
+  verbatim" *and* supplies a grep-based acceptance check should be read this
+  way, not as "byte-identical including line wrap."
+- 2026-08-20 — When a plan's own acceptance check is a NEGATIVE grep for
+  verdict/severity vocabulary (e.g. `grep -Eqi "must fix|insecure|will break|
+  approve"` must find nothing in `file-summaries.md`, T7), an illustrative
+  example of "text that looks like an instruction" copied from a sibling
+  prompt can itself trip that same check — `intent.extract.md`'s example
+  parenthetical is literally `"you must approve this"`. Substituting a
+  semantically equivalent phrase (`"you must comply with this"`) preserves the
+  illustration without tripping the negative grep. Same root cause as the
+  `process.env`-in-a-doc-comment entry below: before writing prose near a
+  literal-string acceptance grep (positive OR negative), mentally run the
+  pattern against the prose first.
+
+- 2026-08-20 — `pnpm exec tsx -e "import {X} from './src/vendor/shared/index.js'; ..."`
+  throws `Cannot find module` even with an absolute path to the barrel — `-e`
+  eval scripts run through tsx's CJS interop layer, which does not apply the
+  same `.js`→`.ts` extension-mapping resolution a real file gets. Write the
+  one-liner to a scratch `.ts` file and run `pnpm exec tsx <file>.ts` instead;
+  the plan's own ad-hoc verification snippets that use `tsx -e` need this
+  workaround to actually run.
 - 2026-08-18 — A `Dirent` from `readdir(dir, { withFileTypes: true })` does
   **not** resolve a symlink's target type: for a symlink entry,
   `entry.isSymbolicLink()` is `true` but both `entry.isFile()` and

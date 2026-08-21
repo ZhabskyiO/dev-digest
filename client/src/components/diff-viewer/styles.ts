@@ -42,6 +42,20 @@ export const s = {
     color: "var(--text-muted)",
     textAlign: "center",
   } satisfies CSSProperties,
+  /* One-line "What this does:" summary row, rendered as a single line of
+     plain text — never Markdown/HTML — directly beneath the file header. */
+  fileSummary: {
+    padding: "8px 18px",
+    fontSize: 13,
+    color: "var(--text-primary)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  } satisfies CSSProperties,
+  fileSummaryLabel: {
+    fontWeight: 500,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
   hunk: {
     fontSize: 12,
     lineHeight: "20px",

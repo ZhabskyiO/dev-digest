@@ -30,6 +30,27 @@ export const s = {
     fontSize: 12,
     color: "var(--text-muted)",
   } satisfies CSSProperties,
+  /* The per-file summary pill in the card header. Deliberately a <span>, not a
+     <button>: it carries no action of its own (AC-44) — it only announces
+     that a collapsed file has a "What this does:" row once expanded. */
+  summaryPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "2px 8px",
+    borderRadius: 5,
+    border: "1px solid var(--border)",
+    background: "var(--bg-elevated)",
+    color: "var(--text-muted)",
+    fontSize: 11.5,
+    fontWeight: 600,
+    flexShrink: 0,
+  } satisfies CSSProperties,
+  /* "N of M files summarized" — appears once for the whole PR, above the
+     groups, only when some but not all changed files carry a summary. */
+  summarizedNote: {
+    fontSize: 12.5,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
   /* The per-file findings badge in the card header. A real <button>: it is the
      keyboard path to the finding, and it must not toggle the card behind it. */
   findingsBtn: {

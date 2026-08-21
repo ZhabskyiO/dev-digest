@@ -53,6 +53,30 @@ Approaches and solutions that worked here and are worth reusing.
 
 Conventions and architectural decisions specific to this repo.
 
+- 2026-08-20 — A `messages/en/<ns>.json` catalogue file's own top level is
+  UNPREFIXED — `brief.json`'s top level is `empty`, `stale`, `verdict`, … not
+  `brief.empty` — because `src/i18n/request.ts:16-25`'s `loadMessages` walks
+  every `messages/<locale>/*.json`, keys the merged tree by filename-minus-
+  extension, and nests each file's own JSON under that key; a component then
+  does `useTranslations("brief")` once and calls `t("empty.title")`, never
+  `t("brief.empty.title")`. Confirmed against the existing consumers
+  (`IntentCard.tsx:37`, `BlastCard.tsx:32` both call
+  `useTranslations("brief")`). A NEW catalogue file needs **no registration
+  anywhere** — dropping it in `messages/en/` is sufficient; only a NEW locale
+  directory would need wiring.
+
+- 2026-08-20 — In `SmartDiffViewer.tsx`, `openPaths` (`Record<string, boolean>
+  | null`) is written by three separate effects: the initial seed-from-server
+  effect, `jumpToFirstFinding`'s badge-click handler, and (added for AC-26) a
+  URL-driven `target` effect. ALWAYS write it with the functional
+  `setOpenPaths((prev) => ({ ...prev, [path]: true }))` form, never a direct
+  object, even from an effect that thinks it's "the first write" — two of
+  these effects can fire in the same commit (e.g. smart-diff data arriving
+  while a `?file=`/`?line=` target is already in the URL), and only the
+  functional form is guaranteed to see the other effect's pending update
+  rather than clobbering it. `{...null}` is valid JS (evaluates to `{}`), so
+  the functional form works safely even before the seed effect has run.
+
 - 2026-08-20 — `AttachmentList`'s composite `${repo_id}:${path}` row key
   (`AttachmentList.tsx:96-98`) only actually disambiguates two same-path rows
   if the CALLER populates `AttachmentListItem.repo_id` — it's optional and

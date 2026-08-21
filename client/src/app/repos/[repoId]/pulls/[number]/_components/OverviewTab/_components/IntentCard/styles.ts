@@ -86,34 +86,6 @@ export const s = {
     width: 4,
     color: "var(--text-muted)",
   } satisfies CSSProperties,
-  /* The rule above RISK AREAS. `box` already supplies the gap below the scope
-     grid, so the divider needs only its own padding above the label. */
-  riskSection: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-    paddingTop: 24,
-    borderTop: "1px solid var(--border)",
-  } satisfies CSSProperties,
-  riskChips: {
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 10,
-  } satisfies CSSProperties,
-  riskChip: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 10,
-    border: "1px solid var(--border)",
-    borderRadius: 10,
-    padding: "10px 16px",
-    fontSize: 15,
-    color: "var(--text-secondary)",
-    lineHeight: 1.3,
-  } satisfies CSSProperties,
   unavailableBox: {
     border: "1px solid var(--border)",
     borderRadius: 8,
@@ -128,35 +100,5 @@ export const s = {
     marginTop: 4,
     fontSize: 12.5,
     color: "var(--text-muted)",
-  } satisfies CSSProperties,
-  errorBox: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    background: "var(--bg-elevated)",
-    padding: "12px 16px",
-  } satisfies CSSProperties,
-  errorLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    color: "var(--text-secondary)",
-    fontSize: 13.5,
-  } satisfies CSSProperties,
-  /* Failure of the manual re-derive. Inline and above the card so the previous
-     (still valid) intent stays readable underneath — the POST failing does not
-     invalidate what is already stored. */
-  recalcError: {
-    margin: "0 0 12px",
-    fontSize: 12.5,
-    color: "var(--crit)",
-  } satisfies CSSProperties,
-  skeletonWrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
   } satisfies CSSProperties,
 } as const;

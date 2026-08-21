@@ -438,6 +438,41 @@ Conventions and architectural decisions specific to this repo.
   API with the saved state" before reaching for a shared transaction that
   may not be achievable without a layering violation.
 
+- 2026-08-20 — `modules/reviews/brief/summaries.ts::selectFilesToSummarize`
+  (T6) takes `findingCounts: ReadonlyMap<string, number>` keyed by file
+  `path`, with an absent path treated as `0` findings (`findingCounts.get(file.path)
+  ?? 0`) — the plan's own text (`selectFilesToSummarize(files, findingCounts)`)
+  left the exact type unspecified. Chosen to match the `ReadonlyMap<string,
+  string>` shape T14 already specifies for `buildSmartDiff`'s `summaries`
+  parameter (`smart-diff/classify.ts`), so both per-path caller-supplied maps
+  in this feature share one convention. T12's `generateFileSummaries(pull,
+  files, findingCounts, logger)` must build/pass a `ReadonlyMap<string,
+  number>` (e.g. from `findingsFromLatestRunPerAgent`'s grouped results) to
+  match this signature, not an object/record keyed by path.
+
+- 2026-08-20 — `IntentService.recalculate` (`modules/reviews/intent/service.ts`)
+  resolves to `PromptIntentSlot` only (`statement`/`inScope`/`outOfScope`/
+  `confidence`) — it never returns the derivation's tokens/cost/provider/
+  model, unlike `derive`'s internal `res` which has all four. A caller that
+  needs that provenance (T12's `BriefService.generate`, which sums the
+  intent call's cost with the file-summaries call's cost into `pr_brief`'s
+  single `tokens_in`/`tokens_out`/`cost_usd`) must `await recalculate(...)`
+  first, then separately `await reviewRepo.getIntent(pull.id)` to read back
+  what `derive` just persisted to `pr_intent` — there is no other way to get
+  at those numbers without widening `PromptIntentSlot` (which would leak
+  provenance into the prompt-slot shape every reviewer prompt consumes).
+
+- 2026-08-20 — `pr_brief.provider`/`model` (T12, `brief/service.ts::doGenerate`)
+  is a single string pair even though `generate()` makes two model calls
+  resolved from two INDEPENDENT Settings entries (`review_intent` for the
+  intent re-derive, `risk_brief` for the file summaries) that a workspace can
+  legitimately point at different providers/models. Decided: the
+  `risk_brief`/summaries call's provider/model wins when that call actually
+  ran; the intent call's is the fallback (so the column is never both-null
+  when at least one call spent tokens) — never blank, never a delimited
+  "both" string. The intent call's own provider/model is separately and
+  fully recorded on `pr_intent`, so nothing is lost by this simplification.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.

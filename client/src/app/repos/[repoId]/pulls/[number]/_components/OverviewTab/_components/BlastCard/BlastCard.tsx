@@ -13,7 +13,7 @@
 import React from "react";
 import { useTranslations } from "next-intl";
 import { SectionLabel, Skeleton, Icon, Button, MonoLink } from "@devdigest/ui";
-import type { BlastSymbol } from "@devdigest/shared";
+import type { BlastRadiusResult, BlastSymbol } from "@devdigest/shared";
 import { useBlastRadius } from "@/lib/hooks/blast";
 import { githubPrUrl } from "@/lib/github-urls";
 import { callerHref, layoutGraph } from "./helpers";
@@ -23,16 +23,40 @@ interface BlastCardProps {
   prId: string | null;
   repoFullName: string | null;
   defaultBranch: string | null;
+  /** The blast payload already resolved by the brief's own read-time
+   * composition (`PrBriefDetail.blast`), or `null` when no brief exists yet
+   * (or the brief hasn't settled). Rendering from this — instead of an
+   * unconditional call to the fallback hook below — means a briefed PR runs
+   * the server-side blast computation exactly once (see the plan's dedupe
+   * table). */
+  blastFromBrief: BlastRadiusResult | null;
+  /** Whether `usePrBrief` has settled (loading finished, brief present or
+   * not). The fallback query below stays disabled until this is true, so it
+   * never fires — then gets thrown away — on first paint while the brief is
+   * still loading. */
+  briefSettled: boolean;
 }
 
 type View = "tree" | "graph";
 
-export function BlastCard({ prId, repoFullName, defaultBranch }: BlastCardProps) {
+export function BlastCard({ prId, repoFullName, defaultBranch, blastFromBrief, briefSettled }: BlastCardProps) {
   const t = useTranslations("blast");
   const tBrief = useTranslations("brief");
   const tCommon = useTranslations("common");
   const [view, setView] = React.useState<View>("tree");
-  const { data, isLoading, isError, refetch } = useBlastRadius(prId);
+  // Only asked for when the brief has settled and did not already carry a
+  // blast payload — a briefed PR never spends a second blast computation.
+  const fallback = useBlastRadius(prId, { enabled: briefSettled && blastFromBrief == null });
+  const data = blastFromBrief ?? fallback.data ?? null;
+  // A brief-backed payload is never "loading"/"erroring" — those states only
+  // apply to the fallback query, and only once it was actually allowed to
+  // run. While the brief itself is still in flight (`!briefSettled`) the
+  // fallback stays disabled by design, so its own `isLoading` would read
+  // `false` — without this override that would fall through to the error
+  // box below instead of the skeleton the brief-loading state needs.
+  const isLoading = blastFromBrief == null && (!briefSettled || fallback.isLoading);
+  const isError = blastFromBrief == null && briefSettled && fallback.isError;
+  const refetch = fallback.refetch;
 
   const title = tBrief("block.blast");
 

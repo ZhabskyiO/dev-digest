@@ -63,7 +63,14 @@ const DATA: BlastRadiusResult = {
   summary: "2 changed symbols · 14 callers · 3 endpoints · 1 cron/job",
 };
 
-function renderCard(props: { repoFullName?: string | null; defaultBranch?: string | null } = {}) {
+function renderCard(
+  props: {
+    repoFullName?: string | null;
+    defaultBranch?: string | null;
+    blastFromBrief?: BlastRadiusResult | null;
+    briefSettled?: boolean;
+  } = {},
+) {
   return render(
     <NextIntlClientProvider
       locale="en"
@@ -73,11 +80,17 @@ function renderCard(props: { repoFullName?: string | null; defaultBranch?: strin
         prId="pr1"
         repoFullName={props.repoFullName === undefined ? "acme/payments-api" : props.repoFullName}
         defaultBranch={props.defaultBranch === undefined ? "main" : props.defaultBranch}
+        blastFromBrief={props.blastFromBrief === undefined ? null : props.blastFromBrief}
+        briefSettled={props.briefSettled ?? true}
       />
     </NextIntlClientProvider>,
   );
 }
 
+/* Every existing case here drives the fallback query — i.e. the "no brief
+   yet" row of the dedupe table — so it renders with `blastFromBrief: null`
+   and `briefSettled: true` (renderCard's defaults) exactly as before the
+   dedupe existed. */
 function mockBlast(data: BlastRadiusResult | null, state: { isLoading?: boolean; isError?: boolean } = {}) {
   useBlastRadius.mockReturnValue({
     data,
@@ -247,5 +260,40 @@ describe("BlastCard — added vs touched", () => {
     renderCard();
     expect(screen.getByText("symbols")).toBeInTheDocument();
     expect(screen.queryByText("touched")).not.toBeInTheDocument();
+  });
+});
+
+describe("BlastCard — blast dedupe with the Brief", () => {
+  it("renders from a non-null blastFromBrief without asking the fallback query for data", () => {
+    // The fallback hook is still called (rules of hooks), but disabled — so
+    // there is no second GET /pulls/:id/blast for a PR that already has a brief.
+    mockBlast(null);
+    renderCard({ blastFromBrief: DATA, briefSettled: true });
+
+    expect(screen.getByText("rateLimit()")).toBeInTheDocument();
+    expect(screen.getByText("bucketKey()")).toBeInTheDocument();
+    expect(screen.getByText("src/api/public/index.ts:23")).toBeInTheDocument();
+
+    expect(useBlastRadius).toHaveBeenCalledWith("pr1", { enabled: false });
+  });
+
+  it("falls back to the live blast query when there is no brief yet — never-briefed PR keeps rendering", () => {
+    mockBlast(DATA);
+    renderCard({ blastFromBrief: null, briefSettled: true });
+
+    expect(useBlastRadius).toHaveBeenCalledWith("pr1", { enabled: true });
+    expect(screen.getByText("rateLimit()")).toBeInTheDocument();
+    expect(screen.getByText("src/api/public/index.ts:23")).toBeInTheDocument();
+    expect(screen.getByText("14")).toBeInTheDocument();
+  });
+
+  it("asks nothing while the brief is still loading — fallback stays disabled", () => {
+    mockBlast(null);
+    renderCard({ blastFromBrief: null, briefSettled: false });
+
+    expect(useBlastRadius).toHaveBeenCalledWith("pr1", { enabled: false });
+    // Neither the brief's payload nor a fetched one exists yet — the card
+    // shows its loading skeleton, not the error box.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

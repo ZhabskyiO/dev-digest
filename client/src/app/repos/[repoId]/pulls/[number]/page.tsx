@@ -64,6 +64,19 @@ export default function PRDetailPage() {
      a reload and can be shared, and one router.replace can move tabs and pick
      the finding in a single navigation. */
   const targetFindingId = search.get("finding");
+  /* Which file:line to reveal on the Files-changed tab, set by `openFileLine`
+     below. Memoized on the raw param strings so the object identity stays
+     stable across unrelated re-renders — DiffTab/SmartDiffViewer key their
+     scroll-on-arrival effect off this reference, and a fresh object every
+     render would re-trigger the scroll continuously. */
+  const fileParam = search.get("file");
+  const lineParam = search.get("line");
+  const targetFileLine = React.useMemo(() => {
+    if (!fileParam) return null;
+    const line = Number(lineParam);
+    if (!Number.isFinite(line)) return null;
+    return { path: fileParam, line };
+  }, [fileParam, lineParam]);
   const setParams = (entries: Record<string, string | null>) => {
     const sp = new URLSearchParams(search.toString());
     for (const [key, val] of Object.entries(entries)) {
@@ -75,11 +88,18 @@ export default function PRDetailPage() {
   const setParam = (key: string, val: string | null) => setParams({ [key]: val });
   // Leaving a tab drops the finding target — it only means anything on the
   // Agent runs tab, and a stale `?finding=` would re-scroll on the way back.
-  const setTab = (t: string) => setParams({ tab: t, finding: null });
+  // `?file=`/`?line=` are the diff tab's equivalent deep-link target, so they
+  // get cleared the same way — otherwise a stale anchor re-fires on return.
+  const setTab = (t: string) => setParams({ tab: t, finding: null, file: null, line: null });
   /* A severity badge in the diff → the finding in full, on the Agent runs tab.
      Both params move together so the tab switch and the target land in one
      history entry (two setParam calls would race on the same `search`). */
   const openFinding = (findingId: string) => setParams({ tab: "findings", finding: findingId });
+  /* A Brief review-focus entry → that file:line in the Files-changed view.
+     One `setParams` call for the same reason as `openFinding` above: two
+     separate `setParam` calls would race on the same `search` snapshot. */
+  const openFileLine = (path: string, line: number) =>
+    setParams({ tab: "diff", file: path, line: String(line) });
 
   // Reviews come newest-first; each is its own run (grouped into accordions).
   const runs = reviews ?? [];
@@ -152,8 +172,11 @@ export default function PRDetailPage() {
           <OverviewTab
             prId={prId}
             prBody={pr.body}
+            prHeadSha={pr.head_sha}
+            prCommits={pr.commits}
             repoFullName={repoFullName}
             defaultBranch={activeRepo?.default_branch ?? null}
+            onOpenFileLine={openFileLine}
           />
         )}
 
@@ -183,6 +206,10 @@ export default function PRDetailPage() {
               // review's derivation is cached by head_sha server-side, so a
               // fresh run may have derived a new intent worth re-fetching.
               if (prId) qc.invalidateQueries({ queryKey: ["pr-intent", prId] });
+              // A completed run changes the brief's read-time-composed
+              // verdict, review focus, and (once summarized) per-file
+              // summaries — all resolved fresh on every `GET .../brief`.
+              if (prId) qc.invalidateQueries({ queryKey: ["pr-brief", prId] });
             }}
           />
         )}
@@ -194,6 +221,7 @@ export default function PRDetailPage() {
             files={pr.files}
             canComment={pr.status === "open"}
             onOpenFinding={openFinding}
+            targetFileLine={targetFileLine}
           />
         )}
       </div>

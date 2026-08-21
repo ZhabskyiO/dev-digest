@@ -24,16 +24,38 @@ export const RiskAreaKind = z.enum([
 export type RiskAreaKind = z.infer<typeof RiskAreaKind>;
 
 /**
+ * A single changed-file reference a risk area can point at — e.g. "here's the
+ * file (and, optionally, the line range) this risk area is about." Purely for
+ * display: like the rest of `RiskArea`, it never reaches a reviewer prompt.
+ */
+export const RiskAreaFileRef = z.object({
+  path: z.string(),
+  start_line: z.number().int().nullish(),
+  end_line: z.number().int().nullish(),
+});
+export type RiskAreaFileRef = z.infer<typeof RiskAreaFileRef>;
+
+/**
  * One "worth a closer look here" flag on a PR — e.g. `security` / "Auth surface
  * touched". Like the rest of `Intent` this is a CLAIM derived from PR metadata,
- * not a finding: it says where to look, never that something is wrong. Risk
- * areas are display-only and are deliberately NOT fed to the reviewer prompt —
- * a derived hint from a cheap model must not steer what the review looks for.
+ * not a finding: it says where to look, never that something is wrong. A risk
+ * area's `label`, `explanation`, and `file_refs` are ALL display-only and are
+ * deliberately NOT fed to the reviewer prompt — a derived hint from a cheap
+ * model must not steer what the review looks for. `file_refs` and
+ * `explanation` are `.nullish()`, not `.default()`: this schema is handed to
+ * the provider as a strict JSON schema, and `default` is not among the
+ * keywords OpenAI's strict structured-output mode accepts (see `gotchas.md`,
+ * 2026-08-08). A risk area with neither field still validates — a brief
+ * persisted before this widening still parses.
  */
 export const RiskArea = z.object({
   kind: RiskAreaKind,
   /** Short noun phrase, 2-6 words — chip text. */
   label: z.string(),
+  /** Zero or more changed-file references this risk area is about. */
+  file_refs: z.array(RiskAreaFileRef).nullish(),
+  /** Short free-text explanation of why this area is flagged. */
+  explanation: z.string().nullish(),
 });
 export type RiskArea = z.infer<typeof RiskArea>;
 

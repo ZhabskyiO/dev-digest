@@ -16,6 +16,7 @@ import {
 } from './evidence.js';
 import { readDocRefs } from './docs.js';
 import { fetchExternalUrlEvidence } from './external.js';
+import { groundRiskAreas } from './risk-areas.js';
 
 /**
  * The shape `reviewer-core`'s prompt slot expects (`PromptParts['intent']`).
@@ -29,6 +30,15 @@ export interface PromptIntentSlot {
   outOfScope: string[];
   confidence: IntentConfidenceTier;
 }
+
+/**
+ * AC-20 pin: risk areas (`RiskArea.label`/`explanation`/`file_refs`) are
+ * display-only and must NEVER be added to `PromptIntentSlot` — they are not
+ * fed to a reviewer prompt, only rendered in the UI. `PromptIntentSlot`
+ * intentionally carries just `statement`/`inScope`/`outOfScope`/`confidence`;
+ * do not widen it to include `riskAreas`, and do not have `toPromptSlot` read
+ * `row.riskAreas` for any reason.
+ */
 
 /** Map a persisted `pr_intent` row to the prompt-slot shape. */
 export function toPromptSlot(row: IntentRow): PromptIntentSlot {
@@ -332,9 +342,26 @@ export class IntentService {
       messages: [{ role: 'user', content: prompt }],
     });
 
+    // ---- ground risk areas against the PR's real changed-file set ------
+    // Model output is untrusted: a `file_refs` entry naming a path outside
+    // this PR never resolves, and `explanation` has no model-side length
+    // limit. `groundRiskAreas` is pure/synchronous/never-throws and never
+    // changes the list's length or order (server/src/modules/reviews/intent/
+    // risk-areas.ts) — AC-16 (drop unresolvable refs, keep the area) and
+    // AC-21 (truncate `explanation` to 280 chars) both land here, on the
+    // persistence path. Risk areas are display-only and never reach
+    // `toPromptSlot`/the reviewer prompt regardless (AC-20, pinned above).
+    const groundedIntent: Intent = {
+      ...res.data,
+      risk_areas: groundRiskAreas(
+        res.data.risk_areas,
+        files.map((f) => f.path),
+      ),
+    };
+
     // ---- persist (still inside the guarding try/catch) -----------------
     await this.repo.upsertIntent(pull.id, {
-      intent: res.data,
+      intent: groundedIntent,
       headSha: pull.headSha,
       confidence: confidence.tier,
       confidenceScore: confidence.score,

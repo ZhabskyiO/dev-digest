@@ -16,6 +16,7 @@ import {
   resolveProjectContext,
 } from './prompt-context.js';
 import { IntentService, type PromptIntentSlot } from './intent/service.js';
+import { BriefService } from './brief/index.js';
 
 /** Thrown by a run when the user cancels it mid-flight (between map files). */
 export class RunCancelledError extends Error {
@@ -50,6 +51,7 @@ export type RunOutcome = {
  */
 export class ReviewRunExecutor {
   private intentService: IntentService;
+  private briefService: BriefService;
 
   constructor(
     private container: Container,
@@ -57,6 +59,7 @@ export class ReviewRunExecutor {
     private agents: Container['agentsRepo'],
   ) {
     this.intentService = new IntentService(container);
+    this.briefService = new BriefService(container);
   }
 
   /**
@@ -170,6 +173,25 @@ export class ReviewRunExecutor {
           `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
         );
       }
+    }
+
+    // T15 — per-file summaries (AC-31), derived ONCE per executeRuns, exactly
+    // like intent above and for the same reason: it's shared across every
+    // queued agent in this batch, not per-agent state. Placed AFTER the loop
+    // (not before it, alongside diff/intent) so it never delays any agent's
+    // review behind an optional model call. `summarizeChangedFilesForRun`
+    // already swallows every internal failure and returns normally (D5); this
+    // try/catch is defense in depth so that even an unexpected throw here can
+    // NEVER reach `failAll` above, which would fail every queued run in this
+    // batch for what is an optional enrichment, not the review itself.
+    try {
+      await runLog.step(
+        'Summarizing changed files',
+        () => this.briefService.summarizeChangedFilesForRun(workspaceId, pull.id, runLog),
+        { kind: 'tool' },
+      );
+    } catch (err) {
+      runLog.info(`File summaries step threw unexpectedly (ignored): ${(err as Error).message}`);
     }
   }
 

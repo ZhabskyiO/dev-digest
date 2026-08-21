@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { PrIntentDetail } from "@devdigest/shared";
 // 10×`../` reaches `client/` from here: `messages/` sits at the package root,
@@ -8,27 +8,7 @@ import messages from "../../../../../../../../../../messages/en/brief.json";
 import commonMessages from "../../../../../../../../../../messages/en/common.json";
 import { IntentCard } from "./IntentCard";
 
-const usePrIntent = vi.hoisted(() => vi.fn());
-const useRecalculateIntent = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/hooks/reviews", () => ({ usePrIntent, useRecalculateIntent }));
-
-/** The re-derive mutation's return, with the mutate spy the tests assert on. */
-const mutate = vi.fn();
-function mockRecalculate(state: { isPending?: boolean; isError?: boolean } = {}) {
-  useRecalculateIntent.mockReturnValue({
-    mutate,
-    isPending: state.isPending ?? false,
-    isError: state.isError ?? false,
-  });
-}
-
 afterEach(cleanup);
-beforeEach(() => {
-  usePrIntent.mockReset();
-  useRecalculateIntent.mockReset();
-  mutate.mockReset();
-  mockRecalculate();
-});
 
 const INTENT: PrIntentDetail = {
   intent: "Add rate limiting to public API endpoints to prevent abuse from unauthenticated clients.",
@@ -48,22 +28,17 @@ const INTENT: PrIntentDetail = {
   derived_at: "2026-08-08T12:00:00.000Z",
 };
 
-function renderCard() {
+function renderCard(intent: PrIntentDetail | null) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ brief: messages, common: commonMessages }}>
-      <IntentCard prId="pr1" />
+      <IntentCard intent={intent} repoFullName="acme/widgets" headSha="abc1234" />
     </NextIntlClientProvider>,
   );
 }
 
-function mockIntent(data: PrIntentDetail | null) {
-  usePrIntent.mockReturnValue({ data, isLoading: false, isError: false, refetch: vi.fn() });
-}
-
 describe("IntentCard", () => {
   it("renders the statement in quotation marks, both scope columns, and risk chips", () => {
-    mockIntent(INTENT);
-    renderCard();
+    renderCard(INTENT);
 
     // The quotes are part of the rendered text — they mark the sentence as the
     // author's claim, so a plain-substring match must fail without them.
@@ -81,66 +56,41 @@ describe("IntentCard", () => {
   });
 
   it("omits the risk-areas section entirely when the model returned none", () => {
-    mockIntent({ ...INTENT, risk_areas: [] });
-    renderCard();
+    renderCard({ ...INTENT, risk_areas: [] });
 
     expect(screen.queryByText("Risk areas")).not.toBeInTheDocument();
     expect(screen.getByText("In scope")).toBeInTheDocument();
   });
 
   it("warns that scope was withheld from the reviewer only at low confidence", () => {
-    mockIntent({ ...INTENT, confidence: { tier: "low", score: 0.3, sources: ["title"] } });
-    renderCard();
+    renderCard({ ...INTENT, confidence: { tier: "low", score: 0.3, sources: ["title"] } });
     expect(screen.getByText(/were not shown to the reviewer/)).toBeInTheDocument();
 
     cleanup();
-    mockIntent(INTENT);
-    renderCard();
+    renderCard(INTENT);
     expect(screen.queryByText(/were not shown to the reviewer/)).not.toBeInTheDocument();
   });
 
   it("shows the empty state, not the card, when no intent has been derived", () => {
-    mockIntent(null);
-    renderCard();
+    renderCard(null);
     expect(screen.getByText("Brief not available yet.")).toBeInTheDocument();
     expect(screen.queryByText("In scope")).not.toBeInTheDocument();
   });
 
-  describe("re-derive", () => {
-    it("triggers the mutation from both the card and the empty state", () => {
-      mockIntent(INTENT);
-      renderCard();
-      fireEvent.click(screen.getByRole("button", { name: "Re-derive" }));
-      expect(mutate).toHaveBeenCalledTimes(1);
+  it("carries no recalculate/re-derive control of its own (AC-43)", () => {
+    // Scoped to the specific control AC-43 removed, not "no buttons at all" —
+    // this fixture's risk areas carry no `explanation`, but AC-17 requires a
+    // real `<button>` disclosure on any risk area that does, and that must
+    // stay unaffected by this assertion.
+    renderCard(INTENT);
+    expect(
+      screen.queryByRole("button", { name: /re-derive|recalculate/i }),
+    ).not.toBeInTheDocument();
 
-      // The empty state is the one place this button is the ONLY way forward —
-      // otherwise leaving it means running a whole review.
-      cleanup();
-      mockIntent(null);
-      renderCard();
-      fireEvent.click(screen.getByRole("button", { name: "Re-derive" }));
-      expect(mutate).toHaveBeenCalledTimes(2);
-    });
-
-    it("disables the button while a derivation is in flight", () => {
-      mockIntent(INTENT);
-      mockRecalculate({ isPending: true });
-      renderCard();
-
-      const button = screen.getByRole("button", { name: "Deriving…" });
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
-      expect(mutate).not.toHaveBeenCalled();
-    });
-
-    it("reports a failed re-derive while keeping the stored intent on screen", () => {
-      mockIntent(INTENT);
-      mockRecalculate({ isError: true });
-      renderCard();
-
-      expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't re-derive/);
-      // The POST failing says nothing about what is already stored.
-      expect(screen.getByText(`“${INTENT.intent}”`)).toBeInTheDocument();
-    });
+    cleanup();
+    renderCard(null);
+    expect(
+      screen.queryByRole("button", { name: /re-derive|recalculate/i }),
+    ).not.toBeInTheDocument();
   });
 });

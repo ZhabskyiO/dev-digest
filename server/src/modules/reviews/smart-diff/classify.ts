@@ -7,6 +7,13 @@
  * tab must never cost a token — that is an acceptance criterion, and keeping
  * this file free of the container is how it stays true.
  *
+ * Per-file pseudocode summaries arrive the same way: as a caller-supplied
+ * `summaries` map (path → persisted summary text) that this module only
+ * reads, never generates. That map must NEVER influence grouping, ordering,
+ * or the split suggestion — those stay fully determined by `files`/`anchors`
+ * alone (the determinism rule). It exists purely to attach an already-written
+ * sentence to the file it describes.
+ *
  * Every threshold and pattern comes from `./constants.ts`.
  */
 
@@ -110,10 +117,18 @@ function findingLinesFor(path: string, anchors: readonly FindingAnchor[]): numbe
  *
  * Groups are emitted in `ROLE_ORDER` and a role with no files is omitted, so
  * the client never renders an empty "Wiring" header.
+ *
+ * `summaries` is an optional, caller-supplied `path → summary text` map of
+ * ALREADY-PERSISTED per-file summaries (see `brief/repository.ts::getFileSummaries`).
+ * It is looked up per file and attached verbatim — never generated, never
+ * fetched, never used to decide bucket, sort position, or split seam. Omit it
+ * (or pass an empty map) for a summary-free response; every `pseudocode_summary`
+ * is then `null`, same as before this parameter existed.
  */
 export function buildSmartDiff(
   files: readonly ClassifiableFile[],
   anchors: readonly FindingAnchor[],
+  summaries?: ReadonlyMap<string, string>,
 ): SmartDiff {
   const byRole = new Map<SmartDiffRole, SmartDiffFile[]>();
 
@@ -124,11 +139,11 @@ export function buildSmartDiff(
       additions: file.additions,
       deletions: file.deletions,
       finding_lines: findingLinesFor(file.path, anchors),
-      // Always null: a pseudocode summary is a model-written sentence, and
-      // Smart Diff is contractually LLM-free. The field stays in the contract
-      // for a future summarizer to populate; the client renders nothing when
-      // it is null rather than showing an empty "What this does" row.
-      pseudocode_summary: null,
+      // A persisted, model-written sentence looked up by path — Smart Diff
+      // itself never calls a model. `summaries` is keyed to the PR's current
+      // head sha by its caller (`getFileSummaries`'s SQL predicate); a stale
+      // or absent entry simply yields `null` here, same as no summary at all.
+      pseudocode_summary: summaries?.get(file.path) ?? null,
     };
     const bucket = byRole.get(role);
     if (bucket) bucket.push(entry);

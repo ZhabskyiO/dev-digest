@@ -51,6 +51,20 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-20 — Adding an unconditional `useTranslations("<newNamespace>")` call
+  to a shared component (one already rendered by `src/test/smoke.test.tsx`,
+  which hand-builds its `NextIntlClientProvider` with only a couple of
+  catalogues, e.g. `{ shell: shellMessages }`) does NOT fail that test — Next-
+  intl's default `onError` just logs `IntlError: MISSING_MESSAGE` to stderr
+  and falls back to rendering the key path as text — but it does pollute test
+  output every run. `FileCard.tsx` gained `useTranslations("prReview")` for a
+  new `summary` row while the plain-`DiffViewer` smoke test still only
+  provides `shell` messages; the hook runs on every render regardless of
+  whether `summary` is set, so the warning fires even when the new feature
+  isn't exercised. If a future task edits `smoke.test.tsx`'s provider, add the
+  now-required namespace there rather than assuming a clean run means no new
+  namespace dependency was introduced.
+
 - 2026-08-20 — **NEVER type a `useRef` holding a timeout id as
   `ReturnType<typeof window.setTimeout>`** — it fails `tsc --noEmit` with
   `Type 'number' is not assignable to type 'Timeout'` even though the same
@@ -180,6 +194,25 @@ Quirks of dependencies, tooling, and the local environment.
   `RunTraceDrawer/_components/TraceBody/TraceBody.tsx`'s `PROJECT_CONTEXT_OUTCOME_TONE`
   lookup (fixed) vs. its neighbouring `t(`trace.projectContext.outcome.${doc.outcome}`)`
   call (left as-is, already safe).
+
+- 2026-08-20 — A planner's "Verify before you return" grep like
+  `grep -c "useSomeHook" <File.tsx>` equals 1` can be structurally
+  impossible to satisfy: `grep -c` counts matching LINES, and any hook that
+  is both imported and called necessarily produces two lines containing its
+  identifier (`import { useSomeHook } from "…"` and
+  `const x = useSomeHook(…)`), even with a single call site. Don't burn a
+  pass trying to make the raw identifier count hit exactly 1 — instead grep
+  for the more specific pattern the check is actually protecting (e.g. a
+  mutation's `.mutate(` call site, not the hook name) and verify THAT count
+  is 1, then report the literal instruction's actual (higher) count with the
+  explanation. Real example from T21 (`BriefCard.tsx`): `useGenerateBrief`
+  greps to 2 (import + call) no matter what, but `generate\.mutate` — the
+  thing AC-43's "exactly one token-spending control" guard actually cares
+  about — greps to 1 once the button is written once and referenced from
+  both the empty-state and brief-content render branches via a shared JSX
+  variable rather than duplicated inline in each branch (which would have
+  produced two `generate.mutate()` call sites, silently violating the guard
+  while still "working").
 
 ## Recurring Errors & Fixes
 

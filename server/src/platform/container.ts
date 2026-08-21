@@ -36,6 +36,7 @@ import { LinearTicketProvider } from '../adapters/tickets/linear.js';
 import { ProjectContextService } from '../modules/project-context/service.js';
 import { ProjectContextRepository } from '../modules/project-context/repository.js';
 import { OnboardingService } from '../modules/onboarding/service.js';
+import { BlastService } from '../modules/blast/service.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -83,6 +84,12 @@ export interface ContainerOverrides {
    *  route-smoke tests stay hermetic (no DB, no clone on disk, no model
    *  call), mirroring `ContainerOverrides.projectContext`. */
   onboarding?: OnboardingService;
+  /** T12 (PR Brief `BriefService`) — `getBrief` calls `container.blast`
+   *  exactly once per read (blast + status + reason come back together on
+   *  `BlastRadiusResult`); tests inject a fake `BlastService` here so a brief
+   *  read-path test stays hermetic (no repo-intel index, no DB read for the
+   *  blast map), mirroring `ContainerOverrides.onboarding`. */
+  blast?: BlastService;
 }
 
 export class Container {
@@ -113,6 +120,7 @@ export class Container {
   private _projectContext?: ProjectContextService;
   private _projectContextRepo?: ProjectContextRepository;
   private _onboarding?: OnboardingService;
+  private _blast?: BlastService;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -180,6 +188,19 @@ export class Container {
   get onboarding(): OnboardingService {
     if (this.overrides.onboarding) return this.overrides.onboarding;
     return (this._onboarding ??= new OnboardingService(this));
+  }
+
+  /**
+   * PR-impact map — reads only, no model call anywhere in its path (see
+   * `BlastService`'s own doc comment). LAZY, like every other adapter/service
+   * getter here: constructing it eagerly in the constructor would run at app
+   * build time and break any test that builds a `Container` from a *partial*
+   * `ContainerOverrides` object without a real DB (server/insights/gotchas.md,
+   * 2026-08-20). Tests inject a fake via `ContainerOverrides.blast`.
+   */
+  get blast(): BlastService {
+    if (this.overrides.blast) return this.overrides.blast;
+    return (this._blast ??= new BlastService(this));
   }
 
   get codeIndex(): CodeIndex {

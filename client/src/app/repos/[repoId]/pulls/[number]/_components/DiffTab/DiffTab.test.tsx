@@ -19,8 +19,15 @@ vi.mock("@/lib/hooks/reviews", () => ({
   useCreatePrComment,
 }));
 // Both viewers are covered by their own tests; here they only have to prove
-// which order is on screen when the token note renders.
-vi.mock("../SmartDiffViewer", () => ({ SmartDiffViewer: () => <div>smart-order-view</div> }));
+// which order is on screen when the token note renders, and (for
+// SmartDiffViewer) that a `targetFileLine` prop actually reaches it.
+const smartDiffViewerSpy = vi.hoisted(() => vi.fn());
+vi.mock("../SmartDiffViewer", () => ({
+  SmartDiffViewer: (props: unknown) => {
+    smartDiffViewerSpy(props);
+    return <div>smart-order-view</div>;
+  },
+}));
 vi.mock("@/components/diff-viewer", () => ({ DiffViewer: () => <div>original-order-view</div> }));
 
 afterEach(cleanup);
@@ -51,10 +58,15 @@ function run(over: Partial<RunSummary>): RunSummary {
   };
 }
 
-function renderTab() {
+function renderTab(targetFileLine?: { path: string; line: number } | null) {
   return render(
     <NextIntlClientProvider locale="en" messages={{ prReview, shell }}>
-      <DiffTab prId="pr-1" filesCount={FILES.length} files={FILES} />
+      <DiffTab
+        prId="pr-1"
+        filesCount={FILES.length}
+        files={FILES}
+        {...(targetFileLine ? { targetFileLine } : {})}
+      />
     </NextIntlClientProvider>,
   );
 }
@@ -103,5 +115,23 @@ describe("DiffTab token note", () => {
     renderTab();
 
     expect(screen.getByText("0 new tokens · no review has run yet")).toBeTruthy();
+  });
+
+  it("threads targetFileLine into SmartDiffViewer as `target` (AC-26)", () => {
+    smartDiffViewerSpy.mockClear();
+    renderTab({ path: "src/api/rate-limit.ts", line: 4 });
+
+    expect(smartDiffViewerSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { path: "src/api/rate-limit.ts", line: 4 } }),
+    );
+  });
+
+  it("passes no `target` to SmartDiffViewer when there is no targetFileLine", () => {
+    smartDiffViewerSpy.mockClear();
+    renderTab();
+
+    expect(smartDiffViewerSpy).toHaveBeenCalledWith(
+      expect.not.objectContaining({ target: expect.anything() }),
+    );
   });
 });

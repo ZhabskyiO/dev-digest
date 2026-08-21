@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import {
   RunRequest,
   PrIntentDetail,
+  PrBriefDetail,
   SmartDiff,
   LocalReviewRequest,
   LocalReviewResult,
@@ -13,6 +14,7 @@ import { IdParams } from '../_shared/schemas.js';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
 import { LocalReviewService } from './local-review.js';
+import { BriefService } from './brief/index.js';
 
 /**
  * reviews module.
@@ -22,6 +24,8 @@ import { LocalReviewService } from './local-review.js';
  *   GET    /pulls/:id/reviews                          → persisted reviews + findings for a PR
  *   GET    /pulls/:id/intent                           → the derived PR intent (L03), or null
  *   POST   /pulls/:id/intent/recalculate               → force a fresh derivation (spends tokens)
+ *   GET    /pulls/:id/brief                            → the persisted PR Brief, or null
+ *   POST   /pulls/:id/brief/generate                   → force a fresh brief (spends tokens)
  *   GET    /pulls/:id/smart-diff                       → reviewer-ordered files (deterministic, no LLM)
  *   POST   /findings/:id/(accept|dismiss)              → finding actions
  */
@@ -31,6 +35,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
   const { container } = app;
   const service = new ReviewService(container);
   const localReviews = new LocalReviewService(container);
+  const briefService = new BriefService(container);
 
   // ---- Run a review (manual trigger) -------------------------------
   // Tight per-route limit: each call can fan out to expensive LLM runs.
@@ -203,6 +208,38 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
     async (req) => {
       const { workspaceId } = await getContext(container, req);
       return service.recalculateIntent(workspaceId, req.params.id, req.log);
+    },
+  );
+
+  // ---- Persisted PR Brief (T13) -------------------------------------------
+  // 200 + `null` (never 404): "no brief yet" is the normal state for any PR
+  // never briefed, and a 404 would route through the client's full-screen
+  // ApiError taxonomy for what is an ordinary empty state.
+  //
+  // Read-only and free (AC-9): getBrief spends zero model calls.
+  app.get(
+    '/pulls/:id/brief',
+    { schema: { params: IdParams, response: { 200: PrBriefDetail.nullable() } } },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      const detail = await briefService.getBrief(workspaceId, req.params.id);
+      return detail ?? null;
+    },
+  );
+
+  // ---- Force a fresh brief (the ONE manual trigger, spends tokens) --------
+  // Non-nullable response by design: unlike the GET, "nothing came back" here
+  // means the generation failed, and the service raises a 502 rather than
+  // answering 200 with the stale row.
+  app.post(
+    '/pulls/:id/brief/generate',
+    {
+      schema: { params: IdParams, response: { 200: PrBriefDetail } },
+      config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    },
+    async (req) => {
+      const { workspaceId } = await getContext(container, req);
+      return briefService.generate(workspaceId, req.params.id, req.log);
     },
   );
 
