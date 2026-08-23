@@ -215,6 +215,23 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-23 — NEVER assume a pgvector query returning zero rows after an
+  embedding model change is a data/query bug. When the model changes, its
+  embedding dimension often changes too (e.g., OpenAI's text-embedding-3-large
+  is 3072-dim vs text-embedding-3-small's 1536-dim). The `vector(N)` column
+  definition in Postgres **persists** at its original dimension until a migration
+  updates it — a query on a vector(1536) column with 3072-dim embeddings
+  silently returns zero rows, no error. Symptom: queries that worked stop
+  working, no indexing or network issue. Diagnosis: `\d+ table_name` in psql to
+  check the column definition against your active model's output dimension. Fix:
+  run a migration to redefine the column (e.g. `alter table agents alter column
+  embedding type vector(3072)`) and backfill with embeddings from the new model
+  before re-querying. Check old migrations and old embedding code before
+  refactoring — if this repo switched models once before, the column definition
+  might already be wrong from a prior incident. For this repo specifically, verify
+  that `agents.embedding` column is `vector(3072)` (text-embedding-3-large) to
+  match the active embedding model in `adapters/embedder.ts`.
+
 - 2026-08-20 — A plan acceptance check phrased as `grep -qi "some phrase"` against
   a `.md` prompt file only matches within a SINGLE physical line — `grep` has no
   multi-line mode without `-z`. `intent.extract.md`'s untrusted-data paragraph

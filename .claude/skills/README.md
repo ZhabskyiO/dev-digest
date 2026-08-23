@@ -20,6 +20,7 @@ Reusable AI skills that provide specialized knowledge and workflows. Canonical l
 | [open-pull-request](open-pull-request/SKILL.md) | Workflow | Opening a PR: Conventional Commits title, the committed template, self-review before review |
 | [run-plan](run-plan/SKILL.md) | Workflow | `/run-plan` — executes an approved Implementation Plan: implementers per DAG, then architecture-reviewer ‖ plan-verifier, then a bounded fix loop |
 | [pr-self-review](pr-self-review/SKILL.md) | Workflow | `/pr-self-review` — local pre-PR gate; blocks the push while a verified CRITICAL remains |
+| [dependency-checker](dependency-checker/SKILL.md) | Shared | Audits external npm deps + internal package edges: Mermaid graphs, size/type breakdown, drift, unused, cycles, audit/outdated/licences → P0–P2 prioritized report |
 
 ## What Are Skills?
 

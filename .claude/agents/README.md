@@ -14,6 +14,7 @@ trigger rules ("Use proactively when…").
 | [`implementer-ui`](./implementer-ui.md)                 | sonnet | Implements ONE UI task (client)                                                                                   | Yes                     |
 | [`plan-verifier`](./plan-verifier.md)                   | sonnet | Read-only completeness / traceability check — runs alongside architecture-reviewer                                | No                      |
 | [`architecture-reviewer`](./architecture-reviewer.md)   | sonnet | Read-only structural/architecture review of a diff or file set                                                    | No                      |
+| [`architecture-reviewer-lite`](./architecture-reviewer-lite.md) | haiku | Same seven rules and report format, compact prompt, one preloaded skill — for PR-sized diffs; compared against the full reviewer in `evals/agents/` | No                      |
 | [`test-writer`](./test-writer.md)                       | sonnet | Writes unit + integration tests, names them after `AC-N` — **not invoked by `/run-plan`**                          | Yes                     |
 | [`doc-writer`](./doc-writer.md)                         | sonnet | Writes documentation (Diátaxis + Mermaid), knows where docs belong                                                | Yes                     |
 

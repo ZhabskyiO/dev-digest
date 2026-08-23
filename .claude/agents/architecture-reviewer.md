@@ -1,6 +1,6 @@
 ---
 name: architecture-reviewer
-description: Read-only architectural reviewer. Use to audit a diff or file set against DevDigest's documented structural contracts — onion layering, DI discipline, reviewer-core isolation, shared-contract usage. Reports violations; never edits.
+description: Read-only architectural reviewer (full). Use to audit a diff or file set against DevDigest's documented structural contracts — onion layering, DI discipline, reviewer-core isolation, shared-contract usage. ALWAYS use this one (never the -lite variant) when the user names "architecture-reviewer" explicitly, for multi-module or repo-wide audits (more than one of server/, reviewer-core/, client/), for changes touching > ~10 files, or for borderline calls that need the full rule text. For a PR-sized, single-module change where the user did not name an agent, prefer architecture-reviewer-lite. Reports violations; never edits.
 model: sonnet
 tools: Read, Glob, Grep
 skills:

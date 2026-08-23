@@ -22,6 +22,8 @@ Package manager: **pnpm**. `pnpm dev` (:3001) · `pnpm db:migrate` · `pnpm db:s
   helmet/cors/rate-limit and the shared error handler.
 - New external dependency → add an **adapter behind the DI container**
   (`platform/container.ts`), never import a client directly in a service.
+  Before placing it, load the `onion-architecture` skill — it holds the layer
+  map and port/adapter recipe; don't reverse-engineer them from `src/`.
 - **Migrations are not applied on boot.** After any schema change run
   `pnpm db:generate` then `pnpm db:migrate`. pgvector is enabled by migration `0000`.
 - The DB schema already contains *every* course table; unused ones sit empty.

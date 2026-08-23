@@ -17,6 +17,24 @@ conventions, and open threads. Newest at the top.
 
 Approaches and solutions that worked here and are worth reusing.
 
+- 2026-08-23 — Writing workflow `activation` evals (`evals/workflow/*.cases.ts`)
+  that are stable on Haiku: (a) the positive prompt must use the skill's OWN
+  vocabulary — "onion-шари", "порт/адаптер", "DI-контейнер" loaded
+  `onion-architecture` via the Skill tool in 3 turns, while a plain "where should
+  the SDK call live?" sent the model reading `container.ts`/`adapters/` by hand
+  until max turns; (b) the near-miss negative should be something the skill
+  description *explicitly excludes* (a `client/` layering question — "NOT for
+  the client/ frontend") — a generic "onion vs hexagonal" explainer flipped
+  ~50/50 across runs. Doc-routing `trace` cases pass reliably when the prompt
+  says "звірся з правилами пакета / за настановами репо" and asserts ONE doc.
+  └ 2026-08-23 correction: a skill description alone cannot win plain-phrasing
+    activation when a `CLAUDE.md` already answers the question. Adding "where
+    should X live / new integration, SDK, notifier" trigger terms to the
+    `onion-architecture` description moved the plain Slack-SDK prompt 0/3 → 0/3;
+    adding one line to `server/CLAUDE.md` ("Before placing it, load the
+    `onion-architecture` skill") moved it to 2/3. Haiku reads the package
+    CLAUDE.md first and follows *its* instruction, so the pointer to a skill has
+    to live in the CLAUDE.md rule the model is already going to read.
 - 2026-08-20 — When ONE user-visible bug spans several agents' owned paths, give
   the whole bug to ONE agent, or verify the composition yourself — per-file
   correctness does not imply the fix works. Splitting a same-path-from-two-repos
@@ -59,6 +77,14 @@ Conventions and architectural decisions specific to this repo.
   tool: nothing in this repo reads or writes it, and it already drifts both ways
   (`architecture-patterns` and `github-workflow-automation` are listed but not
   present in `.claude/skills/`).
+- 2026-08-22 — The eval harness (`evals/src/artifacts/load.ts:skillContent`)
+  injects a skill as `SKILL.md` **plus every `references/*.md`** (sorted), and
+  `quality` cases run content-only with NO tools. So for a skill whose real
+  work is a bundled script, the output contract and the judgement rubric must
+  live in `SKILL.md` or `references/` — anything only in `scripts/`, `*.md`
+  files outside `references/`, or sub-folders is invisible to the judge. Keep
+  `references/` small: it is all prompt. `dependency-checker` follows this
+  (template + rubric in `references/`, collector in `scripts/`).
 
 ## Session Notes
 
@@ -71,3 +97,12 @@ _None yet._
 Unresolved, worth investigating.
 
 _None yet._
+- 2026-08-23 — `architecture-reviewer` (full) failed the benign-refactor eval in 2/2 runs
+  by *reading more*: it opened `.claude/skills/onion-architecture/enforcement.md`, matched the
+  new pure `server/src/modules/repos/helpers.ts` against the **known-drift** list there
+  (`repos/helpers` → `db-confined-to-repositories`) and reported it as a medium finding, while
+  `architecture-reviewer-lite` (rule sources quoted in-prompt, no mandatory doc reads) passed
+  the same case 4/4 at ~10% of the prompt tokens (`pnpm eval:versus architecture-reviewer
+  architecture-reviewer-lite --last 2`). Open: should the full reviewer's Step 1 be told that
+  the drift/exception lists in `enforcement.md` describe *existing* files, not rules — or is
+  the mandatory doc-read itself the cost without the benefit for PR-sized diffs?

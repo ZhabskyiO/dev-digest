@@ -29,10 +29,49 @@ most-skipped and most-valuable section: if something failed, record it here.**
   testing-strategy line; a sibling task in the same phase wrote its equivalent
   test and was right to. If a task's Acceptance names a test, that task writes
   it.
+- 2026-08-23 — NEVER pin a workflow `trace`/`dispatch` eval to exactly one of
+  `architecture-reviewer` / `architecture-reviewer-lite` for a PR-sized prompt.
+  With both agents on disk, Haiku's pick flips between consecutive runs even
+  when the prompt names `architecture-reviewer` literally (the lite description
+  claims "PR-sized changes ≤ ~10 files"). Use `expectAnySubagent` for the role
+  (`evals/src/dsl/case.ts`), and pin a specific agent only where the descriptions
+  are unambiguous (multi-module audit → full reviewer). A wrong pick also costs
+  ~150 s: early-stop never fires, so the case waits out the nested agent's run.
+  └ 2026-08-23 correction: fixed at the source. Both descriptions now state the
+    split explicitly (full: ALWAYS when named / multi-module / > ~10 files;
+    lite: ONLY unnamed PR-sized single-module, NEVER substitute when named).
+    After that, by-name → full, unnamed PR-sized → lite and multi-module → full
+    each passed 3/3 on Haiku (`evals/workflow/review-workflow.cases.ts`), so
+    those cases pin the agent again; `expectAnySubagent` stays available for
+    genuinely interchangeable roles.
+  └ 2026-08-23 — same shape for SKILLS: `open-pull-request` and `pr-self-review`
+    both claimed "before `gh pr create`", so "відкрий PR" sometimes loaded
+    pr-self-review first and ran out of turns. Fix = one entry point: the
+    open-pull-request description now says ALWAYS for open/create/submit a PR
+    and "do NOT load pr-self-review on its own — this skill runs it" (its step 4
+    now invokes `/pr-self-review` explicitly, which the push hook requires
+    anyway); pr-self-review's says "if the request is to OPEN a PR, load
+    open-pull-request instead". 8/8 across two retry-free runs afterwards.
+    Rule: when two artifacts share a trigger phrase, make one the entry point
+    and have its description name the other as *not* to be loaded directly.
+- 2026-08-23 — NEVER rely on the Agent SDK's `allowedTools` as a restriction
+  under `permissionMode: "bypassPermissions"` — it only pre-approves. Asked
+  *which command* fixes `relation ... does not exist`, `gemini-2.5-flash` ran
+  `pnpm db:migrate` via `Bash` against the live dev DB from an eval session whose
+  allow-list was `Read, Grep, Glob, Task, Agent, Skill`. ALWAYS pass a hard
+  deny-list as `disallowedTools` too (`evals/src/config.ts:MUTATING_TOOLS`, wired
+  in `evals/src/tasks.ts` for both `agentTask` and `workflowTask`). Haiku never
+  stepped outside the allow-list, which is why this stayed hidden until the
+  OpenRouter/CI validation.
 
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
+
+- 2026-08-23 — `vitest run <filter>` is a **substring match on the whole path**,
+  so `vitest run workflow` also ran `skills/workflow-retro/*.eval.ts` (and its
+  model-backed failure looked like a workflow-tier regression). Filter with a
+  trailing slash — `vitest run workflow/` (`evals/package.json` `eval:workflow`).
 
 - 2026-07-30 — NEVER read an empty `gh pr view --json statusCheckRollup` as "no
   CI ran". It is also `[]` for the first minute or two after a push, while the
@@ -65,6 +104,21 @@ Quirks of dependencies, tooling, and the local environment.
   file's `diffHash` (and `head`) after any commit that follows the review —
   otherwise the failure surfaces at push time and reads like a tooling bug
   rather than a stale record. Same applies after `--amend` or a rebase.
+- 2026-08-22 — NEVER trust the `dev` flag in `pnpm audit --json` findings to
+  tell prod from dev exposure: it reports `"dev": false` for advisories reached
+  only through a devDependency (e.g. `.>tsx>esbuild` in `server/`, where `tsx`
+  is dev-only). Attribute by the first segment of the finding `path` (the
+  top-level dep) and look that name up in our own `package.json` — that is what
+  `.claude/skills/dependency-checker/scripts/collect-deps.mjs` does. Also:
+  `pnpm outdated` / `pnpm audit` exit 1 *when they find something*, with the
+  JSON still on stdout — a `set -e` shell or a bare `execFileSync` drops it.
+- 2026-08-22 — `tsconfig.json` is JSONC, but NEVER strip its comments with a
+  `/\/\*[\s\S]*?\*\//` regex: every wildcard path alias (`"@devdigest/shared/*"`,
+  `"@/*"`) contains `/*`, so the regex eats the rest of the file and
+  `JSON.parse` fails (or silently yields no `paths`). Use a string-aware
+  stripper — `stripJsonc()` in
+  `.claude/skills/dependency-checker/scripts/collect-deps.mjs` — or `tsc
+  --showConfig`.
 
 ## Recurring Errors & Fixes
 

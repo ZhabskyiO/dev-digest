@@ -1,6 +1,6 @@
 ---
 name: pr-self-review
-description: "Local pre-PR gate for DevDigest. Run before opening or updating a pull request — i.e. before `git push`, `gh pr create`, or `gh pr merge` — or on demand via /pr-self-review. Computes the diff against origin/main, runs cheap deterministic gates (typecheck, tests, and — when configured — lint and dependency-cruiser), then routes the changed files through the project's architecture/quality skills per file bucket (UI vs backend), adversarially verifies every CRITICAL, and BLOCKS the push when any verified CRITICAL remains. Use whenever the user is about to push/open/merge a PR or asks to self-review local changes."
+description: "Local pre-PR gate for DevDigest. Run before opening or updating a pull request — i.e. before `git push`, `gh pr create`, or `gh pr merge` — or on demand via /pr-self-review. Computes the diff against origin/main, runs cheap deterministic gates (typecheck, tests, and — when configured — lint and dependency-cruiser), then routes the changed files through the project's architecture/quality skills per file bucket (UI vs backend), adversarially verifies every CRITICAL, and BLOCKS the push when any verified CRITICAL remains. Use when the user asks to self-review / check / gate their local changes, says they are about to push, or when the push hook has blocked them. If the user's actual request is to OPEN a PR, load open-pull-request instead — it runs this gate as its own step."
 user-invocable: true
 version: "1.0.0"
 ---
