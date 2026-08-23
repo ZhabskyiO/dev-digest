@@ -60,10 +60,10 @@ concurrency:
 
 # The OpenRouter secret is deliberately NOT set here: workflow-level env reaches every step of
 # every job, including third-party actions in `detect` that never need it. Each model job sets it.
+# Per-tier models are resolved in each job's env (the `env` context is not available inside
+# `jobs.<job>.env`, so the inputs/vars/default expression is repeated rather than referenced).
 env:
   EVAL_BACKEND: openrouter
-  EVAL_CONTENT_MODEL: ${{ inputs.content_model || vars.EVAL_CONTENT_MODEL || 'deepseek/deepseek-chat' }}
-  EVAL_TOOL_MODEL: ${{ inputs.tool_model || vars.EVAL_TOOL_MODEL || 'google/gemini-2.5-flash' }}
   EVAL_JUDGE_MODEL: ${{ inputs.judge_model || vars.EVAL_JUDGE_MODEL || inputs.content_model || vars.EVAL_CONTENT_MODEL || 'deepseek/deepseek-chat' }}
   EVAL_QUIET: '1'
 
@@ -168,7 +168,7 @@ jobs:
       run:
         working-directory: evals
     env:
-      EVAL_MODEL: ${{ env.EVAL_CONTENT_MODEL }}
+      EVAL_MODEL: ${{ inputs.content_model || vars.EVAL_CONTENT_MODEL || 'deepseek/deepseek-chat' }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -210,7 +210,7 @@ jobs:
       run:
         working-directory: evals
     env:
-      EVAL_MODEL: ${{ env.EVAL_TOOL_MODEL }}
+      EVAL_MODEL: ${{ inputs.tool_model || vars.EVAL_TOOL_MODEL || 'google/gemini-2.5-flash' }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENROUTER_BASE_URL: http://localhost:4000
     steps:
@@ -257,7 +257,7 @@ jobs:
       run:
         working-directory: evals
     env:
-      EVAL_MODEL: ${{ env.EVAL_TOOL_MODEL }}
+      EVAL_MODEL: ${{ inputs.tool_model || vars.EVAL_TOOL_MODEL || 'google/gemini-2.5-flash' }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENROUTER_BASE_URL: http://localhost:4000
     steps:
