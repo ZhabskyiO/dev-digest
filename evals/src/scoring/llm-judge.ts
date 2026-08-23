@@ -23,13 +23,29 @@ export interface Verdict {
   score: number;
 }
 
+/**
+ * Parse the judge's JSON, repairing the one malformation cheap models actually produce: an
+ * invalid escape inside a string (e.g. `\_`, `\-`, `\.` in a verbatim evidence quote — DeepSeek
+ * on CI: "Bad escaped character at position 634"). Only `\` followed by a character that JSON
+ * does not allow after a backslash is doubled; valid escapes (`\n`, `\"`, `\\`, `\uXXXX`, …) are
+ * left alone, so well-formed JSON parses identically.
+ */
+export function parseJudgeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const repaired = raw.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+    return JSON.parse(repaired);
+  }
+}
+
 function parseVerdict(text: string): Verdict["results"] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) throw new Error(`judge returned no JSON: ${text.slice(0, 200)}`);
-  const obj = JSON.parse(text.slice(start, end + 1));
+  const obj = parseJudgeJson(text.slice(start, end + 1)) as { results?: unknown };
   if (!Array.isArray(obj.results)) throw new Error("judge JSON missing results[]");
-  return obj.results;
+  return obj.results as Verdict["results"];
 }
 
 /** Judge an output against a list of practices. Model defaults to the stronger judge family. */
