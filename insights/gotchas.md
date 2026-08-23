@@ -68,6 +68,17 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-23 — NEVER use `${{ env.* }}` inside `jobs.<job>.env` in GitHub Actions —
+  the `env` context is not available there (only github/needs/strategy/matrix/
+  vars/secrets/inputs). The workflow file then fails to PARSE: the run shows up
+  named by file path with "This run likely failed because of a workflow file
+  issue", zero jobs, no annotation. Plain YAML validation cannot catch it.
+  Repeat the inputs/vars/default expression per job instead
+  (`.github/workflows/harness-evals.yml`).
+- 2026-08-23 — deepseek-chat as LLM judge emits invalid JSON escapes inside
+  verbatim evidence quotes (`\_`, `\-`, `\.`) → `Bad escaped character in JSON`.
+  Repair before parsing: double only a `\` NOT followed by `"\/bfnrtu`
+  (`evals/src/scoring/llm-judge.ts:parseJudgeJson`); valid JSON parses unchanged.
 - 2026-08-23 — `vitest run <filter>` is a **substring match on the whole path**,
   so `vitest run workflow` also ran `skills/workflow-retro/*.eval.ts` (and its
   model-backed failure looked like a workflow-tier regression). Filter with a
