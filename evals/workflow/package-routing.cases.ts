@@ -102,9 +102,12 @@ export const cases: WorkflowCase[] = [
   {
     kind: "trace",
     name: "shared-contract change reads client/CLAUDE.md (vendored copy is not a fork)",
+    // Same strengthening as the server twin: name the doc and forbid jumping to the contract —
+    // gemini-2.5-flash otherwise reads vendor files instead of the package rules (CI 0/2).
     prompt:
       "Хочу додати поле `summary` до контракту Review у @devdigest/shared і показати його в UI. " +
-      "За правилами пакета client — чи можна правити копію в client/src/vendor/shared напряму? Звірся з правилами пакета.",
+      "За правилами пакета client (його CLAUDE.md) — чи можна правити копію в client/src/vendor/shared " +
+      "напряму? Спершу прочитай правила пакета, а не сам контракт.",
     expectFilesRead: ["client/CLAUDE.md"],
     maxTurns: 6,
   },
