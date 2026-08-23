@@ -31,6 +31,12 @@ export interface QualityCase {
   grounding?: string[];
   /** Judge score gate (default 0.6). */
   threshold?: number;
+  /**
+   * Behaviour-shaped quality case (e.g. "stops and asks instead of implementing"): asserted on
+   * the Anthropic path and anthropic/* slugs, skipped with a visible reason on other backends
+   * (EVAL_RUN_INDICATIVE=1 forces it). Measured: deepseek-chat scores 2/4 on run-plan discipline.
+   */
+  indicative?: boolean;
   maxTurns?: number;
 }
 export type SkillCase = QualityCase;
@@ -112,6 +118,11 @@ type Task = (prompt: string, artifact: string, opts?: RunOptions) => Promise<Res
 
 function runQualityCases(artifact: string, cases: QualityCase[], task: Task): void {
   for (const c of cases) {
+    const skip = indicativeSkipReason(c.indicative, "quality");
+    if (skip) {
+      test.skip(`${c.name} [${skip}]`, () => {});
+      continue;
+    }
     test(c.name, async () => {
       const threshold = c.threshold ?? DEFAULT_THRESHOLD;
       const result = await task(c.prompt, artifact, { maxTurns: c.maxTurns });
@@ -147,16 +158,16 @@ export const runSkillCases = (skill: string, cases: SkillCase[]) => runQualityCa
 export const runAgentCases = (agent: string, cases: AgentCase[]) => runQualityCases(agent, cases, agentTask);
 
 /** Indicative cases only assert on a capable model: the Anthropic path, or an anthropic/* slug. */
-function skipIndicative(c: WorkflowCase): string | null {
-  if (c.kind !== "activation" || !c.indicative) return null;
+function indicativeSkipReason(indicative: boolean | undefined, kind: string): string | null {
+  if (!indicative) return null;
   if (process.env.EVAL_RUN_INDICATIVE === "1") return null;
   if (EVAL_BACKEND !== "openrouter" || EVAL_MODEL.startsWith("anthropic/")) return null;
-  return `indicative activation case — skipped on ${EVAL_MODEL} (set EVAL_RUN_INDICATIVE=1 to run)`;
+  return `indicative ${kind} case — skipped on ${EVAL_MODEL} (set EVAL_RUN_INDICATIVE=1 to run)`;
 }
 
 export function runWorkflowCases(cases: WorkflowCase[]): void {
   for (const c of cases) {
-    const skip = skipIndicative(c);
+    const skip = indicativeSkipReason(c.kind === "activation" ? c.indicative : undefined, "activation");
     if (skip) {
       test.skip(`${c.name} [${skip}]`, () => {});
       continue;

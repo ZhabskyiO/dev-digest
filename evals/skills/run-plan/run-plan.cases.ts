@@ -14,6 +14,10 @@ export const cases: SkillCase[] = [
       "it does not offer to edit product code, read src/** itself, spawn test-writer, or push/merge — it describes that the run would end with a recommendation to run pr-self-review",
     ],
     threshold: 0.6,
+    // Behaviour-shaped: demands the model STOP and ask rather than implement. deepseek-chat
+    // scored 2/4 on both CI attempts (starts implementing); Haiku passes. Asserted on the
+    // Anthropic path only — skipped with a visible reason on cheap non-Anthropic models.
+    indicative: true,
     maxTurns: 6,
   },
 ];

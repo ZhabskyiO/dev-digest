@@ -543,7 +543,7 @@ Cheap and orthogonal; the `TrendReporter` keeps writing test-level outcome rows 
 | `EVAL_CONFIG` | `candidate` | `benchmark` sets this to `baseline` to skip artifact injection |
 | `EVAL_QUIET` | unset | suppress per-run trace spam during multi-run aggregation |
 | `EVAL_RETRY` | `1` | vitest retries per case (max **2** sessions). `run-vitest.ts` forces `0` for repeat/benchmark/versus |
-| `EVAL_RUN_INDICATIVE` | unset | `1` runs `indicative: true` activation cases on non-Anthropic models too (otherwise skipped there) |
+| `EVAL_RUN_INDICATIVE` | unset | `1` runs `indicative: true` cases (activation or quality) on non-Anthropic models too (otherwise skipped there) |
 
 ## Records, statistics, flags
 
