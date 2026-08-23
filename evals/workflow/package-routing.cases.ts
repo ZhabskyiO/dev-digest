@@ -76,9 +76,12 @@ export const cases: WorkflowCase[] = [
     kind: "trace",
     // e2e/CLAUDE.md "Docs": "Flow anatomy, env knobs, coverage table: README.md".
     name: "e2e coverage question follows e2e/CLAUDE.md to e2e/README.md",
+    // Demands the TABLE's contents, not facts about e2e: e2e/CLAUDE.md carries env knobs and
+    // conventions itself, and a cheaper model answered from there without opening the README
+    // (CI, gemini-2.5-flash 0/2). Only the README holds the coverage table.
     prompt:
-      "Які сторінки вже покриті browser-flows у пакеті e2e і які env-змінні ними керують? " +
-      "За настановами пакета — де таблиця покриття? Прочитай той документ.",
+      "Мені потрібна сама таблиця покриття browser-flows пакета e2e — які flows існують і що кожен " +
+      "покриває. За настановами пакета знайди, в якому документі ця таблиця, відкрий його і перекажи її рядки.",
     expectFilesRead: ["e2e/README.md"],
     maxTurns: 6,
   },
