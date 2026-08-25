@@ -26,6 +26,11 @@ export const cases: WorkflowCase[] = [
       "репо — зроби self-review перед push. PR поки НЕ відкривай.",
     skill: "pr-self-review",
     shouldActivate: true,
+    // Flaky on cheap CI backends: green on run 32910822439, then on run
+    // 32911433189 (gemini-2.5-flash) attempt 1 answered without invoking the
+    // skill and attempt 2 timed out at 240s. Activation semantics are only
+    // meaningful where the model reliably drives the Skill tool — Anthropic path.
+    indicative: true,
     maxTurns: 4,
   },
   {
@@ -34,6 +39,9 @@ export const cases: WorkflowCase[] = [
     prompt: "Поясни коротко, що саме перевіряє pr-self-review у цьому репо і коли його запускають.",
     skill: "pr-self-review",
     shouldActivate: false,
+    // Same pair, opposite flip on run 32911433189: gemini-2.5-flash INVOKED the
+    // skill twice when merely asked to explain it (green on the previous run).
+    indicative: true,
     maxTurns: 4,
   },
 
