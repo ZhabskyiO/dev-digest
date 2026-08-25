@@ -116,7 +116,7 @@ export function EvalDashboardView() {
                 <span style={s.recentAgent}>{b.agent_name}</span>
                 <span style={s.recentDate}>{fmtDate(b.ran_at)}</span>
                 <Badge color="var(--accent)" mono>
-                  v{b.agent_version ?? "?"}
+                  {t("compare.version", { version: b.agent_version ?? "?" })}
                 </Badge>
                 <span style={s.recentMetric("var(--accent)")}>{pct(b.recall)}</span>
                 <span style={s.recentMetric("var(--ok)")}>{pct(b.precision)}</span>
