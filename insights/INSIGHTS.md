@@ -106,3 +106,7 @@ _None yet._
   architecture-reviewer-lite --last 2`). Open: should the full reviewer's Step 1 be told that
   the drift/exception lists in `enforcement.md` describe *existing* files, not rules — or is
   the mandatory doc-read itself the cost without the benefit for PR-sized diffs?
+  └ 2026-08-25 measurement (CI, gemini-2.5-flash): the full agent doesn't over-read there —
+    it makes ZERO tool calls and one-shots in 1 turn (218 tokens out), missing everything
+    not visible in the inlined diff (reviewer-core case scored 0.2/0.4). Cheap backends skip
+    the method entirely, so that case is now `indicative` (runs on the Anthropic path only).

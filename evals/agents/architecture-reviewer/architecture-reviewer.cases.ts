@@ -52,6 +52,15 @@ export const cases: AgentCase[] = [
   {
     name: "reviewer-core: catches node:fs I/O and the grounding bypass as critical, citing reviewer-core/CLAUDE.md",
     kind: "quality",
+    // Behaviour-shaped: demands the agent actually RUN its method (read the
+    // authoritative docs, audit beyond the first visible hunk, emit the full
+    // report format). Measured on CI run 32910822439 (google/gemini-2.5-flash):
+    // the full agent one-shots in 1 turn with 0 tool calls (218 output tokens),
+    // finds only the fs import and scores 0.2/0.4; lite lands exactly at the
+    // 0.6 threshold with the same no-tool behaviour. On the Anthropic path the
+    // agent engages the tool loop and the case asserts for real — so it runs
+    // there and skips (visibly) on non-anthropic backends.
+    indicative: true,
     prompt: review(
       "Change to reviewer-core/src/review/run.ts adding debugging options to the review pipeline.",
       fx("reviewer-core-gate.diff"),
