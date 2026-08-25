@@ -41,9 +41,14 @@ export const cases: SkillCase[] = [
     prompt:
       "We need DevDigest to create a Jira ticket whenever a review posts a CRITICAL finding. " +
       "Where exactly does each piece of this integration live in server/? Name the concrete files.",
-    // Facts are facts — the cheap deterministic tier goes first. The canonical move
-    // names these three anchors; if any is missing the judge is not even consulted.
-    grounding: ["adapters.ts", "platform/container", "ContainerOverrides"],
+    // Facts are facts — the cheap deterministic tier goes first. Calibrated on
+    // CI run 32912155484 (gemini-2.5-flash): a fully CORRECT answer (port in
+    // adapters.ts, adapter isolated, wired in platform/container.ts, service
+    // consumes the port) described the DI wiring generically without naming
+    // ContainerOverrides — so that anchor moved to the judge tier (practice 3
+    // still requires it, with evidence and partial credit). These two anchors
+    // are non-negotiable: an answer missing either is placing things wrong.
+    grounding: ["adapters.ts", "platform/container"],
     practices: [
       "defines the port first: an interface in @devdigest/shared (src/vendor/shared/adapters.ts) speaking the application's language, with no vendor name in it",
       "puts the concrete Jira SDK wrapper in src/adapters/<kind>/ and a mock in src/adapters/mocks.ts",
