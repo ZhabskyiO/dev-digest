@@ -1,5 +1,4 @@
-/* AgentEditor — agent config + skills editor. Later lessons add Evals/Stats/CI
-   tabs. Tab state lives in ?tab= for forward-compatibility. */
+/* AgentEditor — agent config + skills editor (Config/Skills/Context/Evals/Stats/Versions). Tab state lives in ?tab= for forward-compatibility. */
 "use client";
 
 import React from "react";
@@ -10,6 +9,8 @@ import { ConfigTab } from "./_components/ConfigTab";
 import { SkillsTab } from "./_components/SkillsTab";
 import { ContextTab } from "./_components/ContextTab";
 import { StatsTab } from "./_components/StatsTab";
+import { EvalsTab } from "./_components/EvalsTab";
+import { VersionsTab } from "./_components/VersionsTab";
 import { TABS } from "./constants";
 import { s } from "./styles";
 
@@ -26,8 +27,12 @@ export function AgentEditor({ agent, tab, onTab }: { agent: Agent; tab: string; 
           <SkillsTab agent={agent} />
         ) : tab === "context" ? (
           <ContextTab agent={agent} />
+        ) : tab === "evals" ? (
+          <EvalsTab agent={agent} />
         ) : tab === "stats" ? (
           <StatsTab agent={agent} />
+        ) : tab === "versions" ? (
+          <VersionsTab agent={agent} />
         ) : (
           <ConfigTab agent={agent} />
         )}

@@ -493,12 +493,31 @@ Conventions and architectural decisions specific to this repo.
   change a cap, re-measure, update the constant's comment.
   `POST …/brief/generate` is idempotent for the current head unless
   `?force=true` (`routes.ts::BriefGenerateQuery`).
+- 2026-08-24 — The given eval schema has NO batch table: the eval pipeline writes one
+  `eval_runs` row PER CASE, stamps the shared `batch_id` (+ agent_version/model/provider)
+  into `actual_output`, and duplicates the BATCH-level recall/precision/citation onto every
+  row's metric columns. A "run" (one press of Run evals) is re-aggregated at read time by
+  `modules/evals/helpers.ts::groupRunsIntoBatches`; rows without the stamp are skipped, so
+  pre-pipeline `eval_runs` rows can never invent a phantom batch.
+  └ 2026-08-24 update: skill-owned sets reuse the same stamp with `skill_id`, the
+    carrier `agent_id`, `agent_version` = the SKILL's version, and a `batch_baseline`
+    aggregate from the without-skill pass (`modules/evals/service.ts::runSkill`).
+- 2026-08-24 — Eval `must_find` matching is strict file + line-INTERSECTION against the
+  expectation frozen from the source finding's exact lines. A correct agent rerun often
+  cites the same issue ±1–2 lines away (confirmed: expectation 5-5, rerun cited 6-7 for
+  the identical hardcoded-key issue), so baseline recall < 1.0 is EXPECTED, not a scorer
+  bug. If it bites, widen `expected_output.start_line/end_line` on the case — do not
+  loosen `modules/evals/scoring.ts::matchesExpectation`.
 
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.
 
 _None yet._
+- 2026-08-24 — Added the L07 eval pipeline: `modules/evals` (one-click case from an
+  accepted/dismissed finding, `POST /agents/:id/eval-runs`, code-only scoring in
+  `scoring.ts`), shared contracts `contracts/eval-pipeline.ts` (both vendored copies),
+  client AgentEditor Evals tab + `/evals` dashboard + FindingCard button.
 
 ## Open Questions
 

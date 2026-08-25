@@ -393,6 +393,32 @@ Quirks of dependencies, tooling, and the local environment.
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
 
+- 2026-08-25 — `Anthropic structured output failed schema validation` on eval
+  runs (whole batch aborts): without `strict: true` on the forced tool,
+  claude-haiku omits required scalar fields (`verdict: Required` from Zod) even
+  though the `input_schema` marks them required — Anthropic tool `input_schema`
+  is guidance, not enforcement, unlike OpenRouter/OpenAI strict `json_schema`
+  mode which the same `toJsonSchema` output IS enforced under. Fix: set
+  `strict: true` on the tool (`adapters/llm/anthropic.ts`) — but strict mode
+  rejects numeric bounds (`400 ... For 'integer' type, properties maximum,
+  minimum are not supported`), so strip `minimum`/`maximum`/`exclusive*` from
+  numeric properties in the schema copy sent to Anthropic (Zod still enforces
+  the bounds after parsing). NOTE `@anthropic-ai/sdk` 0.33 types don't know
+  `strict` — cast the tool literal to `Anthropic.Tool`.
+
+- 2026-08-25 — `400 invalid_request_error: "tool_use ids were found without
+  tool_result blocks immediately after"` on every anthropic-provider agent run
+  that needed a schema-validation retry. Cause: `AnthropicProvider.
+  completeStructured`'s reprompt loop pushed the assistant turn (containing the
+  forced `tool_use` block) followed by a PLAIN-TEXT user message — the Anthropic
+  Messages API requires the next user message to answer with a `tool_result`
+  block carrying the matching `tool_use_id`, so attempt ≥2 was rejected before
+  reaching the model (OpenRouter/OpenAI chat format has no such rule, which is
+  why the same loop worked there). Fix: send the reprompt as
+  `{type:'tool_result', tool_use_id, is_error:true, content}` and fall back to
+  plain text only when the response had no `tool_use` block
+  (`adapters/llm/anthropic.ts`, test `test/anthropic-adapter.test.ts`).
+
 - 2026-08-19 — A raw NUL byte (0x00) inside a `.ts` template literal (e.g.
   `` return `${repoId}\0${docPath}`; `` written with a literal control
   character rather than the `\x00` escape) makes `git` classify the WHOLE

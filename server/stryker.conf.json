@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/api/schema/stryker-core.json",
+  "_comment": "L06 bonus — mutation testing on ONE module: the eval pipeline's pure scorer. 'Check the checker': do the scoring tests actually kill logic mutants?",
+  "mutate": ["src/modules/evals/scoring.ts"],
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.config.ts" },
+  "coverageAnalysis": "perTest",
+  "disableTypeChecks": true,
+  "reporters": ["clear-text", "progress"],
+  "thresholds": { "high": 90, "low": 70, "break": null },
+  "tempDirName": ".stryker-tmp"
+}

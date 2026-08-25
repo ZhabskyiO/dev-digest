@@ -30,6 +30,8 @@ export function FindingCard({
   expanded: expandedProp,
   onAction,
   pending,
+  onEvalCase,
+  evalPending,
   repoFullName,
   headSha,
 }: {
@@ -41,6 +43,10 @@ export function FindingCard({
   expanded?: true | undefined;
   onAction?: (action: FindingActionKind, reply?: string) => void;
   pending?: boolean;
+  /** "Turn into eval case" — rendered only when provided; enabled once the
+   *  finding is decided (the decision fixes the expectation type). */
+  onEvalCase?: () => void;
+  evalPending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
 }) {
@@ -118,6 +124,19 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {onEvalCase && (
+              <span title={muted ? undefined : t("finding.evalCaseHint")}>
+                <Button
+                  kind="ghost"
+                  size="sm"
+                  icon="FlaskConical"
+                  disabled={pending || evalPending || !muted}
+                  onClick={onEvalCase}
+                >
+                  {t("finding.turnIntoEvalCase")}
+                </Button>
+              </span>
+            )}
           </div>
         </div>
       )}

@@ -138,7 +138,8 @@
       "context": "Context",
       "preview": "Preview",
       "stats": "Stats",
-      "versions": "Versions"
+      "versions": "Versions",
+      "evals": "Evals"
     }
   },
   "config": {

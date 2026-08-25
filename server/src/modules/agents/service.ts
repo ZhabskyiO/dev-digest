@@ -137,6 +137,32 @@ export class AgentsService {
     return row ? toAgentVersionDto(row) : undefined;
   }
 
+  /**
+   * Re-apply an old config snapshot as a NEW version — never rewinds history,
+   * so past eval runs keep the exact version they were scored against (same
+   * contract as skill restore). Restores the core config fields; linked skills
+   * and context attachments are managed by their own endpoints and stay as
+   * they are.
+   */
+  async restoreVersion(
+    workspaceId: string,
+    agentId: string,
+    version: number,
+  ): Promise<Agent | undefined> {
+    const snapshot = await this.getVersion(workspaceId, agentId, version);
+    if (!snapshot) return undefined;
+    const c = snapshot.config;
+    return this.update(workspaceId, agentId, {
+      provider: c.provider,
+      model: c.model,
+      system_prompt: c.system_prompt,
+      output_schema: c.output_schema ?? null,
+      strategy: c.strategy,
+      ci_fail_on: c.ci_fail_on,
+      repo_intel: c.repo_intel,
+    });
+  }
+
   /** Linked skills for an agent as AgentSkillLink[] (ordered). */
   async skillLinks(agentId: string): Promise<AgentSkillLink[]> {
     const links = await this.repo.linkedSkills(agentId);

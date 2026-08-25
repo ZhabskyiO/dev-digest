@@ -87,6 +87,9 @@ export interface ReviewInput {
   task?: string;
   /** Override the structured-output retry budget. */
   maxRetries?: number;
+  /** Per-LLM-call timeout (ms) forwarded to the provider — fail-fast knob for
+      callers like eval runs where a bounded wait beats a thorough retry. */
+  llmTimeoutMs?: number;
   /** Override the map-reduce line threshold. */
   mapThresholdLines?: number;
   /**
@@ -192,6 +195,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ReviewOutco
       schemaName: 'Review',
       messages: a.messages,
       maxRetries,
+      ...(input.llmTimeoutMs ? { timeoutMs: input.llmTimeoutMs } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     });
     tokensIn += res.tokensIn;

@@ -3,9 +3,32 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import type { FindingRecord } from "@devdigest/shared";
 import messages from "../../../../../../../../messages/en/prReview.json";
+import evalMessages from "../../../../../../../../messages/en/eval.json";
 
 vi.mock("../../../../../../../lib/hooks/reviews", () => ({
   useFindingAction: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+const seedMutate = vi.hoisted(() =>
+  vi.fn((_vars: unknown, opts?: { onSuccess?: (seed: unknown) => void }) =>
+    opts?.onSuccess?.({
+      agent_id: "ag1",
+      agent_name: "Security Reviewer",
+      name: "From finding: Hardcoded secret",
+      input_diff: "diff --git a/src/config.ts b/src/config.ts",
+      expectation: { type: "must_find", file: "src/config.ts", start_line: 12, end_line: 12, title: "Hardcoded secret" },
+      pr_meta: { title: "Add config", body: "" },
+      decision: "accepted",
+      existing_case_id: null,
+    }),
+  ),
+);
+
+vi.mock("../../../../../../../lib/hooks/evals", () => ({
+  useEvalCaseSeed: () => ({ mutate: seedMutate, isPending: false }),
+  useCreateEvalCase: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateEvalCase: () => ({ mutate: vi.fn(), isPending: false }),
+  useRunEvalCase: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { FindingsPanel } from "./FindingsPanel";
@@ -94,7 +117,7 @@ function spyScrollTargets(): string[] {
 
 function renderWithIntl(ui: React.ReactElement) {
   return render(
-    <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+    <NextIntlClientProvider locale="en" messages={{ prReview: messages, eval: evalMessages }}>
       {ui}
     </NextIntlClientProvider>,
   );
@@ -173,10 +196,33 @@ describe("FindingsPanel (smoke)", () => {
     // Even with the filter on, arriving from a diff badge must land on the card
     // rather than an empty list.
     rerender(
-      <NextIntlClientProvider locale="en" messages={{ prReview: messages }}>
+      <NextIntlClientProvider locale="en" messages={{ prReview: messages, eval: evalMessages }}>
         <FindingsPanel findings={[LOW_CONF]} prId="pr1" targetFindingId="f2" />
       </NextIntlClientProvider>,
     );
     expect(screen.getByText("Prefer const over let")).toBeInTheDocument();
+  });
+});
+
+describe("FindingsPanel — turn into eval case opens the seeded editor", () => {
+  it("fetches the seed and opens the prefilled New-eval-case modal", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={{ prReview: messages, eval: evalMessages }}>
+        <FindingsPanel
+          findings={[{ ...FINDINGS[0]!, accepted_at: "2026-08-24T00:00:00Z" }]}
+          prId="pr1"
+        />
+      </NextIntlClientProvider>,
+    );
+    fireEvent.click(screen.getByText("Turn into eval case"));
+    expect(seedMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ findingId: FINDINGS[0]!.id }),
+      expect.anything(),
+    );
+    // the modal opened, prefilled from the seed, with the positive-case banner
+    expect(screen.getByText("New eval case")).toBeInTheDocument();
+    expect(screen.getByTestId("seed-banner")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("From finding: Hardcoded secret")).toBeInTheDocument();
+    expect(screen.getByText("Never run yet")).toBeInTheDocument();
   });
 });

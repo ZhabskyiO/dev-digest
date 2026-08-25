@@ -213,6 +213,21 @@ Quirks of dependencies, tooling, and the local environment.
   variable rather than duplicated inline in each branch (which would have
   produced two `generate.mutate()` call sites, silently violating the guard
   while still "working").
+- 2026-08-24 — Adding a React Query hook call (`useMutation`/`useQueryClient`) to a
+  widely-rendered component (e.g. `FindingsPanel`) breaks EVERY existing test of that
+  component with `No QueryClient set, use QueryClientProvider` — those tests render with no
+  provider and mock hook MODULES instead. Fix: `vi.mock` the new hook module (e.g.
+  `lib/hooks/evals`) in each affected test file, mirroring the existing `lib/hooks/reviews`
+  mock. Same failure shape as the 2026-08-20 `useTranslations` entry: a new hook in a shared
+  component means updating sibling tests' mocks, not the component.
+- 2026-08-24 — The FIRST runtime (value) import from `@devdigest/shared` in a client
+  component breaks `next dev` with `Module not found: Can't resolve './contracts/…​.js'`
+  — every prior use was `import type` (erased), so webpack had never resolved the
+  vendored barrel's ESM-style `.js` specifiers against its `.ts` sources. Typecheck and
+  vitest both stay green (tsc and vite map `.js`→`.ts` themselves), so only the running
+  app shows it. Fix (in place): `config.resolve.extensionAlias = { ".js": [".ts",
+  ".tsx", ".js"] }` in `next.config.mjs`'s `webpack` hook — do not rewrite the shared
+  package's import specifiers, the server runs the same files under tsx.
 
 ## Recurring Errors & Fixes
 

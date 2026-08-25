@@ -54,13 +54,12 @@ describe("SkillDetail", () => {
     expect(screen.getByText("v5")).toBeInTheDocument();
   });
 
-  it("offers exactly the four tabs", () => {
+  it("offers exactly the declared tabs (Evals included since the eval pipeline)", () => {
     renderDetail();
     for (const label of Object.values(messages.editor.tabs)) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
-    // Evals and CI are not built — they must not appear.
-    expect(screen.queryByText("Evals")).toBeNull();
+    // CI is not built — it must not appear.
     expect(screen.queryByText("CI")).toBeNull();
   });
 

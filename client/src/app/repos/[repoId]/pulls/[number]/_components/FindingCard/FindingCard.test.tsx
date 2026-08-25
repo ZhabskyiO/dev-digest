@@ -58,3 +58,32 @@ describe("FindingCard (smoke, both themes)", () => {
     expect(onAction).toHaveBeenCalledWith("dismiss");
   });
 });
+
+describe("FindingCard — turn into eval case", () => {
+  it("is disabled while the finding is undecided (decision picks the type)", () => {
+    const onEvalCase = vi.fn();
+    renderWithIntl(<FindingCard f={FINDING} defaultExpanded onEvalCase={onEvalCase} />);
+    const btn = screen.getByText("Turn into eval case").closest("button")!;
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onEvalCase).not.toHaveBeenCalled();
+  });
+
+  it("fires once the finding is accepted or dismissed", () => {
+    const onEvalCase = vi.fn();
+    renderWithIntl(
+      <FindingCard
+        f={{ ...FINDING, accepted_at: "2026-08-24T00:00:00Z" }}
+        defaultExpanded
+        onEvalCase={onEvalCase}
+      />,
+    );
+    fireEvent.click(screen.getByText("Turn into eval case"));
+    expect(onEvalCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("is absent when no handler is wired (other surfaces reuse the card)", () => {
+    renderWithIntl(<FindingCard f={FINDING} defaultExpanded />);
+    expect(screen.queryByText("Turn into eval case")).not.toBeInTheDocument();
+  });
+});
