@@ -28,7 +28,14 @@
       "cost": "Cost"
     },
     "pass": "pass",
-    "fail": "fail"
+    "fail": "fail",
+    "subtitle": "Regression harness across all reviewer agents · pick an agent to see its runs",
+    "agents": "Agents",
+    "recentAll": "Recent eval runs · all agents",
+    "lastRun": "Last run v{version} · {date} · {passed}/{total} pass",
+    "neverRun": "No eval runs yet",
+    "casesCount": "{count, plural, one {# case} other {# cases}}",
+    "empty": "No agents have eval cases yet. Open a PR review and turn a decided finding into an eval case."
   },
   "caseEditor": {
     "newCase": "New eval case",
@@ -55,7 +62,24 @@
     "invalidJson": "invalid JSON",
     "lastRunPassed": "Last run passed",
     "lastRunFailed": "Last run failed",
-    "resultSummary": "recall {recall}% · precision {precision}% · citation {citation}% · {duration}s"
+    "resultSummary": "recall {recall}% · precision {precision}% · citation {citation}% · {duration}s",
+    "cancel": "Cancel",
+    "subtitle": "{agent} · simulate a PR and assert the expected output",
+    "findingSkeleton": "Finding skeleton",
+    "runOnSave": "Run on save",
+    "editDiff": "Edit",
+    "gotSummary": "expected {expected, plural, one {# finding} other {# findings}}, got {got} · {duration}s · {cost}",
+    "startLine": "Start line",
+    "endLine": "End line",
+    "seededAccepted": "Seeded from an accepted finding · assert the expected output",
+    "seededDismissed": "Seeded from a dismissed finding · assert the agent stays quiet",
+    "positiveCase": "POSITIVE CASE",
+    "negativeCase": "NEGATIVE CASE",
+    "mustFindAt": "MUST find \"{title}\" at {file}:{line}",
+    "mustNotFlagAt": "MUST NOT flag \"{title}\" at {file}:{line}",
+    "actualOutput": "Actual output",
+    "neverRun": "Never run yet",
+    "saved": "Eval case \"{name}\" saved"
   },
   "evalsTab": {
     "metricsTitle": "Eval metrics",
@@ -71,7 +95,23 @@
     "run": "Run",
     "running": "Running…",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "runAll": "Run all evals",
+    "runsHeading": "Run history",
+    "noRuns": "No eval runs yet. Run the set to get a baseline.",
+    "mustFind": "must find",
+    "mustNotFlag": "must not flag",
+    "invalidExpectation": "invalid expectation",
+    "passingSummary": "{passed} / {total} passing",
+    "compare": "Compare",
+    "compareHint": "Select two runs to compare",
+    "runDone": "Eval run finished: {passed}/{total} passed",
+    "runFailed": "Eval run failed: {message}",
+    "deleted": "Eval case deleted",
+    "traces": "traces",
+    "noCasesRun": "Create cases from findings before running evals.",
+    "viewDashboard": "View full dashboard →",
+    "caseRunResult": "Case {name}: {status}"
   },
   "page": {
     "crumbSkillsLab": "Skills Lab",
@@ -80,5 +120,22 @@
     "crumbEvals": "Evals",
     "crumbNewCase": "New case",
     "crumbEvalCase": "Eval case"
+  },
+  "compare": {
+    "title": "Compare runs · {a} → {b}",
+    "subtitle": "Old prompt vs new — metric deltas on the same case set",
+    "recall": "RECALL",
+    "precision": "PRECISION",
+    "citation": "CITATION",
+    "cost": "COST",
+    "passed": "PASSED",
+    "close": "Close",
+    "version": "v{version}"
+  },
+  "skillEvals": {
+    "expectedGot": "expected {expected, plural, one {# finding} other {# findings}}, got {got}",
+    "withWithout": "With skill {w}% / Without skill {wo}%",
+    "emptyTitle": "No eval cases for this skill yet",
+    "emptyBody": "Create a case to assert what this skill makes the reviewer find (or stay quiet about) on a sample diff. Runs execute with and without the skill — the difference is the skill's measured lift."
   }
 }

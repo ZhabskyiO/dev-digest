@@ -141,6 +141,38 @@ d('GET /agents/:id/versions', () => {
     await app.close();
   });
 
+  it('POST …/versions/:version/restore re-applies an old config as a NEW version', async () => {
+    const app = await makeApp();
+    const agentId = (
+      await app.inject({ method: 'POST', url: '/agents', payload: createBody })
+    ).json().id as string;
+    await app.inject({
+      method: 'PUT',
+      url: `/agents/${agentId}`,
+      payload: { system_prompt: 'Broken prompt.', model: 'gpt-4o' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/agents/${agentId}/versions/1/restore`,
+    });
+    expect(res.statusCode).toBe(201);
+    // v1 config is live again, recorded as v3 — history is never rewound.
+    expect(res.json()).toMatchObject({
+      version: 3,
+      system_prompt: 'Review the diff.',
+      model: 'gpt-4o-mini',
+    });
+    const versions = await app.inject({ method: 'GET', url: `/agents/${agentId}/versions` });
+    expect(versions.json()).toHaveLength(3);
+
+    expect(
+      (await app.inject({ method: 'POST', url: `/agents/${agentId}/versions/99/restore` }))
+        .statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
   it('a non-numeric :version is rejected at the edge (422, not 404)', async () => {
     const app = await makeApp();
     const agentId = (

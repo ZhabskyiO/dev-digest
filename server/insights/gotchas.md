@@ -215,6 +215,23 @@ most-skipped and most-valuable section: if something failed, record it here.**
 
 Quirks of dependencies, tooling, and the local environment.
 
+- 2026-08-23 — NEVER assume a pgvector query returning zero rows after an
+  embedding model change is a data/query bug. When the model changes, its
+  embedding dimension often changes too (e.g., OpenAI's text-embedding-3-large
+  is 3072-dim vs text-embedding-3-small's 1536-dim). The `vector(N)` column
+  definition in Postgres **persists** at its original dimension until a migration
+  updates it — a query on a vector(1536) column with 3072-dim embeddings
+  silently returns zero rows, no error. Symptom: queries that worked stop
+  working, no indexing or network issue. Diagnosis: `\d+ table_name` in psql to
+  check the column definition against your active model's output dimension. Fix:
+  run a migration to redefine the column (e.g. `alter table agents alter column
+  embedding type vector(3072)`) and backfill with embeddings from the new model
+  before re-querying. Check old migrations and old embedding code before
+  refactoring — if this repo switched models once before, the column definition
+  might already be wrong from a prior incident. For this repo specifically, verify
+  that `agents.embedding` column is `vector(3072)` (text-embedding-3-large) to
+  match the active embedding model in `adapters/embedder.ts`.
+
 - 2026-08-20 — A plan acceptance check phrased as `grep -qi "some phrase"` against
   a `.md` prompt file only matches within a SINGLE physical line — `grep` has no
   multi-line mode without `-z`. `intent.extract.md`'s untrusted-data paragraph
@@ -375,6 +392,32 @@ Quirks of dependencies, tooling, and the local environment.
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
+
+- 2026-08-25 — `Anthropic structured output failed schema validation` on eval
+  runs (whole batch aborts): without `strict: true` on the forced tool,
+  claude-haiku omits required scalar fields (`verdict: Required` from Zod) even
+  though the `input_schema` marks them required — Anthropic tool `input_schema`
+  is guidance, not enforcement, unlike OpenRouter/OpenAI strict `json_schema`
+  mode which the same `toJsonSchema` output IS enforced under. Fix: set
+  `strict: true` on the tool (`adapters/llm/anthropic.ts`) — but strict mode
+  rejects numeric bounds (`400 ... For 'integer' type, properties maximum,
+  minimum are not supported`), so strip `minimum`/`maximum`/`exclusive*` from
+  numeric properties in the schema copy sent to Anthropic (Zod still enforces
+  the bounds after parsing). NOTE `@anthropic-ai/sdk` 0.33 types don't know
+  `strict` — cast the tool literal to `Anthropic.Tool`.
+
+- 2026-08-25 — `400 invalid_request_error: "tool_use ids were found without
+  tool_result blocks immediately after"` on every anthropic-provider agent run
+  that needed a schema-validation retry. Cause: `AnthropicProvider.
+  completeStructured`'s reprompt loop pushed the assistant turn (containing the
+  forced `tool_use` block) followed by a PLAIN-TEXT user message — the Anthropic
+  Messages API requires the next user message to answer with a `tool_result`
+  block carrying the matching `tool_use_id`, so attempt ≥2 was rejected before
+  reaching the model (OpenRouter/OpenAI chat format has no such rule, which is
+  why the same loop worked there). Fix: send the reprompt as
+  `{type:'tool_result', tool_use_id, is_error:true, content}` and fall back to
+  plain text only when the response had no `tool_use` block
+  (`adapters/llm/anthropic.ts`, test `test/anthropic-adapter.test.ts`).
 
 - 2026-08-19 — A raw NUL byte (0x00) inside a `.ts` template literal (e.g.
   `` return `${repoId}\0${docPath}`; `` written with a literal control

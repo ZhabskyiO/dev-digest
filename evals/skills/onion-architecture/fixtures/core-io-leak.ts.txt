@@ -1,0 +1,16 @@
+// reviewer-core/src/review/cache.ts  (new file in a PR)
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import postgres from "postgres";
+import type { Review } from "@devdigest/shared";
+
+const sql = postgres(process.env.DATABASE_URL!);
+
+/** Cache grounded reviews on disk + Postgres so repeated runs are free. */
+export async function cachedReview(key: string, compute: () => Promise<Review>): Promise<Review> {
+  const f = `/tmp/review-cache/${key}.json`;
+  if (existsSync(f)) return JSON.parse(readFileSync(f, "utf8"));
+  const review = await compute();
+  writeFileSync(f, JSON.stringify(review));
+  await sql`insert into review_cache (key, body) values (${key}, ${JSON.stringify(review)})`;
+  return review;
+}

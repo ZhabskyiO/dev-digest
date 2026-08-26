@@ -16,6 +16,7 @@ import { ContextTab } from "./_components/ContextTab";
 import { PreviewTab } from "./_components/PreviewTab";
 import { StatsTab } from "./_components/StatsTab";
 import { VersionsTab } from "./_components/VersionsTab";
+import { EvalsTab } from "./_components/EvalsTab";
 
 export function SkillDetail({
   skill,
@@ -57,6 +58,8 @@ export function SkillDetail({
           <PreviewTab skill={skill} />
         ) : tab === "stats" ? (
           <StatsTab skill={skill} />
+        ) : tab === "evals" ? (
+          <EvalsTab skill={skill} />
         ) : tab === "versions" ? (
           <VersionsTab skill={skill} />
         ) : (

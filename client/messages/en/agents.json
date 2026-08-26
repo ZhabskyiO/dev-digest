@@ -56,7 +56,8 @@
       "context": "Context",
       "evals": "Evals",
       "stats": "Stats",
-      "ci": "CI"
+      "ci": "CI",
+      "versions": "Versions"
     }
   },
   "config": {
@@ -117,5 +118,21 @@
   },
   "mount": {
     "body": "Mount point for {owner}. The Agent Editor shell + tab routing are wired by A2 — {owner} renders this tab."
+  },
+  "versions": {
+    "heading": "Version history",
+    "count": "{count, plural, one {# version} other {# versions}}",
+    "subtitle": "Every config save snapshots the provider, model, and system prompt. Restore re-applies an old snapshot as a new version — history is never rewound, so past eval runs stay reproducible.",
+    "current": "Current",
+    "promptLength": "prompt {chars, plural, one {# char} other {# chars}}",
+    "diff": "Diff",
+    "hideDiff": "Hide diff",
+    "restore": "Restore",
+    "restoring": "Restoring…",
+    "restoredToast": "Restored v{version} as v{newVersion}.",
+    "diffHeading": "v{version} → current system prompt",
+    "diffIdentical": "The system prompt is identical to the current one.",
+    "loadError": "Could not load version history.",
+    "empty": "No snapshots yet — the first config edit records one."
   }
 }

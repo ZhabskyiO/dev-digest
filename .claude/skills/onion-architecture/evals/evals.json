@@ -1,0 +1,105 @@
+{
+  "skill_name": "onion-architecture",
+  "skill_path": ".",
+  "notes": "Assertions prefixed DISCRIMINATOR target capability the module-level CLAUDE.md files do NOT already supply; unprefixed ones are ground-truth coverage of the planted violations and are expected to pass in both arms. Each detection fixture holds exactly 3 planted violations plus at least one deliberately correct control file. Fixtures contain NO comment hinting at the planted problems - keep it that way when editing.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "notifications-module-review",
+      "type": "detection",
+      "prompt": "We're about to merge the new notifications module and I want a second pair of eyes before it goes in. The code is at fixtures/eval-1-notifications-module/server/src/modules/notifications/ (routes.ts, service.ts, repository.ts). Go through it and write me a review of how it's put together \u2014 anything that doesn't sit right with how this backend is meant to be organised. Markdown, and be specific about file and line.",
+      "fixture": "fixtures/eval-1-notifications-module",
+      "expected_output": "A markdown review naming 3 layering violations: routes.ts querying db/schema inline, service.ts importing/instantiating OctokitGitHubClient instead of container.github(), and service.ts importing ../reviews/repository.js instead of container.reviewRepo. repository.ts should be left alone.",
+      "files": [],
+      "assertions": [
+        "Flags routes.ts for importing drizzle-orm + db/schema and running the unread-count query inline in the handler",
+        "Flags service.ts for importing and instantiating OctokitGitHubClient instead of resolving GitHubClient through the container",
+        "Flags service.ts for importing ../reviews/repository.js directly instead of reaching reviews through the container",
+        "DISCRIMINATOR: identifies the cross-module import as a DISTINCT violation from the adapter import - i.e. does not fold 'imports ReviewRepository' into the same 'use the DI container' point, but names it as a module-boundary breach with container.reviewRepo as the fix",
+        "DISCRIMINATOR: notices NotificationsRepository.unreadCount already exists and is dead code, and routes the fix through it rather than inventing a new service method",
+        "Does NOT report repository.ts as a violation - it is correct infrastructure (false-positive check)",
+        "APPROVAL ACCURACY: every affirmative claim the review makes (anything it explicitly calls correct, fine, or already right) is actually true of the fixture"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "reviewer-core-purity",
+      "type": "detection",
+      "prompt": "I inherited a severity-audit feature that someone dropped into reviewer-core. Files are fixtures/eval-2-core-purity/reviewer-core/src/review/severity-audit.ts and audit-scoring.ts. Does this belong in reviewer-core as written? If not, tell me exactly what has to move and where it should go instead. Write it to markdown.",
+      "fixture": "fixtures/eval-2-core-purity",
+      "expected_output": "A markdown analysis naming 3 outward-pointing dependencies in severity-audit.ts: the type-only import from server/src/db/rows.js, the estimateTokens import from server/src/adapters/tokenizer, and the process.env config reads. None of these trip a naive no-db/no-fs/no-SDK check. audit-scoring.ts must be confirmed fine and the injected llm parameter must NOT be called a violation.",
+      "files": [],
+      "assertions": [
+        "Flags the `import type { FindingRow, ReviewRow }` from server/src/db/rows.js as an outward-pointing dependency, despite it being type-only and erased at runtime",
+        "Flags the `estimateTokens` import from server/src/adapters/tokenizer as core reaching into infrastructure, despite that helper being itself pure",
+        "Flags the process.env reads (DEVDIGEST_AUDIT_MODEL / DEVDIGEST_AUDIT_TOKEN_BUDGET) as configuration that must be passed in rather than read inside the core",
+        "DISCRIMINATOR: reasons from the DIRECTION of the dependency (inner ring importing an outer one) rather than only from whether the code performs I/O - the three violations here all pass a naive no-db/no-fs/no-SDK check",
+        "Gives a correct destination for each: a shared contract type for the row types, an injected function or the Tokenizer port for token estimation, and caller-supplied parameters for model and budget",
+        "Does NOT report audit-scoring.ts as a problem - it is correctly pure (false-positive check)",
+        "RED HERRING: does NOT report the injected `llm` parameter as a violation - dependency injection of the provider is the correct pattern"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "codecov-adapter-wiring",
+      "type": "detection",
+      "prompt": "A teammate wired up a Codecov integration and I'm reviewing the PR. Changed files are under fixtures/eval-3-coverage-adapter/server/src/ \u2014 vendor/shared/adapters.ts, adapters/coverage/codecov.ts, and modules/reviews/routes.ts. Did they hook it into the backend the way we're supposed to? Give me a review in markdown with concrete fixes.",
+      "fixture": "fixtures/eval-3-coverage-adapter",
+      "expected_output": "A markdown review naming: the CodecovClient port is vendor-shaped (vendor name, codecov* method prefixes, raw CodecovApiResponse wire type, apiToken on the interface); the adapter imports modules/reviews/constants.js; and routes.ts imports and instantiates CodecovAdapter directly. Bonus: notices the missing mock in adapters/mocks.ts and the missing container getter + ContainerOverrides field.",
+      "files": [],
+      "assertions": [
+        "Flags the CodecovClient port as vendor-shaped (vendor name, codecov* method prefixes, raw CodecovApiResponse wire type, or apiToken on the interface)",
+        "Flags adapters/coverage/codecov.ts importing modules/reviews/constants.js as infrastructure depending on a feature module",
+        "Flags modules/reviews/routes.ts importing and instantiating CodecovAdapter directly in the handler",
+        "DISCRIMINATOR: proposes a concrete vendor-neutral replacement for the port - an actual name and/or method shape with no 'Codecov' in it",
+        "DISCRIMINATOR: identifies at least two of the four port-leak signals specifically (vendor-prefixed method names, wire-format return type, apiToken on the interface, vendor enum parameter) rather than objecting to the port in general terms",
+        "DISCRIMINATOR: notices the wiring is incomplete - no mock in adapters/mocks.ts and/or no container getter plus ContainerOverrides field",
+        "Does NOT condemn the adapter wholesale - recognises the fetch wrapper and Zod validation as correct adapter work",
+        "APPROVAL ACCURACY: every affirmative claim the review makes about code being correct is actually true of the fixture"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "slack-summary-placement",
+      "type": "placement",
+      "prompt": "We want DevDigest to post a short summary to Slack whenever a review run finishes \u2014 one channel per repo, configurable in settings. Where does this go in the backend, and what does each piece look like? I want the actual code for every file you'd add or change, not just prose.",
+      "fixture": null,
+      "expected_output": "A port defined first in src/vendor/shared/adapters.ts that is vendor-neutral (no 'Slack' in the interface/method shapes), an adapter under src/adapters/<kind>/ wrapping the Slack SDK/webhook, a mock added to src/adapters/mocks.ts, a lazy getter in platform/container.ts plus a ContainerOverrides field, and the reviews service consuming container.<port> \u2014 never the SDK. Route/DB placement should follow the same rules.",
+      "files": [],
+      "assertions": [
+        "Defines the port first as an interface in src/vendor/shared/adapters.ts",
+        "The port passes the four leak checks: no vendor-prefixed method names, no wire-format return type, no credential field on the interface, no vendor enum parameter",
+        "DISCRIMINATOR: the port is named for the capability rather than the company (e.g. ChatNotifier / MessagePublisher rather than SlackNotifier), OR the answer explicitly argues why a Slack-specific name is justified here against the swappable-provider test",
+        "Implements a concrete adapter under src/adapters/<kind>/ that wraps the Slack webhook/SDK",
+        "Adds a real mock implementation to src/adapters/mocks.ts, present as actual code rather than promised in prose",
+        "Wires a lazy getter in platform/container.ts AND adds the matching field to ContainerOverrides",
+        "The reviews service consumes the port via container.<port> and never imports or constructs the Slack client itself",
+        "Per-repo channel config is persisted through a repository or settings module, and its WRITE path also goes through a repository rather than touching db/schema in a route",
+        "DISCRIMINATOR: sends one message per finished review run rather than one per agent inside the run, matching the user's 'whenever a review run finishes'"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "digest-side-effects",
+      "type": "detection",
+      "targets_skill_version": "1.2.0 \u2014 section 'Side effects: where they fire, and how often'",
+      "prompt": "Before I turn the weekly digests on for everyone, can you look over fixtures/eval-5-digest-side-effects/server/src/modules/digests/ (run-executor.ts, repository.ts, service.ts) and tell me if the delivery side of it is put together sensibly? Markdown, be specific about file and line.",
+      "fixture": "fixtures/eval-5-digest-side-effects",
+      "expected_output": "A markdown review naming 3 side-effect defects: chat.post inside the per-repo loop (wrong granularity for a once-per-workspace digest), the unguarded post awaited before insertDigest (wrong ordering + an outbound failure aborting the durable write), and the raw fetch to a webhook inside DigestsRepository.insertDigest (persistence performing outbound I/O, un-ported, reading process.env). service.ts must be left alone.",
+      "assertions": [
+        "Flags the chat.post call inside the `for (const repo of repos)` loop in run-executor.ts as firing once per repo when the digest is defined as one per workspace",
+        "Flags that the digest is posted BEFORE insertDigest persists it, so a crash between the two announces a digest the system has no record of",
+        "Flags that the pre-persist post is unguarded, so an outbound failure prevents insertDigest from running at all",
+        "Flags the raw fetch() to DIGEST_WEBHOOK_URL inside DigestsRepository.insertDigest as persistence performing an outbound call",
+        "DISCRIMINATOR: articulates the granularity principle generally - that the number of messages must not depend on an internal detail (how many repos have activity), not merely that this particular loop looks wrong",
+        "DISCRIMINATOR: prescribes the correct ordering explicitly - persist first, then send inside its own catch so the outbound effect cannot fail the write",
+        "DISCRIMINATOR: says the webhook belongs behind a port called from the application layer, rather than only saying to delete the fetch",
+        "Does NOT report service.ts as a violation - its canPost check before persisting is input validation, not an announcement, and is correct (false-positive check)",
+        "APPROVAL ACCURACY: every affirmative claim the review makes about code being correct is actually true of the fixture"
+      ],
+      "files": []
+    }
+  ],
+  "fixtures_base": "evals/fixtures (relative to the skill root; prompts reference paths under it)",
+  "answer_keys": "NOT shipped with the skill on purpose. Ground truth lives in .claude/skill-evals/onion-architecture/answer-keys/ because the with-skill arm is pointed at this skill directory - keys inside it would leak into the runs being measured."
+}

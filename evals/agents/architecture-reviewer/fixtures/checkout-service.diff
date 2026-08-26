@@ -1,0 +1,116 @@
+diff --git a/server/src/adapters/payments/stripe.ts b/server/src/adapters/payments/stripe.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/adapters/payments/stripe.ts
+@@ -0,0 +1,14 @@
++import Stripe from 'stripe';
++
++export class StripeClient {
++  private readonly stripe: Stripe;
++  constructor(secretKey: string) {
++    this.stripe = new Stripe(secretKey);
++  }
++  async charge(customerId: string, amountCents: number): Promise<string> {
++    const intent = await this.stripe.paymentIntents.create({ amount: amountCents, currency: 'usd', customer: customerId });
++    return intent.id;
++  }
++}
++
++export default StripeClient;
+diff --git a/server/src/modules/checkout/service.ts b/server/src/modules/checkout/service.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/modules/checkout/service.ts
+@@ -0,0 +1,27 @@
++import type { FastifyRequest } from 'fastify';
++import { StripeClient } from '../../adapters/payments/stripe.js';
++import type { CheckoutRepository } from './repository.js';
++
++export class CheckoutService {
++  private readonly stripe = new StripeClient(process.env.STRIPE_SECRET_KEY ?? '');
++
++  constructor(private readonly repo: CheckoutRepository) {}
++
++  async checkout(req: FastifyRequest<{ Body: { customerId: string; planId: string } }>): Promise<{ orderId: string }> {
++    const { customerId, planId } = req.body;
++    const plan = await this.repo.findPlan(planId);
++    if (!plan) throw new Error('plan not found');
++    const paymentId = await this.stripe.charge(customerId, plan.priceCents);
++    const order = await this.repo.createOrder({ customerId, planId, paymentId });
++    return { orderId: order.id };
++  }
++
++  async cancel(orderId: string): Promise<void> {
++    const order = await this.repo.findOrder(orderId);
++    if (!order) return;
++    await this.repo.markCancelled(orderId);
++  }
++}
++
++export type { CheckoutRepository };
++
+diff --git a/server/src/modules/checkout/routes.ts b/server/src/modules/checkout/routes.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/modules/checkout/routes.ts
+@@ -0,0 +1,31 @@
++import type { FastifyInstance } from 'fastify';
++import { z } from 'zod';
++import { eq } from 'drizzle-orm';
++import { db } from '../../db/client.js';
++import { orders } from '../../db/schema.js';
++import { container } from '../../platform/container.js';
++
++const CheckoutBody = z.object({ customerId: z.string().min(1), planId: z.string().min(1) });
++
++export async function checkoutRoutes(app: FastifyInstance): Promise<void> {
++  app.post('/checkout', { schema: { body: CheckoutBody } }, async (req, reply) => {
++    const result = await container.checkoutService.checkout(req as never);
++    return reply.code(201).send(result);
++  });
++
++  app.get('/checkout/:orderId', async (req, reply) => {
++    const { orderId } = req.params as { orderId: string };
++    const rows = await db.select().from(orders).where(eq(orders.id, orderId));
++    const order = rows[0];
++    if (!order) return reply.code(404).send({ error: 'not found' });
++    if (order.status === 'cancelled' && order.refundedAt == null) {
++      await db.update(orders).set({ status: 'refund_pending' }).where(eq(orders.id, orderId));
++      order.status = 'refund_pending';
++    }
++    return reply.send(order);
++  });
++}
++
++export default checkoutRoutes;
++
++
+diff --git a/server/src/modules/checkout/repository.ts b/server/src/modules/checkout/repository.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/modules/checkout/repository.ts
+@@ -0,0 +1,24 @@
++import { eq } from 'drizzle-orm';
++import type { Db } from '../../db/client.js';
++import { orders, plans } from '../../db/schema.js';
++
++export class CheckoutRepository {
++  constructor(private readonly db: Db) {}
++
++  async findPlan(planId: string) {
++    const rows = await this.db.select().from(plans).where(eq(plans.id, planId));
++    return rows[0] ?? null;
++  }
++  async findOrder(orderId: string) {
++    const rows = await this.db.select().from(orders).where(eq(orders.id, orderId));
++    return rows[0] ?? null;
++  }
++  async createOrder(input: { customerId: string; planId: string; paymentId: string }) {
++    const [row] = await this.db.insert(orders).values({ ...input, status: 'paid' }).returning();
++    return row!;
++  }
++  async markCancelled(orderId: string) {
++    await this.db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, orderId));
++  }
++}
++

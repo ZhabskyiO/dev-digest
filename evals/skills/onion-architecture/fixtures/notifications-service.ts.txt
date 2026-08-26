@@ -1,0 +1,13 @@
+// server/src/modules/notifications/service.ts
+import { db } from "../../db/client.js";
+import { notifications } from "../../db/schema.js";
+import { SlackClient } from "../../adapters/slack/client.js";
+import { eq } from "drizzle-orm";
+
+export class NotificationsService {
+  private slack = new SlackClient(process.env.SLACK_TOKEN!);
+  async notifyReviewDone(reviewId: string) {
+    const rows = await db.select().from(notifications).where(eq(notifications.reviewId, reviewId));
+    for (const row of rows) await this.slack.post(row.channel, "Review " + reviewId + " finished");
+  }
+}

@@ -9,7 +9,9 @@
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "turnIntoEvalCase": "Turn into eval case",
+    "evalCaseHint": "Accept or dismiss first — the decision sets the expectation type"
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",
@@ -30,7 +32,10 @@
     "hideLowConfidence": "Hide low confidence",
     "jumpToSeverity": "Jump to the next {severity} finding",
     "noMatchTitle": "No findings match",
-    "noMatchBody": "Adjust the filters above, or run a review to generate findings."
+    "noMatchBody": "Adjust the filters above, or run a review to generate findings.",
+    "evalCaseCreated": "Eval case \"{name}\" created ({type})",
+    "evalCaseExists": "This finding already has eval case \"{name}\"",
+    "evalCaseFailed": "Could not create the eval case: {message}"
   },
   "runReview": {
     "runAll": "Run all enabled agents",

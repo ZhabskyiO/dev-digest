@@ -44,6 +44,9 @@ directory — a routed skill that does not exist silently drops that whole revie
 
 ### UI bucket
 - `frontend-architecture` — where code lives, component splitting, App Router organization.
+- `frontend-design` — visual/UX quality: `@devdigest/ui` design-system discipline, CSS-variable
+  theming (dark/light), loading/empty/error states, accessibility, i18n coverage, content
+  resilience. Severities per its own rubric (CRITICAL/HIGH/MEDIUM).
 - `react-best-practices` — anti-patterns, hooks rules, derive-don't-store, performance
   (CRITICAL/HIGH/MEDIUM). This is also the runtime-performance pass; there is no separate
   perf skill installed here.

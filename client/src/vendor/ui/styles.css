@@ -291,3 +291,11 @@ p {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* tiny utility: continuous rotation for in-flight indicators */
+@keyframes dd-spin {
+  to { transform: rotate(360deg); }
+}
+.dd-spin {
+  animation: dd-spin 1s linear infinite;
+}

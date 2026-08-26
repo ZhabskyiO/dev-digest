@@ -3,7 +3,14 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, AgentRunStats, ModelInfo, Provider, ReviewStrategy } from "@devdigest/shared";
+import type {
+  Agent,
+  AgentRunStats,
+  AgentVersion,
+  ModelInfo,
+  Provider,
+  ReviewStrategy,
+} from "@devdigest/shared";
 
 export function useAgents() {
   return useQuery({
@@ -76,6 +83,33 @@ export function useDeleteAgent() {
     onSuccess: (_d, id) => {
       qc.invalidateQueries({ queryKey: ["agents"] });
       qc.removeQueries({ queryKey: ["agent", id] });
+    },
+  });
+}
+
+/** GET /agents/:id/versions → config snapshots, newest version first. */
+export function useAgentVersions(agentId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["agent-versions", agentId],
+    queryFn: () => api.get<AgentVersion[]>(`/agents/${agentId}/versions`),
+    enabled: !!agentId,
+  });
+}
+
+/**
+ * POST /agents/:id/versions/:version/restore → re-apply an old config. The
+ * server records it as a NEW version (history is never rewound), so on success
+ * both the agent and its version list refresh.
+ */
+export function useRestoreAgentVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, version }: { agentId: string; version: number }) =>
+      api.post<Agent>(`/agents/${agentId}/versions/${version}/restore`),
+    onSuccess: (_data, { agentId }) => {
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: ["agent", agentId] });
+      qc.invalidateQueries({ queryKey: ["agent-versions", agentId] });
     },
   });
 }

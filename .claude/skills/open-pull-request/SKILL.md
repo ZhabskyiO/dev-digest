@@ -1,6 +1,6 @@
 ---
 name: open-pull-request
-description: Opens a pull request for the current branch following this repo's conventions — Conventional Commits PR title, the committed PR template filled in honestly, and a self-review before requesting review. Use when asked to open, create, raise, or submit a PR.
+description: Opens a pull request for the current branch following this repo's conventions — Conventional Commits PR title, the committed PR template filled in honestly, and the pr-self-review gate run as one of its own steps. ALWAYS the skill to load when the user asks to open, create, raise, submit, or "PR" a branch — even if they also mention pushing or reviewing first; do NOT load pr-self-review on its own for that request, this skill runs it.
 when_to_use: When the user asks to open/create/raise/submit a pull request, or says "PR this", "put this up for review", "ship it for review". Also read it before pushing a branch you intend to turn into a PR.
 allowed-tools: Read, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git branch:*), Bash(git push:*), Bash(gh pr create:*), Bash(gh pr view:*), Bash(gh pr edit:*), Bash(gh auth status:*)
 ---
@@ -112,6 +112,10 @@ Write that file to the scratchpad directory, not into the repo.
 
 Non-negotiable, and it is the single highest-leverage step here:
 
+- **Run the `pr-self-review` skill now** (`/pr-self-review`). It is the repo's
+  local pre-PR gate, and the `PreToolUse` hook will deny `git push` / `gh pr create`
+  unless that gate has a fresh PASS on record for the current diff — so this is
+  not optional, and it belongs here, after the title and body are drafted.
 - Re-read your own diff as if it were someone else's.
 - Run `pnpm typecheck` and `pnpm test` in **every package you touched** — they're
   standalone packages, so "the root passed" proves nothing about the others.

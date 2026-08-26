@@ -1,0 +1,43 @@
+diff --git a/reviewer-core/src/review/run.ts b/reviewer-core/src/review/run.ts
+--- a/reviewer-core/src/review/run.ts
++++ b/reviewer-core/src/review/run.ts
+@@ -1,8 +1,10 @@
++import { readFileSync, writeFileSync } from 'node:fs';
+ import type { Finding, Review, UnifiedDiff } from '@devdigest/shared';
+ import type { LLMProvider } from '../llm/structured.js';
+ import { buildPrompt } from '../prompt.js';
+ import { groundFindings } from '../grounding.js';
+ import { reduceFindings } from './reduce.js';
+
+ export interface RunOptions {
+   maxFindings?: number;
++  /** Skip the grounding pass — faster for large diffs where line refs are unreliable. */
++  skipGrounding?: boolean;
++  /** Persist the raw model answer next to the diff for later debugging. */
++  dumpRawTo?: string;
+ }
+
+@@ -18,12 +20,22 @@ export async function runReview(
+   const prompt = buildPrompt(diff, opts);
+   const raw = await llm.complete(prompt);
++  if (opts.dumpRawTo) {
++    writeFileSync(opts.dumpRawTo, JSON.stringify(raw, null, 2));
++  }
++  const hints = opts.dumpRawTo ? readFileSync(opts.dumpRawTo.replace(/\.json$/, '.hints.md'), 'utf8') : '';
+   const findings: Finding[] = reduceFindings(raw.findings, opts.maxFindings ?? 20);
+
++  if (opts.skipGrounding) {
++    return {
++      findings,
++      score: raw.score,
++      summary: raw.summary + (hints ? `\n\n${hints}` : ''),
++    };
++  }
++
+   const grounded = groundFindings(findings, diff);
+   return {
+     findings: grounded.findings,
+     score: grounded.score,
+     summary: raw.summary,
+   };
+ }

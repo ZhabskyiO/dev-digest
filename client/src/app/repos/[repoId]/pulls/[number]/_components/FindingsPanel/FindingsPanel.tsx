@@ -8,6 +8,10 @@ import { Toggle, EmptyState, Icon, SEV } from "@devdigest/ui";
 import type { FindingRecord } from "@devdigest/shared";
 import { FindingCard } from "../FindingCard";
 import { useFindingAction } from "../../../../../../../lib/hooks/reviews";
+import { useEvalCaseSeed } from "../../../../../../../lib/hooks/evals";
+import { CaseEditorModal } from "@/components/eval-case-editor";
+import type { EvalCaseSeed } from "@devdigest/shared";
+import { notify } from "../../../../../../../lib/toast";
 import { TALLY_SEVERITIES, tallySeverities, type TallySeverity } from "@/components/findings-summary";
 import { KEY_TO_ACTION, SCROLL_SETTLE_MS } from "./constants";
 import { visibleFindings } from "./helpers";
@@ -30,6 +34,8 @@ export function FindingsPanel({
 }) {
   const t = useTranslations("prReview");
   const action = useFindingAction();
+  const evalSeed = useEvalCaseSeed();
+  const [caseSeed, setCaseSeed] = React.useState<EvalCaseSeed | null>(null);
   const [hideLow, setHideLow] = React.useState(false);
   const [focusIdx, setFocusIdx] = React.useState(0);
 
@@ -178,10 +184,38 @@ export function FindingsPanel({
               repoFullName={repoFullName}
               headSha={headSha}
               onAction={(act) => action.mutate({ findingId: f.id, action: act, prId })}
+              evalPending={evalSeed.isPending}
+              onEvalCase={() =>
+                evalSeed.mutate(
+                  { findingId: f.id },
+                  {
+                    onSuccess: (seed) => {
+                      if (seed.existing_case_id) {
+                        notify.info(t("panel.evalCaseExists", { name: seed.name }));
+                      }
+                      setCaseSeed(seed);
+                    },
+                    onError: (e) =>
+                      notify.error(
+                        t("panel.evalCaseFailed", {
+                          message: e instanceof Error ? e.message : String(e),
+                        }),
+                      ),
+                  },
+                )
+              }
             />
           ))
         )}
       </div>
+      {caseSeed && (
+        <CaseEditorModal
+          owner={{ kind: "agent", id: caseSeed.agent_id, name: caseSeed.agent_name }}
+          existing={null}
+          seed={caseSeed}
+          onClose={() => setCaseSeed(null)}
+        />
+      )}
     </div>
   );
 }

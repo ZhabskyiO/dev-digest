@@ -1,0 +1,96 @@
+diff --git a/server/src/modules/repos/helpers.ts b/server/src/modules/repos/helpers.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/modules/repos/helpers.ts
+@@ -0,0 +1,18 @@
++/** Pure helpers for the repos module — no I/O, no framework types. */
++
++export interface RepoSlug {
++  owner: string;
++  name: string;
++}
++
++/** Accepts "owner/name", a GitHub URL, or an SSH remote and returns the slug, or null. */
++export function parseRepoSlug(input: string): RepoSlug | null {
++  const trimmed = input.trim();
++  const m =
++    trimmed.match(/^([\w.-]+)\/([\w.-]+?)(?:\.git)?$/) ??
++    trimmed.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/);
++  if (!m) return null;
++  return { owner: m[1]!, name: m[2]! };
++}
++
++export const slugKey = (s: RepoSlug): string => `${s.owner}/${s.name}`.toLowerCase();
+diff --git a/server/src/modules/repos/service.ts b/server/src/modules/repos/service.ts
+--- a/server/src/modules/repos/service.ts
++++ b/server/src/modules/repos/service.ts
+@@ -1,6 +1,7 @@
+ import type { Container } from '../../platform/container.js';
+ import type { RepoRow } from './repository.js';
+ import { AppError } from '../_shared/errors.js';
++import { parseRepoSlug, slugKey } from './helpers.js';
+
+ export class ReposService {
+   constructor(private readonly c: Container) {}
+@@ -12,14 +13,10 @@ export class ReposService {
+   }
+
+   async importRepo(input: string): Promise<RepoRow> {
+-    const trimmed = input.trim();
+-    const m = trimmed.match(/^([\w.-]+)\/([\w.-]+?)(?:\.git)?$/) ?? trimmed.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/);
+-    if (!m) throw new AppError('invalid_repo', `cannot parse repo from "${input}"`);
+-    const owner = m[1]!;
+-    const name = m[2]!;
+-    const existing = await this.c.reposRepo.findByOwnerAndName(owner, name);
++    const slug = parseRepoSlug(input);
++    if (!slug) throw new AppError('invalid_repo', `cannot parse repo from "${input}"`);
++    const existing = await this.c.reposRepo.findBySlugKey(slugKey(slug));
+     if (existing) return existing;
+-    const meta = await this.c.github.getRepo(owner, name);
+-    return this.c.reposRepo.insert({ owner, name, defaultBranch: meta.defaultBranch });
++    const meta = await this.c.github.getRepo(slug.owner, slug.name);
++    return this.c.reposRepo.insert({ owner: slug.owner, name: slug.name, defaultBranch: meta.defaultBranch });
+   }
+ }
+diff --git a/server/src/modules/repos/repository.ts b/server/src/modules/repos/repository.ts
+--- a/server/src/modules/repos/repository.ts
++++ b/server/src/modules/repos/repository.ts
+@@ -1,4 +1,4 @@
+-import { and, eq } from 'drizzle-orm';
++import { and, eq, sql } from 'drizzle-orm';
+ import type { Db } from '../../db/client.js';
+ import { repos } from '../../db/schema.js';
+
+@@ -14,6 +14,13 @@ export class ReposRepository {
+     return rows[0] ?? null;
+   }
+
++  /** Case-insensitive lookup by "owner/name". */
++  async findBySlugKey(key: string): Promise<RepoRow | null> {
++    const rows = await this.db
++      .select()
++      .from(repos)
++      .where(eq(sql`lower(${repos.owner} || '/' || ${repos.name})`, key));
++    return rows[0] ?? null;
++  }
++
+   async insert(input: { owner: string; name: string; defaultBranch: string }): Promise<RepoRow> {
+     const [row] = await this.db.insert(repos).values(input).returning();
+     return row!;
+diff --git a/server/src/modules/repos/helpers.test.ts b/server/src/modules/repos/helpers.test.ts
+new file mode 100644
+--- /dev/null
++++ b/server/src/modules/repos/helpers.test.ts
+@@ -0,0 +1,12 @@
++import { describe, expect, it } from 'vitest';
++import { parseRepoSlug, slugKey } from './helpers.js';
++
++describe('parseRepoSlug', () => {
++  it('parses owner/name, https and ssh forms', () => {
++    expect(parseRepoSlug('ZhabskyiO/dev-digest')).toEqual({ owner: 'ZhabskyiO', name: 'dev-digest' });
++    expect(parseRepoSlug('https://github.com/ZhabskyiO/dev-digest.git')).toEqual({ owner: 'ZhabskyiO', name: 'dev-digest' });
++    expect(parseRepoSlug('git@github.com:ZhabskyiO/dev-digest.git')).toEqual({ owner: 'ZhabskyiO', name: 'dev-digest' });
++    expect(parseRepoSlug('not a repo')).toBeNull();
++    expect(slugKey({ owner: 'ZhabskyiO', name: 'Dev-Digest' })).toBe('zhabskyio/dev-digest');
++  });
++});

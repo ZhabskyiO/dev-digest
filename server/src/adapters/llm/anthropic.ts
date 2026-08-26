@@ -16,6 +16,28 @@ import { ExternalServiceError } from '../../platform/errors.js';
 const DEFAULT_TIMEOUT = 60_000;
 const DEFAULT_MAX_TOKENS = 4096;
 
+/**
+ * Anthropic strict tool use rejects `minimum`/`maximum` on numeric properties
+ * (400: "For 'integer' type, properties maximum, minimum are not supported"),
+ * so strip them from the copy sent as `input_schema`. Zod still enforces the
+ * bounds after parsing, and the reprompt loop catches violations.
+ */
+function toStrictInputSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(toStrictInputSchema);
+  if (node && typeof node === 'object') {
+    const o = { ...(node as Record<string, unknown>) };
+    if (o['type'] === 'integer' || o['type'] === 'number') {
+      delete o['minimum'];
+      delete o['maximum'];
+      delete o['exclusiveMinimum'];
+      delete o['exclusiveMaximum'];
+    }
+    for (const k of Object.keys(o)) o[k] = toStrictInputSchema(o[k]);
+    return o;
+  }
+  return node;
+}
+
 /** Anthropic has no embeddings API; embeddings come from the OpenAI Embedder. */
 function splitSystem(messages: ChatMessage[]): {
   system: string;
@@ -114,11 +136,18 @@ export class AnthropicProvider implements LLMProvider {
             max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
             temperature: req.temperature ?? 0,
             tools: [
+              // `strict: true` makes the API guarantee the tool input matches
+              // the schema (required fields included) — without it the model
+              // may omit required fields like `verdict`. SDK 0.33 types don't
+              // know the field yet, hence the cast.
               {
                 name: toolName,
                 description: `Return the result as ${req.schemaName}.`,
-                input_schema: jsonSchema.schema as Anthropic.Tool.InputSchema,
-              },
+                input_schema: toStrictInputSchema(
+                  jsonSchema.schema,
+                ) as Anthropic.Tool.InputSchema,
+                strict: true,
+              } as Anthropic.Tool,
             ],
             tool_choice: { type: 'tool', name: toolName },
           }),
@@ -146,9 +175,20 @@ export class AnthropicProvider implements LLMProvider {
         };
       }
       messages.push({ role: 'assistant', content: res.content });
+      // A tool_use block must be answered by a tool_result with the matching
+      // id in the very next user message, or the API rejects the request (400).
       messages.push({
         role: 'user',
-        content: parsed.repromptMessage,
+        content: toolUse
+          ? [
+              {
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                is_error: true,
+                content: parsed.repromptMessage,
+              },
+            ]
+          : parsed.repromptMessage,
       });
     }
 

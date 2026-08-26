@@ -59,6 +59,17 @@ export class OpenRouterProvider implements LLMProvider {
   async completeStructured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
     const jsonSchema = toJsonSchema(req.schema, req.schemaName);
     const maxRetries = req.maxRetries ?? 2;
+    // Per-request fail-fast override (eval runs): a caller-supplied timeoutMs
+    // caps EACH network attempt and also drops the SDK's own retry budget to 1,
+    // so the worst case stays bounded instead of compounding
+    // (constructor default: 90s × 3 SDK tries × reprompts ≈ many minutes).
+    // maxRetries: 0 — when a caller asks to fail fast, the SDK gets exactly ONE
+    // network try per reprompt attempt. With eval runs at timeoutMs=45s and one
+    // reprompt, the worst case is 2 × 45s per review call — a skill pair stays
+    // under ~3 min, safely inside the browser's ~5-min response-header timeout
+    // (Chrome kills longer fetches with a network error that reads as a
+    // failure while the server quietly finishes the run).
+    const requestOpts = req.timeoutMs ? { timeout: req.timeoutMs, maxRetries: 0 } : undefined;
     const messages = [...req.messages];
     let tokensIn = 0;
     let tokensOut = 0;
@@ -81,7 +92,7 @@ export class OpenRouterProvider implements LLMProvider {
         // OpenRouter usage accounting — ask it to return the REAL generation
         // cost (USD) in `usage.cost`, instead of estimating from a price book.
         ...(this.id === 'openrouter' ? { usage: { include: true } } : {}),
-      });
+      }, requestOpts);
 
       // OpenRouter can return HTTP 200 with no `choices` (an upstream provider
       // error / moderation / free-tier limit in the body) — surface it.

@@ -1,6 +1,6 @@
 ---
 name: onion-architecture
-description: "Onion / ports-and-adapters layering for the DevDigest backend (server/ + reviewer-core/). Use when adding or reviewing a backend module — placing routes/services/repositories/adapters, deciding where a DB query or an external SDK call (LLM, GitHub, git, ripgrep, ast-grep) may live, wiring DI in platform/container.ts, defining a new port in @devdigest/shared, or keeping reviewer-core pure. Enforces the dependency rule (imports point inward) and ships a dependency-cruiser gate. NOT for the client/ frontend (use frontend-architecture) or React code."
+description: "Onion / ports-and-adapters layering for the DevDigest backend (server/ + reviewer-core/). Use when adding or reviewing a backend module — placing routes/services/repositories/adapters, deciding where a DB query or an external SDK call (LLM, GitHub, git, ripgrep, ast-grep) may live, wiring DI in platform/container.ts, defining a new port in @devdigest/shared, or keeping reviewer-core pure. ALWAYS load this BEFORE exploring server/src yourself whenever the question is \"where should X live / which layer / how do I plug in\" for a new integration, third-party service, SDK, API client, webhook, or notifier (Slack, email, Jira, S3, …) in server/ — even if the user never says onion, port, adapter, or DI. Enforces the dependency rule (imports point inward) and ships a dependency-cruiser gate. NOT for the client/ frontend (use frontend-architecture) or React code."
 version: "1.0.0"
 ---
 

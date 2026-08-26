@@ -13,6 +13,7 @@ export const TABS: readonly DetailTab[] = [
   { key: "preview", labelKey: "editor.tabs.preview", icon: "Eye" },
   { key: "stats", labelKey: "editor.tabs.stats", icon: "BarChart" },
   { key: "versions", labelKey: "editor.tabs.versions", icon: "History" },
+  { key: "evals", labelKey: "editor.tabs.evals", icon: "FlaskConical" },
 ];
 
 export const TAB_KEYS: readonly string[] = TABS.map((t) => t.key);
