@@ -10,10 +10,9 @@ on:
     paths:
       - 'client/**'
       - '.github/workflows/client.yml'
+  # Path-filtered only on push (post-merge); every PR runs the full suite
+  # so a green PR always means the tests actually ran (2026-08-26).
   pull_request:
-    paths:
-      - 'client/**'
-      - '.github/workflows/client.yml'
 
 permissions:
   contents: read
