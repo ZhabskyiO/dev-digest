@@ -1,0 +1,53 @@
+name: DevDigest Review
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  fork-notice:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip — fork pull request
+        run: 'echo "DevDigest review skipped: pull requests from forks cannot access
+          repository secrets. Merge from a branch on this repository to run the
+          review."'
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version: "22"
+      - name: Check DevDigest is on the base branch
+        id: bootstrap
+        run: >-
+          if [ -f .devdigest/runner/index.js ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "DevDigest review skipped: .devdigest/ is not on the base branch yet. It activates once the install PR merges."
+          fi
+      - name: Run DevDigest review
+        if: steps.bootstrap.outputs.present == 'true'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEVDIGEST_POST_AS: pr_comment
+        run: node .devdigest/runner/index.js
+      - if: always()
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: devdigest-result
+          path: devdigest-result.json
+          if-no-files-found: ignore
