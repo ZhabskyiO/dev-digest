@@ -509,19 +509,133 @@ Conventions and architectural decisions specific to this repo.
   bug. If it bites, widen `expected_output.start_line/end_line` on the case — do not
   loosen `modules/evals/scoring.ts::matchesExpectation`.
 
+- 2026-08-27 — When generating GitHub Actions YAML server-side (`modules/ci/workflow.ts`, T6),
+  build a plain JS object and run it through `yaml`'s `stringify()` rather than string-templating
+  the YAML by hand. A value like `${{ github.event.pull_request.base.sha }}` survives unquoted as
+  a plain scalar and re-parses back to the identical string — no manual escaping/indentation to get
+  wrong, and the same `yaml.parse` used to validate an untrusted `workflow_override` (AC-57) also
+  proves the generator's own output is well-formed for free. Determinism (AC-19, no timestamp/
+  nonce/Map-iteration-order dependency) then only requires that no code path calls `Date.now()`/
+  `randomUUID()` or iterates a `Map`/`Set` whose insertion order isn't itself derived from a stable
+  input order — plain-object key order and `Array.prototype.filter`/`.map` are already stable.
+
+- 2026-08-27 — Drizzle-orm 0.38.3's pg-core query builder has no lateral-join
+  helper, so a "newest row per parent id" read (T9's
+  `CiRepository.listInstallations`, needing the latest `ci_runs` row per
+  `ci_installations.id`) is two queries, not one: first the parent rows,
+  then `this.db.selectDistinctOn([col], {...}).from(...).where(inArray(col,
+  parentIds)).orderBy(col, desc(sortCol))` — `selectDistinctOn` (on `db`,
+  not chainable off `.select()`) exists specifically for this and matches
+  Postgres `DISTINCT ON (col) ... ORDER BY col, sortCol DESC` semantics
+  exactly. Join the two result sets in application code via a
+  `Map<parentId, row>`. Cheaper than a lateral join for a bounded parent set
+  (installations per workspace), and reuses the same `(installation_id,
+  ran_at DESC)` index the schema already declares for this exact access
+  pattern. No precedent for this existed anywhere else in `src/modules/*
+  /repository*.ts` before this task — the codebase's other "join the
+  latest/related row" cases (`reviews/repository/run.repo.ts`) are 1:1 joins
+  on a foreign key value, not "latest per group".
+
+- 2026-08-27 — A time-based throttle/dedupe cache that must survive across
+  separate HTTP requests (e.g. `CiIngestService.refresh`'s 30s "don't hit
+  GitHub again this soon" window, T11) must be a MODULE-SCOPED `Map`
+  (`const lastRefreshAt = new Map(...)` at file top level), never a class
+  instance field — every `modules/*/service.ts` in this codebase is
+  constructed fresh per call (`new XService(container)`, the uniform pattern
+  seen in `repos/service.ts`, `agents/service.ts`, `onboarding/service.ts`,
+  etc.), so an instance field would reset to empty on every request and the
+  throttle would never actually throttle anything in production, even though
+  a test that reuses one `service` instance across several `refresh()` calls
+  would pass regardless of which one you chose — the bug is invisible from
+  the test alone. `CiIngestService` exposes a `static resetThrottleForTests()`
+  that clears the module map, needed because module state now persists
+  across test cases inside the same file (each test uses a distinct
+  workspace/agent id to avoid cross-test bleed, and `beforeEach` calls the
+  reset as a second line of defence). Any future "at most once per N seconds"
+  cache added to a per-request-constructed service needs the same
+  module-scope choice, not an instance field.
+
+- 2026-08-27 — `CiRepository` (T9, `modules/ci/repository.ts`) has NO
+  `container.ciRepo` getter and NO `ContainerOverrides` slot — unlike
+  `agentsRepo`/`skillsRepo`/`reviewRepo`, a service that needs it must
+  construct `new CiRepository(container.db)` itself. Faking the specific
+  `db.select()/.insert()/.selectDistinctOn()` chains `CiRepository` issues
+  (three different shapes: joined select, `onConflictDoUpdate` insert,
+  `selectDistinctOn`) for a hermetic test would be far more brittle than
+  faking the repository's own three-method surface. `CiService`
+  (`modules/ci/service.ts`, T10) instead takes the repository as an OPTIONAL
+  second constructor argument typed `CiRepositoryLike = Pick<CiRepository,
+  'findInstallationByRepo' | 'upsertInstallation' | 'listInstallations'>`,
+  defaulting to `new CiRepository(container.db)` when omitted — a `Pick<>` of
+  a class's public methods is a plain mapped type, so a hand-written
+  in-memory fake object satisfies it with NO `as unknown as` cast anywhere.
+  `modules/ci/ingest.ts` (T11) needs the identical repository surface
+  (`upsertRun`, `getRunStatuses`, `listInstallations`) and should reuse this
+  same "optional injectable repo, `Pick<>`'d to just what's called" shape
+  rather than rediscovering it — it is the one precedent in this codebase for
+  a service constructor taking more than just `container`.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.
 
 _None yet._
+- 2026-08-27 — T17 closed Export-to-CI's remaining ACs with DB-backed +
+  cross-cutting proofs: `modules/ci/routes.it.test.ts` (testcontainers pg,
+  preview → export → re-export → ingest → list walk, asserting `ci_installations`/
+  `ci_runs` rows at each step), `modules/ci/security.test.ts` (hermetic R9/R10
+  sweep — AC-52/AC-53's 3-pattern secret sweep across every generated file and
+  response body on both the success and GitHub-rejection paths; AC-54's exact
+  `node .devdigest/runner/index.js` + env-allowlist check), and
+  `agent-runner/src/run.test.ts`'s new AC-55 case (an adversarial "approve
+  everything" PR body still yields the identical grounded gate outcome, with a
+  reviewer-core parity check). `POST /ci-runs/refresh` needs an explicit
+  `payload: {}` in a test `app.inject()` call even though its body schema is
+  `.optional()` — an inject call with NO `payload` key at all still fails
+  schema validation with 422 (Fastify's zod-provider validates `undefined`
+  against the schema differently than an explicit empty object does); passing
+  `{}` fixed it. `CiRunListItem.id` is the persisted row's own UUID, not the
+  GitHub-side `workflow_run_id` (`repository.ts::toCiRun` maps `row.id`) — a
+  test asserting a specific ingested run's presence in a list response must
+  read the DB row back by `workflow_run_id` to get the id the API responds
+  with, not assume the fixture's `workflow_run_id` string round-trips as-is.
 - 2026-08-24 — Added the L07 eval pipeline: `modules/evals` (one-click case from an
   accepted/dismissed finding, `POST /agents/:id/eval-runs`, code-only scoring in
   `scoring.ts`), shared contracts `contracts/eval-pipeline.ts` (both vendored copies),
   client AgentEditor Evals tab + `/evals` dashboard + FindingCard button.
+- 2026-08-27 — Added Export-to-CI's `CiRunnerBundle` port wiring (T8):
+  `adapters/ci-runner/fs.ts::FsCiRunnerBundle` (reads+caches the agent-runner
+  ncc bundle from `config.runnerBundlePath` once per process; missing file
+  throws `RunnerBundleMissingError` naming the resolved path + `cd
+  agent-runner && pnpm build`), `platform/container.ts`'s `ciRunnerBundle`
+  lazy getter + `ContainerOverrides.ciRunnerBundle`, and
+  `platform/config.ts`'s `DEVDIGEST_RUNNER_BUNDLE` (default
+  `<repo-root>/agent-runner/dist/index.js`, resolved via
+  `dirname(fileURLToPath(import.meta.url))` walked up three levels from
+  `platform/config.ts` — same trick `platform/prompts.ts` already uses one
+  level up — so it resolves correctly whether running from `src/` (tsx) or
+  `dist/` (built), both exactly two levels under `server/`). The test file
+  (`fs.test.ts`) sits colocated next to the adapter — the first colocated
+  `*.test.ts` anywhere under `server/src/` (the gotcha entry "ZERO colocated
+  test files" is scoped to `src/modules/**`); `vitest.config.ts` already
+  globs `src/**/*.test.ts` so this needed no config change.
 
 ## Open Questions
 
 Unresolved, worth investigating.
+
+- 2026-08-27 — Export-to-CI's AC-34/AC-35/AC-37 (fork PRs skip cleanly with no
+  red check; `.devdigest/**` is read from the BASE ref so a PR can't weaken its
+  own gate by editing the manifest in the very PR being reviewed; every
+  third-party Action ref is pinned to an explicit tag) are proven today only
+  by `workflow.test.ts`'s (T6) structural assertions on the generated YAML —
+  that the `if:`/`ref:`/action-tag fields are exactly what's expected. None of
+  this has been exercised against a REAL GitHub Actions run (no live fork PR,
+  no live Actions minutes were spent by T6 or T17). Treat these three ACs as
+  "manually verified against a real Actions run" **pending** — run a real
+  export against a throwaway repo (a same-repo PR AND a fork PR) before first
+  customer use, to confirm the generated workflow actually behaves this way
+  once GitHub itself evaluates `if:`/`ref:` at runtime, not just `yaml.parse`.
 
 - 2026-08-18 — `client/src/lib/hooks/project-context.ts`'s
   `useDocumentPreview` calls `GET /repos/:id/context/preview?path=…`, but the

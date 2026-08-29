@@ -32,6 +32,8 @@ import type {
   SecretsProvider,
   SecretKey,
   TicketProvider,
+  CiWorkflowRun,
+  CiRunnerBundle,
 } from '@devdigest/shared';
 import { parseUnifiedDiff } from './git/diff-parser.js';
 
@@ -126,6 +128,13 @@ export interface MockGitHubOptions {
   login?: string;
   /** Existing inline review comments returned by listReviewComments. */
   comments?: PrReviewComment[];
+  /** Fixture returned by `listWorkflowRuns`, regardless of the repo/opts asked for. */
+  workflowRuns?: CiWorkflowRun[];
+  /**
+   * Fixture for `downloadRunArtifactFile`, keyed by `${runId}/${artifactName}/${fileName}`.
+   * A missing key resolves to `null` — mirrors the real adapter's "absent or expired" case.
+   */
+  artifactFiles?: Record<string, string>;
 }
 
 export class MockGitHubClient implements GitHubClient {
@@ -133,6 +142,14 @@ export class MockGitHubClient implements GitHubClient {
   public openedPrs: OpenPrPayload[] = [];
   public committed: CommitFilesPayload[] = [];
   public createdComments: CreateReviewCommentInput[] = [];
+  public listWorkflowRunsCalls: { repo: RepoRef; opts: { workflowFile: string; perPage?: number } }[] =
+    [];
+  public downloadRunArtifactFileCalls: {
+    repo: RepoRef;
+    runId: string;
+    artifactName: string;
+    fileName: string;
+  }[] = [];
 
   constructor(private opts: MockGitHubOptions = {}) {}
 
@@ -243,6 +260,24 @@ export class MockGitHubClient implements GitHubClient {
 
   async currentLogin(): Promise<string> {
     return this.opts.login ?? 'mock-user';
+  }
+
+  async listWorkflowRuns(
+    repo: RepoRef,
+    opts: { workflowFile: string; perPage?: number },
+  ): Promise<CiWorkflowRun[]> {
+    this.listWorkflowRunsCalls.push({ repo, opts });
+    return this.opts.workflowRuns ?? [];
+  }
+
+  async downloadRunArtifactFile(
+    repo: RepoRef,
+    runId: string,
+    artifactName: string,
+    fileName: string,
+  ): Promise<string | null> {
+    this.downloadRunArtifactFileCalls.push({ repo, runId, artifactName, fileName });
+    return this.opts.artifactFiles?.[`${runId}/${artifactName}/${fileName}`] ?? null;
   }
 }
 
@@ -373,5 +408,13 @@ export class MockTicketProvider implements TicketProvider {
   ): Promise<{ key: string; title: string; description: string } | undefined> {
     this.calls.push(key);
     return this.opts.tickets?.[key];
+  }
+}
+
+// ---------- Mock CI runner bundle ----------
+export class MockCiRunnerBundle implements CiRunnerBundle {
+  constructor(private contents = '// mock agent-runner bundle\n') {}
+  async read(): Promise<string> {
+    return this.contents;
   }
 }

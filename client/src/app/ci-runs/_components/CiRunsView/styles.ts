@@ -1,0 +1,71 @@
+import type { CSSProperties } from "react";
+import { GRID } from "./constants";
+
+/** Co-located styles for CiRunsView. */
+export const s = {
+  wrap: { padding: "28px 32px", maxWidth: 1200, display: "flex", flexDirection: "column", gap: 20 } satisfies CSSProperties,
+  pageHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 } satisfies CSSProperties,
+  title: { fontSize: 22, fontWeight: 700, letterSpacing: "-0.02em" } satisfies CSSProperties,
+  subtitle: { fontSize: 13, color: "var(--text-muted)", marginTop: 4 } satisfies CSSProperties,
+  filtersRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 } satisfies CSSProperties,
+  banner: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    padding: "10px 14px",
+    borderRadius: 8,
+    border: "1px solid var(--warn)",
+    background: "var(--warn-bg)",
+    color: "var(--warn)",
+    fontSize: 13,
+  } satisfies CSSProperties,
+  bannerHeadline: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } satisfies CSSProperties,
+  bannerReason: {
+    fontSize: 12,
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+  tableCard: {
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    background: "var(--bg-surface)",
+    overflow: "hidden",
+  } satisfies CSSProperties,
+  headRow: {
+    display: "grid",
+    gridTemplateColumns: GRID,
+    gap: 8,
+    padding: "10px 16px",
+    borderBottom: "1px solid var(--border)",
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+  } satisfies CSSProperties,
+  row: {
+    display: "grid",
+    gridTemplateColumns: GRID,
+    gap: 8,
+    padding: "12px 16px",
+    borderBottom: "1px solid var(--border)",
+    fontSize: 13,
+    alignItems: "center",
+  } satisfies CSSProperties,
+  loadingStack: { display: "flex", flexDirection: "column", gap: 8, padding: 16 } satisfies CSSProperties,
+  muted: { color: "var(--text-muted)" } satisfies CSSProperties,
+  statusPill: (color: string, bg: string): CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "3px 9px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    color,
+    background: bg,
+  }),
+} as const;

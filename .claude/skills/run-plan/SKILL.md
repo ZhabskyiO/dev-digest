@@ -5,8 +5,8 @@ version: "0.1.0"
 description: >
   Runs an already-approved DevDigest Implementation Plan end-to-end: dispatches implementer agents
   per the plan's DAG (multi-agent by non-overlapping owned paths, or single-agent), then gates with
-  architecture-reviewer + plan-verifier in parallel, then resolves their comments in a bounded fix
-  loop. Starts FROM a plan — spec authoring (spec-creator) and planning (implementation-planner) are
+  architecture-reviewer + plan-verifier + per-bucket quality reviewers in one parallel batch, then
+  resolves their comments in a bounded fix loop. Starts FROM a plan — spec authoring (spec-creator) and planning (implementation-planner) are
   run separately/manually beforehand. Never pushes or merges.
   TRIGGER when: "run the plan", "/run-plan", "execute the plan", "implement this plan",
   "implement docs/plans/<x>.md", "run-plan plan:<path>".
@@ -17,7 +17,8 @@ description: >
 # Run Plan — Implementation Plan executor
 
 > **Take an approved Implementation Plan and drive it to reviewed code: implement per the DAG, gate
-> with architecture-reviewer + plan-verifier, and resolve their comments in a bounded fix loop.**
+> with architecture-reviewer + plan-verifier + quality-bucket reviewers in one batch, and resolve
+> their comments in a bounded fix loop.**
 
 You are the **orchestrator**, running in the main session. The spec and the plan already exist and
 were approved by a human beforehand (you run `spec-creator` and `implementation-planner` separately —
@@ -118,9 +119,19 @@ message**:
   PASS/FAIL gate.
 - **`plan-verifier`** with the plan, the spec, and the changed set → a traceability matrix and a
   PASS/FAIL/REVIEW gate.
+- **Quality buckets** — split the changed files into UI (`client/`) and backend (everything else)
+  buckets and spawn one read-only `general-purpose` reviewer per non-empty bucket, mirroring
+  `pr-self-review`'s routing: the UI bucket carries `frontend-architecture`,
+  `react-best-practices`, `next-best-practices`, `react-testing-library`; the backend bucket
+  carries `fastify-best-practices`, `drizzle-orm-patterns`, `postgresql-table-design`; both carry
+  `typescript-expert`, `zod`, `security`, plus the touched modules' `insights/` as extra criteria.
+  Require structured findings (`{file, line, severity, skill, issue, fix}`), scoped to
+  added/modified lines only, with the plan's known accepted decisions listed as do-not-report.
 
-Both run on Sonnet (read-only, structured prompts), so running them together costs wall-clock only.
-Collect both verdicts.
+All of these run read-only on Sonnet with structured prompts, so batching them costs wall-clock
+only — and catching a quality/security finding here, in the same cycle as the structural and
+traceability gates, avoids a second review→fix→gate cycle when `pr-self-review` runs later (that
+gate still runs before push; its reviews should come back clean). Collect every verdict.
 
 ### Step 3 — Fix loop (bounded — this is where review comments get resolved)
 
@@ -131,6 +142,9 @@ Build the **fix backlog**:
   note for the user, because acting on an uncited opinion is how architecture churn starts.
 - `plan-verifier` rows with status **missing** or **partial** (a requirement is not actually met).
   `cannot-verify` rows are not fixable by looping — they become the *unproven* list in the report.
+- Quality-bucket findings with severity **CRITICAL** or **HIGH** (MEDIUM/LOW → report only, unless
+  the user asks for them). A quality finding that contradicts a decision recorded in the spec or
+  plan is not actionable — it is a note for the user.
 
 If the backlog is empty → go to Step 4. Otherwise loop, for iteration `i = 1 … max-fix`:
 
@@ -146,7 +160,10 @@ If the backlog is empty → go to Step 4. Otherwise loop, for iteration `i = 1 �
    catching it costs 20 seconds.
 5. **Re-review only the changed files**: re-run `architecture-reviewer` scoped to the files the fixes
    touched (plus any file a fix newly imported); re-run `plan-verifier` only for the requirements that
-   were `missing`/`partial`. Findings carried forward are not re-derived.
+   were `missing`/`partial`; re-check quality findings only in the buckets whose files a fix touched —
+   a pure test addition needs no quality re-review, and a finding whose fix landed with a named
+   passing test can be closed on the implementer's report alone. Findings carried forward are not
+   re-derived.
 6. Recompute the backlog:
    - empty → **break (gate PASS)**.
    - non-empty but **no progress** since last iteration (the same findings unresolved — the
@@ -178,6 +195,7 @@ implementers that hit them — do not duplicate their entries.
 ### Review gate
 - architecture-reviewer (sonnet): PASS | FAIL — <crit/high counts>
 - plan-verifier (sonnet): PASS | FAIL | REVIEW — <verified N/M; missing/partial ids>
+- quality buckets (sonnet): <UI: C/H/M/L counts> · <backend: C/H/M/L counts> | bucket empty
 
 ### Fix loop
 - iterations run: <i> / <max-fix>

@@ -47,6 +47,22 @@ most-skipped and most-valuable section: if something failed, record it here.**
   `generate.mutate()`), not off response identity — this covers the user's
   own retry but not a failure from a regeneration someone else triggered.
 
+- 2026-08-27 — Do NOT import a status/label mapping (e.g. `STATUS_LABEL_KEY`/
+  `STATUS_META`) from another route's private `_components` tree just to avoid
+  duplicating a 4-line `Record`, even when both features share the same
+  contract enum (`CiRunStatus`) and the same i18n catalogue (`ci.json`'s
+  `runs.status.*`). `ci-runs/_components/CiRunsView/constants.ts` and the
+  Agent Editor's `CiTab` are two separate implementer tasks' owned paths in
+  the same `/run-plan` fan-out; importing one from the other creates a
+  same-branch dependency edge neither task's "Owned paths" brief accounts for
+  — a sibling agent reworking `CiRunsView/constants.ts` for its own acceptance
+  criteria has no reason to know `CiTab` also depends on that exact export
+  shape. Re-derived the small mapping locally instead
+  (`CiTab/helpers.ts:statusLabelKey`) at the cost of ~10 duplicated lines. If
+  this vocabulary needs a THIRD consumer, promote it to a shared module in a
+  task whose owned paths include both call sites, not as a side effect of one
+  implementer's local convenience.
+
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
@@ -220,6 +236,26 @@ Quirks of dependencies, tooling, and the local environment.
   `lib/hooks/evals`) in each affected test file, mirroring the existing `lib/hooks/reviews`
   mock. Same failure shape as the 2026-08-20 `useTranslations` entry: a new hook in a shared
   component means updating sibling tests' mocks, not the component.
+- 2026-08-27 — TanStack Query's `focusManager.isFocused()` (the gate
+  `refetchIntervalInBackground` checks before firing a scheduled poll,
+  `query-core/queryObserver.js:215`) does NOT track real window focus/blur —
+  its own default listens for `visibilitychange` and returns
+  `document.visibilityState !== "hidden"` (`focusManager.js:56`), so its
+  *default* behavior already approximates document-visibility gating despite
+  the "focus" name. Don't let that fool you into thinking
+  `refetchIntervalInBackground` is close enough for a spec requiring
+  visibility-gated polling: it's a single query-wide, non-overridable-per-hook
+  switch with no boolean a caller can read or compose with other logic (e.g.
+  `poll: someCondition && visible`). `hooks/ci.ts`'s `useCiInstallations`/
+  `useCiRuns` instead take an explicit `{ poll }` boolean the caller supplies
+  from `useDocumentVisible()` (own `visibilitychange` listener,
+  `hooks/useDocumentVisible.ts`) and feed it straight into
+  `refetchInterval: poll ? 30_000 : false` — explicit, per-hook, and testable
+  with fake timers without touching `QueryClient`/`focusManager` internals at
+  all. See `hooks/ci.test.ts`'s "R12" suite for the fake-timer pattern:
+  `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync(ms)` inside `act()`,
+  flipping `document.visibilityState` via a redefined getter + a dispatched
+  `visibilitychange` event (jsdom has no native visibility change support).
 - 2026-08-24 — The FIRST runtime (value) import from `@devdigest/shared` in a client
   component breaks `next dev` with `Module not found: Can't resolve './contracts/…​.js'`
   — every prior use was `import type` (erased), so webpack had never resolved the
@@ -228,6 +264,56 @@ Quirks of dependencies, tooling, and the local environment.
   app shows it. Fix (in place): `config.resolve.extensionAlias = { ".js": [".ts",
   ".tsx", ".js"] }` in `next.config.mjs`'s `webpack` hook — do not rewrite the shared
   package's import specifiers, the server runs the same files under tsx.
+- 2026-08-27 — `vendor/ui/kit/SelectInput.tsx` has no `aria-label`/`aria-labelledby`
+  passthrough — its props are only `value`/`onChange`/`options`/`mono`, so a filter
+  select built with it is invisible to `getByRole("combobox", { name: … })` no matter
+  what surrounds it in the DOM. Since `vendor/ui/**` is vendored (only `nav.ts` is ever
+  in a UI task's owned paths otherwise), a filter bar that needs an accessible name per
+  control has to hand-roll a plain `<select aria-label={…}>` locally instead of
+  reaching for `SelectInput` — see
+  `app/ci-runs/_components/CiRunsView/_components/FiltersBar/FiltersBar.tsx`'s
+  `FilterSelect`. Also useful there: when the catalogue has no dedicated "filter by X"
+  label key (only each select's own default/"all" option text, e.g. `runs.filters.allAgents`),
+  reusing that option's own translated text as the `aria-label` is an acceptable
+  stand-in — it never becomes stale from selection changes since it's fixed text, not
+  read from current `value`.
+
+- 2026-08-27 — jsdom (this repo's vitest environment) has no `URL.createObjectURL`
+  at all — `typeof URL.createObjectURL === "undefined"`, confirmed directly, not
+  merely a no-op. A component whose click handler goes on to build a
+  `Blob`/`URL.createObjectURL`/`<a download>` trigger (e.g. `ExportWizard`'s
+  "Download files" install path, `download.ts`'s `downloadArchive`) throws
+  before any post-click assertion runs if the test exercises the real helper.
+  Fix: `vi.mock` the download helper module itself in the `*.test.tsx`
+  (`vi.mock("./download", () => ({ downloadArchive: vi.hoisted(() => vi.fn()) }))`)
+  and assert on ITS call — proving the browser-API side effect fired and in
+  what order relative to other calls — rather than trying to polyfill
+  `URL.createObjectURL`/`atob` in the test. See
+  `ExportWizard/ExportWizard.test.tsx`'s AC-31 test (download → NO confirm
+  call yet → confirm click → confirm call, all driven through the mocked
+  `downloadArchive` plus the existing `useConfirmCiInstallation` hook mock).
+
+- 2026-08-27 — In an RTL test, manually invoking a mocked mutation's captured
+  `opts.onSuccess(data)` callback OUTSIDE `act(...)` produces the classic
+  "An update to X inside a test was not wrapped in act(...)" warning — but
+  the warning is easy to dismiss as noise because the assertion right after
+  it does NOT throw for a wrong reason, it throws because the dispatched
+  state update never actually committed before the assertion ran. React 18
+  batches/defers a `dispatch()` invoked outside `act()` to a microtask that
+  the synchronous test body never waits for, so `screen.getByRole(...)`
+  queries the PRE-update DOM and fails with "unable to find element" — which
+  looks exactly like a reducer/guard logic bug (e.g. a stale-response guard
+  wrongly rejecting a legitimate update) rather than a test-harness ordering
+  bug. Confirmed by instrumenting: the `onSuccess` closure DOES run
+  synchronously and DOES call `dispatch(...)`, but the reducer function
+  itself provably never executes before the failing assertion — only after
+  wrapping the manual call in `act(() => opts.onSuccess(data))` does the
+  reducer run and the DOM reflect the new state. Any test that manually fires
+  a captured `mutate(vars, opts)` callback (the pattern for proving mutation
+  race/ordering behaviour, e.g. "stale response ignored") MUST wrap that
+  invocation in `act(...)`, not just the initial `render()`/`fireEvent`
+  calls. See `ExportWizard.test.tsx`'s "ignores a stale preview response for
+  an abandoned tuple" test.
 
 ## Recurring Errors & Fixes
 

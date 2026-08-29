@@ -228,6 +228,21 @@ Conventions and architectural decisions specific to this repo.
   length 1. `force` is what makes regeneration actually refresh: without
   `?force=true` the server returns the existing brief for the current head.
 
+- 2026-08-27 — `vendor/ui/nav.ts`'s `NAV` groups can trail the rest of the shell by a
+  whole feature: `components/app-shell/helpers.ts`'s `activeKeyFor` already matched
+  `/memory`, `/repos/*/pulls/*/multi-agent` and `/agent-performance`, and
+  `messages/en/shell.json`'s `nav.*`/`commandPalette.globalGroup` already carried
+  `"memory"`/`"multi-agent"`/`"agent-performance"`/`"GLOBAL"` labels, while `NAV` itself
+  had no group or item for any of the three — only `WORKSPACE` and `SKILLS LAB`
+  existed. Added a `"GLOBAL"` section (matching the design mock's sidebar grouping and
+  `shell.json`'s own `"GLOBAL"` terminology) holding just the one item this task owned
+  (`ci-runs`) — the other three stay unbuilt (no route/page), so they're deliberately
+  NOT added as placeholder nav items. Lesson: when a task's target nav item doesn't fit
+  any existing `NAV` group, check `activeKeyFor`/`shell.json`'s `nav.*` keys first —
+  they can already reveal a planned group name and sibling items from OTHER
+  not-yet-implemented features, which is a stronger signal than inventing a new group
+  name from scratch.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.
@@ -237,6 +252,31 @@ _None yet._
 ## Open Questions
 
 Unresolved, worth investigating.
+
+- 2026-08-28 — `CiRunStatus` (`vendor/shared/contracts/eval-ci.ts`) gained a
+  `'skipped'` member (server-side live-testing fix: a completed CI run with no
+  artifact and a `success` conclusion — fork PR or the DevDigest-install
+  bootstrap case — is now `skipped`, not misleadingly `failed`). `pnpm
+  typecheck` is RED right now because of it:
+  `app/agents/[id]/_components/AgentEditor/_components/CiTab/helpers.ts` and
+  `app/ci-runs/_components/CiRunsView/constants.ts` both key an exhaustive
+  `Record<CiRunStatus, …>` (`STATUS_LABEL_KEY`, `STATUS_META`, and the
+  matching helpers-file map) that TS now requires a `skipped` entry for. A
+  follow-up UI task must add a `skipped` label key (+ translation catalogue
+  entry) and icon/colour pair to both files before `pnpm typecheck` is clean
+  again — this was a known, accepted consequence of the contract change, not
+  a regression to chase elsewhere.
+  └ 2026-08-28 resolved: both `Record<CiRunStatus, …>` maps got a `skipped`
+    entry (`icon: "Slash"`, `color: "var(--text-muted)"`,
+    `bg: "var(--bg-hover)"` — neutral/muted, distinct from `no_findings`'s
+    `text-secondary`/`bg-hover` pairing so the two aren't visually identical),
+    `messages/en/ci.json` got `runs.filters.status.skipped` and
+    `runs.status.skipped` ("Skipped"), and `FiltersBar`'s status filter picked
+    it up for free since its options are `STATUS_VALUES.map(...)`, not a
+    hand-restated list. `pnpm typecheck` is green again. Neither `RunRow` nor
+    `InstallationRow` had any existing reason/tooltip affordance for a failed
+    run's `error` text to begin with, so none was added for `skipped` either —
+    inventing one would have been out of this task's scope.
 
 - 2026-08-18 — The repo-level Project Context page
   (`app/repos/[repoId]/context/`) cannot wire a real drift-detail/confirm flow

@@ -151,6 +151,18 @@ export interface CommitFilesPayload {
   files: CommitFile[];
 }
 
+/** One GitHub Actions workflow run, as read back for the CI Runs page / CI tab. */
+export interface CiWorkflowRun {
+  id: string;
+  status: 'queued' | 'in_progress' | 'completed';
+  conclusion: string | null;
+  html_url: string;
+  pr_number: number | null;
+  created_at: string;
+  run_started_at: string | null;
+  updated_at: string;
+}
+
 export interface GitHubClient {
   listPullRequests(repo: RepoRef): Promise<PrMeta[]>;
   getPullRequest(repo: RepoRef, n: number): Promise<PrDetail>;
@@ -177,6 +189,35 @@ export interface GitHubClient {
   getIssues(repo: RepoRef, numbers: number[]): Promise<IssueMeta[]>;
   /** GET /user — for "posting as @user". */
   currentLogin(): Promise<string>;
+  /**
+   * Recent runs of a workflow file (e.g. `devdigest-review.yml`), newest first.
+   * Used by the CI ingest loop to discover new/updated runs to reconcile.
+   */
+  listWorkflowRuns(
+    repo: RepoRef,
+    opts: { workflowFile: string; perPage?: number },
+  ): Promise<CiWorkflowRun[]>;
+  /**
+   * The UTF-8 text of `fileName` inside the run's `artifactName` artifact
+   * zip, or `null` when the artifact is absent or has expired. Unzipping is
+   * deliberately behind this port so no caller ever sees the archive format.
+   */
+  downloadRunArtifactFile(
+    repo: RepoRef,
+    runId: string,
+    artifactName: string,
+    fileName: string,
+  ): Promise<string | null>;
+}
+
+// ---------- CI runner bundle (the agent-runner ncc output shipped into CI) ----------
+/**
+ * Source of the self-contained runner bundle exported into a target repo's
+ * `.devdigest/runner/index.js`. Behind a port so the export/preview services
+ * never know whether it comes from disk, a build step, or anywhere else.
+ */
+export interface CiRunnerBundle {
+  read(): Promise<string>;
 }
 
 // ---------- Ticket provider (Jira/Linear; Intent Layer tier (e), gated OFF) ----------
