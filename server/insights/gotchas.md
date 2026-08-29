@@ -18,6 +18,25 @@ quirks, and error → cause → fix records. Newest at the top.
 Dead ends and antipatterns — what was tried and failed, and why. **This is the
 most-skipped and most-valuable section: if something failed, record it here.**
 
+- 2026-08-27 — A `run-executor.ts` timing test that overrides `container.llm`
+  with one slow mock and measures `executeRuns()` wall time will ALSO time
+  the one-time intent derivation (`IntentService.deriveForRun`) and the
+  post-loop brief hook (`BriefService.summarizeChangedFilesForRun`) — both
+  resolve the SAME `openai` provider via `resolveFeatureModel` and call
+  `completeStructured` before/after the per-agent loop, so their sleep stacks
+  ON TOP of the (correctly-parallelized) loop time. Measured: 4 agents each
+  sleeping 400ms via `PQueue({concurrency:4})` still measured ~1260ms total
+  wall time, not ~400-600ms, because intent (+400ms) and the brief hook
+  (+400ms) each added a full serial sleep outside the loop — looked exactly
+  like a broken concurrency fix even though the loop itself was fine. Fix
+  (`test/run-executor-concurrency.it.test.ts`): `INTENT_ENABLED=false` skips
+  intent's model call, and omitting `pr_files` rows entirely makes
+  `selectFilesToSummarize` return `[]` so the brief hook's `generateFileSummaries`
+  skips its call too (`grep`: `brief/service.ts:472` `if (selected.length === 0)
+  … return NO_SUMMARIES`) — neither changes what a concurrency/isolation test
+  needs, since `MockGitClient`'s injected diff is what grounding runs against,
+  not `pr_files`.
+
 - 2026-08-21 — NEVER key a service-level `static readonly inFlight = new
   Map<string, Promise<T>>()` dedupe cache by an id ALONE (e.g. `pr_id`) when
   the entry point is workspace-scoped — `BriefService.generate`
@@ -210,6 +229,19 @@ most-skipped and most-valuable section: if something failed, record it here.**
   (`ONBOARDING_GENERATION_TIMEOUT_MS` 90000 → 45000, `platform/config.ts`);
   any future feature composing these two primitives needs the same `(N+1) ×
   timeoutMs < jobTimeoutMs` sizing, not `timeoutMs < jobTimeoutMs`.
+
+- 2026-08-27 — A plan's own "prove this module is pure" grep gate (e.g.
+  `grep -Eqc "container|drizzle|llm" server/src/modules/multi-agent/grouping.ts`
+  must be 0) is tripped by a JSDoc sentence that *describes* the absence —
+  writing "no `container`, no `db`, no LLM" as a module-header comment
+  contains the literal substring `container` (case-sensitive, matches the
+  pattern) even though the file has zero real imports of it. Same root cause
+  as the `process.env`-in-a-doc-comment and BRE-wildcard entries elsewhere in
+  this file (2026-08-07) — before writing prose near a literal-string
+  acceptance grep, mentally run the grep against the prose too, this time for
+  a POSITIVE architecture-purity check rather than a security one. Fixed in
+  `modules/multi-agent/grouping.ts` by rephrasing to "no DI composition
+  root, no database, no LLM" — same meaning, no longer grep-matchable.
 
 ## Tool & Library Notes
 

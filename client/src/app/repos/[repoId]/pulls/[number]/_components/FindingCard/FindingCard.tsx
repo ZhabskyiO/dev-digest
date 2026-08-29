@@ -18,7 +18,7 @@ import {
   type Category,
 } from "@devdigest/ui";
 import type { FindingRecord, FindingActionKind } from "@devdigest/shared";
-import { SEV_COLOR, SEV_COLOR_FALLBACK } from "./constants";
+import { SEV_COLOR, SEV_COLOR_FALLBACK, NO_UNAVAILABLE_ACTIONS } from "./constants";
 import { lineLabel } from "./helpers";
 import { githubBlobUrl } from "../../../../../../../lib/github-urls";
 import { s } from "./styles";
@@ -34,6 +34,7 @@ export function FindingCard({
   evalPending,
   repoFullName,
   headSha,
+  unavailableActions = NO_UNAVAILABLE_ACTIONS,
 }: {
   f: FindingRecord;
   focused?: boolean;
@@ -49,6 +50,13 @@ export function FindingCard({
   evalPending?: boolean;
   repoFullName?: string | null;
   headSha?: string | null;
+  /** Action kinds not implemented on this surface yet (e.g. Multi-Agent
+   *  Review's "learn"/"reply" — `reviews/routes.ts`'s `FINDING_ACTIONS` only
+   *  registers accept/dismiss). Each named kind renders as a disabled control
+   *  with no `onClick` wiring, instead of being omitted or issuing a request
+   *  that would 404. Defaults to none, so every existing call site is
+   *  unaffected. */
+  unavailableActions?: FindingActionKind[];
 }) {
   const t = useTranslations("prReview");
   const [expanded, setExpanded] = React.useState(defaultExpanded ?? false);
@@ -124,6 +132,17 @@ export function FindingCard({
             >
               {t("finding.dismiss")}
             </Button>
+            {unavailableActions.includes("learn") && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="Lightbulb"
+                disabled
+                title={t("finding.actionUnavailable")}
+              >
+                {t("finding.learn")}
+              </Button>
+            )}
             {onEvalCase && (
               <span title={muted ? undefined : t("finding.evalCaseHint")}>
                 <Button
@@ -136,6 +155,17 @@ export function FindingCard({
                   {t("finding.turnIntoEvalCase")}
                 </Button>
               </span>
+            )}
+            {unavailableActions.includes("reply") && (
+              <Button
+                kind="ghost"
+                size="sm"
+                icon="MessageSquare"
+                disabled
+                title={t("finding.actionUnavailable")}
+              >
+                {t("finding.replyToAuthor")}
+              </Button>
             )}
           </div>
         </div>

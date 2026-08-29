@@ -19,13 +19,17 @@ export function useShellCommands(): Command[] {
 
   return React.useMemo<Command[]>(() => {
     const navCmds: Command[] = NAV.flatMap((g) =>
-      g.items.map((it) => ({
-        id: it.key,
-        label: t("commandPalette.goTo", { label: t(`nav.${it.key}`) }),
-        group: g.section,
-        icon: it.icon,
-        run: () => router.push(resolveHref(it.href, repoId)),
-      }))
+      g.items.map((it) => {
+        const key = `nav.${it.key}`;
+        const label = t.has(key) ? t(key) : it.label;
+        return {
+          id: it.key,
+          label: t("commandPalette.goTo", { label }),
+          group: g.section,
+          icon: it.icon,
+          run: () => router.push(resolveHref(it.href, repoId)),
+        };
+      })
     );
     navCmds.push({
       id: "settings",

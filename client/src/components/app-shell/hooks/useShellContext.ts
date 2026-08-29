@@ -38,6 +38,11 @@ export function useShellContext({ onOpenCommandPalette }: ShellContextOptions): 
 
   const onAddRepo = React.useCallback(() => router.push("/onboarding"), [router]);
 
+  const navLabel = React.useCallback(
+    (key: string, fallback: string) => (t.has(`nav.${key}`) ? t(`nav.${key}`) : fallback),
+    [t],
+  );
+
   const onRemoveRepo = React.useCallback(
     (id: string) => {
       const target = repos.find((r) => r.id === id);
@@ -73,6 +78,7 @@ export function useShellContext({ onOpenCommandPalette }: ShellContextOptions): 
       // Sidebar badge = PRs that still NEED review, not the total PR count.
       // 0 → undefined so the badge hides entirely when nothing needs review.
       prCount: pulls?.filter((p) => p.status === "needs_review").length || undefined,
+      navLabel,
     }),
     [
       pathname,
@@ -86,6 +92,7 @@ export function useShellContext({ onOpenCommandPalette }: ShellContextOptions): 
       onAddRepo,
       onRemoveRepo,
       pulls,
+      navLabel,
     ],
   );
 }

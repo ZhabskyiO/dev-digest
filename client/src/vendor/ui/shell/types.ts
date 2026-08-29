@@ -34,6 +34,8 @@ export interface ShellContext {
   onRemoveRepo?: (id: string) => void;
   onRefresh?: () => void;
   prCount?: number;
+  /** Translate a nav item's label by key, falling back to the hard-coded default. */
+  navLabel?: (key: string, fallback: string) => string;
 }
 
 export interface Crumb {

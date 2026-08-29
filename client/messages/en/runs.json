@@ -120,27 +120,63 @@
   },
   "page": {
     "title": "Multi-Agent Review",
-    "subtitle": "this PR through every enabled agent in parallel",
+    "subtitle": "Pick a pull request and choose which agents to fan out — they run in parallel and you compare their findings side by side.",
     "selectPr": "Select PR",
     "prItem": "#{number} · {title}",
     "view": {
       "columns": "columns",
       "tabs": "tabs"
     },
-    "runAll": "Run all agents",
+    "run": "Run multi-agent review ({count})",
     "running": "Running…",
     "meta": "{count} agents · fan-out via p-queue · {duration}s total · {cost}",
     "noAgents": {
       "title": "Enable agents to run reviews",
-      "body": "Multi-agent review runs the PR through every enabled agent in parallel. You have no agents enabled yet.",
+      "body": "Multi-agent review runs this PR through the agents you choose, in parallel. You have no agents enabled yet.",
       "cta": "Go to Agents"
     },
     "noRun": {
       "title": "No multi-agent run yet",
-      "bodyReady": "Run all enabled agents on this PR to see N columns + conflicts.",
+      "bodyReady": "Choose which agents to run on this PR to compare their findings side by side, plus where they disagree.",
       "bodySelect": "Select a PR to begin.",
-      "cta": "Run all agents"
+      "cta": "Configure agents"
     },
-    "crumb": "Multi-Agent Review"
+    "crumb": "Multi-Agent Review",
+    "configure": {
+      "title": "Run a Multi-Agent Review",
+      "pickPr": "Pick a pull request",
+      "pickPrPlaceholder": "Pick a pull request first",
+      "selectAll": "Select all",
+      "clear": "Clear",
+      "estimateDuration": "≈ {duration}s",
+      "estimateCost": "{cost}",
+      "estimateNone": "—",
+      "aggregate": "≈ {duration}s · {cost} · parallel fan-out",
+      "aggregateAtLeast": "At least {duration}s · {cost} · parallel fan-out",
+      "noSummary": "No summary yet — this agent hasn’t run on this PR.",
+      "submit": "Run multi-agent review ({count})"
+    },
+    "results": {
+      "modeColumns": "Columns",
+      "modeTabs": "Tabs",
+      "header": "PR #{number} · {title}",
+      "findingsCount": "{count, plural, one {# finding} other {# findings}}",
+      "viewTrace": "View trace",
+      "statusQueued": "Queued",
+      "statusRunning": "Running…",
+      "statusDone": "Done",
+      "statusFailed": "Failed",
+      "statusCancelled": "Cancelled",
+      "sharedError": "Every agent failed the same way: {reason}",
+      "columnError": "Failed: {reason}"
+    },
+    "disagree": {
+      "title": "Where agents disagree",
+      "onlyConflicts": "Show only conflicts",
+      "didNotFlag": "did not flag",
+      "emptyTitle": "No disagreements",
+      "emptyBody": "The agents agree on every flagged location.",
+      "rangeLabel": "Lines {start}–{end}"
+    }
   }
 }

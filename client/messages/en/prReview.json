@@ -6,12 +6,14 @@
     "accept": "Accept",
     "dismiss": "Dismiss",
     "learn": "Learn",
+    "reply": "Reply",
     "replyToAuthor": "Reply to author",
     "replyPlaceholder": "Reply to the author about this finding…",
     "sendReply": "Send reply",
     "cancel": "Cancel",
     "turnIntoEvalCase": "Turn into eval case",
-    "evalCaseHint": "Accept or dismiss first — the decision sets the expectation type"
+    "evalCaseHint": "Accept or dismiss first — the decision sets the expectation type",
+    "actionUnavailable": "Not available in multi-agent review yet"
   },
   "trifecta": {
     "lethal": "LETHAL TRIFECTA — ALL 3 PRESENT",
@@ -38,12 +40,20 @@
     "evalCaseFailed": "Could not create the eval case: {message}"
   },
   "runReview": {
-    "runAll": "Run all enabled agents",
     "configureAgents": "Configure agents…",
     "running": "Running…",
     "runReview": "Run Review",
     "mergedWarning": "Already merged — review is informational",
-    "mergedTooltip": "This PR is already merged; running a review won’t affect the merged code."
+    "mergedTooltip": "This PR is already merged; running a review won’t affect the merged code.",
+    "picker": {
+      "title": "Run a review",
+      "clear": "Clear",
+      "run": "Run ({count})",
+      "estimate": "≈ {duration}s",
+      "estimateNone": "—",
+      "configureLink": "Configure agents",
+      "noAgents": "No agents enabled yet."
+    }
   },
   "runStatus": {
     "elapsed": "Running · {count} agent(s)",

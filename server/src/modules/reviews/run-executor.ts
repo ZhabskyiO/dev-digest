@@ -1,3 +1,4 @@
+import PQueue from 'p-queue';
 import type { Container } from '../../platform/container.js';
 import type { Provider, Review, RunTrace, UnifiedDiff } from '@devdigest/shared';
 import { reviewPullRequest, countBlockers } from '@devdigest/reviewer-core';
@@ -149,34 +150,17 @@ export class ReviewRunExecutor {
       intentSlot = undefined;
     }
 
-    for (const { agent, runId } of jobs) {
-      const agentStart = Date.now();
-      logger?.info(
-        { runId, agent: agent.name, provider: agent.provider, model: agent.model, prId: pull.id },
-        `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
-      );
-      try {
-        const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, intentSlot, agent, runId, runLog);
-        logger?.info(
-          {
-            runId,
-            agent: agent.name,
-            findings: outcome.findings.length,
-            grounding: outcome.grounding,
-            durationMs: Date.now() - agentStart,
-          },
-          `review: agent "${agent.name}" done — ${outcome.findings.length} finding(s)`,
-        );
-      } catch (err) {
-        // runOneAgent already persisted the failure/cancel (status + error +
-        // trace) and completed the bus; here we only log at the run level.
-        const cancelled = err instanceof RunCancelledError;
-        logger?.[cancelled ? 'info' : 'error'](
-          { runId, agent: agent.name, err: (err as Error).message, durationMs: Date.now() - agentStart },
-          `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
-        );
-      }
-    }
+    // D-2 / AC-49 — fan the queued agent runs out over a bounded p-queue
+    // instead of executing them sequentially. Each queued function keeps its
+    // own try/catch (see runOneAgentIsolated) so a throw is logged and
+    // swallowed INSIDE the queued job — it can never reject a sibling or the
+    // `Promise.all` below. The concurrency cap is a config knob
+    // (`reviewRunConcurrency`, default 4), never `Infinity` — same pattern as
+    // `platform/jobs.ts`'s JobRunner and repo-intel's `pipeline/full.ts`.
+    const q = new PQueue({ concurrency: this.container.config.reviewRunConcurrency });
+    await Promise.all(
+      jobs.map((job) => q.add(() => this.runOneAgentIsolated(job, workspaceId, pull, repo, diff, intentSlot, runLog, logger))),
+    );
 
     // T15 — per-file summaries (AC-31), derived ONCE per executeRuns, exactly
     // like intent above and for the same reason: it's shared across every
@@ -195,6 +179,52 @@ export class ReviewRunExecutor {
       );
     } catch (err) {
       runLog.info(`File summaries step threw unexpectedly (ignored): ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Wraps `runOneAgent` with the per-job try/catch that used to live inline
+   * in the sequential loop, so it can be handed to `PQueue.add()` — the
+   * catch here means a throw from one job is logged and swallowed INSIDE the
+   * queued function itself, never propagated to `Promise.all` (AC-49: one
+   * run's failure/rejection must not interrupt, cancel, or fail any other
+   * run in the same multi-run). `runOneAgent` has already persisted the
+   * failure/cancel (status + error + trace) and completed the bus by the
+   * time this catch runs; this only logs at the run level.
+   */
+  private async runOneAgentIsolated(
+    { agent, runId }: { agent: AgentRow; runId: string },
+    workspaceId: string,
+    pull: PullRow,
+    repo: typeof schema.repos.$inferSelect,
+    diff: UnifiedDiff,
+    intentSlot: PromptIntentSlot | undefined,
+    runLog: RunLogger,
+    logger?: Logger,
+  ): Promise<void> {
+    const agentStart = Date.now();
+    logger?.info(
+      { runId, agent: agent.name, provider: agent.provider, model: agent.model, prId: pull.id },
+      `review: agent "${agent.name}" started (${agent.provider}/${agent.model})`,
+    );
+    try {
+      const outcome = await this.runOneAgent(workspaceId, pull, repo, diff, intentSlot, agent, runId, runLog);
+      logger?.info(
+        {
+          runId,
+          agent: agent.name,
+          findings: outcome.findings.length,
+          grounding: outcome.grounding,
+          durationMs: Date.now() - agentStart,
+        },
+        `review: agent "${agent.name}" done — ${outcome.findings.length} finding(s)`,
+      );
+    } catch (err) {
+      const cancelled = err instanceof RunCancelledError;
+      logger?.[cancelled ? 'info' : 'error'](
+        { runId, agent: agent.name, err: (err as Error).message, durationMs: Date.now() - agentStart },
+        `review: agent "${agent.name}" ${cancelled ? 'cancelled' : 'failed'}`,
+      );
     }
   }
 
@@ -407,6 +437,20 @@ export class ReviewRunExecutor {
       runLog.info('Run complete; trace persisted');
       await this.repo.saveRunTrace(runId, trace);
 
+      // AC-50 (enabling half) — findings the model proposed but which failed
+      // the citation-grounding gate, mapped to the repository's persisted
+      // shape. `undefined` (not `[]`) when nothing was dropped, matching
+      // `completeAgentRun`'s null-clears contract.
+      const groundingRejected = outcome.dropped.length
+        ? outcome.dropped.map((d) => ({
+            file: d.finding.file,
+            start_line: d.finding.start_line,
+            end_line: d.finding.end_line,
+            title: d.finding.title,
+            reason: d.reason,
+          }))
+        : undefined;
+
       await this.repo.completeAgentRun(runId, {
         status: 'done',
         durationMs,
@@ -418,6 +462,7 @@ export class ReviewRunExecutor {
         score: outcome.review.score,
         blockers,
         error: null,
+        groundingRejected,
       });
       this.container.runBus.complete(runId);
 

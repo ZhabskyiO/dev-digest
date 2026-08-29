@@ -43,7 +43,12 @@ run_suite() { # pkg, label, cmd
   local label="$2"
   local run="$3"
   echo "test-gate: staged changes in $pkg/ - running $label..." >&2
-  if ! (cd "$ROOT/$pkg" && eval "$run") >/tmp/test-gate-$$.log 2>&1; then
+  # Honor the repo's .nvmrc (Node >=22): the hook inherits the harness PATH,
+  # which may resolve an older node — under which Fastify 5 suites fail at
+  # collection with "diagnostics.tracingChannel is not a function" (a false
+  # negative this repo's insights already document). nvm is optional; without
+  # it we run with whatever node is present, exactly as before.
+  if ! (cd "$ROOT/$pkg" && { export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 && nvm use >/dev/null 2>&1; } ; eval "$run") >/tmp/test-gate-$$.log 2>&1; then
     echo "test-gate: $pkg tests FAILED - commit blocked. Last 25 lines:" >&2
     tail -25 /tmp/test-gate-$$.log >&2
     rm -f /tmp/test-gate-$$.log

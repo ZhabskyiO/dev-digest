@@ -37,6 +37,7 @@ import { ProjectContextService } from '../modules/project-context/service.js';
 import { ProjectContextRepository } from '../modules/project-context/repository.js';
 import { OnboardingService } from '../modules/onboarding/service.js';
 import { BlastService } from '../modules/blast/service.js';
+import { ReviewService } from '../modules/reviews/service.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -90,6 +91,12 @@ export interface ContainerOverrides {
    *  read-path test stays hermetic (no repo-intel index, no DB read for the
    *  blast map), mirroring `ContainerOverrides.onboarding`. */
   blast?: BlastService;
+  /** T9/T10 (multi-agent module) — the multi-agent module reaches
+   *  `ReviewService.runReview` through `container.reviews` rather than
+   *  importing `modules/reviews/service.ts` directly, per the onion rule
+   *  that cross-module calls go through the composition root. Tests inject
+   *  a fake `ReviewService` here, mirroring `ContainerOverrides.onboarding`. */
+  reviews?: ReviewService;
 }
 
 export class Container {
@@ -121,6 +128,7 @@ export class Container {
   private _projectContextRepo?: ProjectContextRepository;
   private _onboarding?: OnboardingService;
   private _blast?: BlastService;
+  private _reviews?: ReviewService;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -188,6 +196,17 @@ export class Container {
   get onboarding(): OnboardingService {
     if (this.overrides.onboarding) return this.overrides.onboarding;
     return (this._onboarding ??= new OnboardingService(this));
+  }
+
+  /**
+   * Review application service (`runReview`, run history, findings actions).
+   * Composition-root door for the multi-agent module (T10) to reach a single
+   * agent's run flow without importing `modules/reviews/service.ts` directly.
+   * Tests inject a fake via `ContainerOverrides.reviews`.
+   */
+  get reviews(): ReviewService {
+    if (this.overrides.reviews) return this.overrides.reviews;
+    return (this._reviews ??= new ReviewService(this));
   }
 
   /**

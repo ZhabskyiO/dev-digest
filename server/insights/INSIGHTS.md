@@ -17,6 +17,24 @@ conventions, and open threads. Newest at the top.
 
 Approaches and solutions that worked here and are worth reusing.
 
+- 2026-08-27 — When a broader contract (`AgentColumnFinding`,
+  `vendor/shared/contracts/observability.ts`) is deliberately typed with a
+  widened field (e.g. `category: z.string()` instead of the narrower
+  `FindingCategory` enum `FindingRecord.category` uses) specifically so a
+  value of that shape can later be assigned where the narrower type
+  (`FindingRecord`) is expected, that assignability ONLY holds if the value
+  is built with `satisfies AgentColumnFinding`, not `: AgentColumnFinding`.
+  An explicit type annotation widens the literal (`'security'` → `string`)
+  to match the declared type, and a `string` is never assignable back into a
+  narrower union field. `satisfies` validates the object against the target
+  shape but keeps the expression's own inferred (literal) types, so
+  `category: 'security'` stays the literal `'security'` and satisfies
+  `FindingRecord.category: FindingCategory` on the receiving end. Any future
+  service that builds an `AgentColumnFinding` from a `FindingRecord` (or
+  needs the reverse) should build the literal with `satisfies`, not a type
+  annotation, when downstream code expects the narrower type. Verified in
+  `test/multi-agent-contracts.test.ts`.
+
 - 2026-08-18 — `LocalReviewService` (`modules/reviews/local-review.ts`) builds
   its own `ReviewRepository` directly from `container.db`
   (`this.repo = new ReviewRepository(container.db)`), NOT via
@@ -37,6 +55,19 @@ Approaches and solutions that worked here and are worth reusing.
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
+
+- 2026-08-27 — `multiRunTotals` (`modules/multi-agent/estimates.ts`, T6, AC-22) applies TWO
+  DIFFERENT null-triggers, not one shared "any run incomplete" check: `total_duration_ms` goes
+  `null` the moment ANY run in the group is non-terminal (`queued`/`running`), regardless of
+  whether the terminal runs even have a `durationMs`; `total_cost_usd` only goes `null` when a
+  TERMINAL run specifically has `costUsd: null` — a still-running run's necessarily-null cost does
+  NOT by itself null the total (only if a run that's actually finished came back unpriced). The
+  status values compared here (`'queued' | 'running' | 'done' | 'failed' | 'cancelled'`) come from
+  `AgentColumn.status` in `vendor/shared/contracts/observability.ts`, not from this module's own
+  input type (`RunForTotals.status: string`, deliberately untyped so the function stays pure with
+  no contract import). Whoever wires the real repository data into this function (T9/T10) must
+  pass the exact same five-value status set, not a differently-cased or DB-column-named
+  equivalent, or the terminal/non-terminal split silently misclassifies every run.
 
 - 2026-08-20 — In `modules/project-context/service.ts`, a `context_attachments`
   row is NEVER by itself proof that `(repo_id, path)` is safe to read back out
@@ -509,6 +540,53 @@ Conventions and architectural decisions specific to this repo.
   bug. If it bites, widen `expected_output.start_line/end_line` on the case — do not
   loosen `modules/evals/scoring.ts::matchesExpectation`.
 
+- 2026-08-27 — T4's five new `ReviewRepository` multi-agent methods
+  (`run.repo.ts`) return raw/aggregated shapes, not the `observability.ts`
+  contracts — the mapping into `AgentColumn`/`AgentRunEstimate`/etc. is left
+  entirely to T9/T10's service layer. Concretely, for whoever consumes them
+  next: `runsForMultiRun(multiRunId)` returns `{run: AgentRunRow, agentName:
+  string | null}[]` (the full `agent_runs` row, including `groundingRejected`
+  and `status`) — pair it with `reviewRepo.reviewsWithFindingsForRunIds(runIds)`
+  (new in `review.repo.ts`, matched via `reviews.run_id`) to get each column's
+  findings; `recentCompletedRunStats(workspaceId, agentIds, limit)` returns
+  `Map<agentId, {durationMs, costUsd}[]>` — one entry per agent in the input
+  list, but the array can be SHORTER than `limit` (or absent from the map
+  entirely if the agent has zero completed runs ever) since it's built via
+  one `ORDER BY ran_at DESC LIMIT n` query per agent, not a window function
+  (drizzle-orm 0.38.3's `pg-core` has no per-partition `LIMIT` combinator —
+  same gap as the already-documented missing `union`); a caller computing an
+  average must handle both an empty array and a missing map key, not just
+  `?? 0`/`?? null` on the values inside. `latestCompletedSummaryForPull`
+  differs from that: it pre-seeds its returned `Map<agentId, string | null>`
+  with `null` for EVERY id in the input `agentIds` list before querying, so
+  every requested agent is guaranteed a key (never `undefined`) even when it
+  has no completed run on the PR at all.
+- 2026-08-27 — `latestMultiRunForPull(workspaceId, prId)` (`run.repo.ts`)
+  joins `multi_agent_runs` to `pull_requests` on `workspace_id` even though
+  `multi_agent_runs` already has its own `workspace_id` column — deliberate
+  defense-in-depth per the plan's own known-gotcha text (mirrors
+  `pull.repo.ts::getIntentDetail`'s join for `pr_intent`, which has no
+  `workspace_id` at all). Returns `undefined` (never throws) for a `prId` in
+  a foreign workspace — verified in `test/multi-agent-repository.it.test.ts`.
+
+- 2026-08-27 — To parameterize an `IN (...)` list of ids inside a raw
+  `db.execute(sql\`...\`)` template (drizzle-orm 0.38.3, postgres-js), use
+  `sql.join(ids.map((id) => sql\`${id}\`), sql\`, \`)` and interpolate the
+  result directly (`... agent_id IN (${idList}) ...`) — each id becomes its
+  own bound parameter, not one array parameter, so there's no dependency on
+  whether the driver auto-coerces a JS array into a Postgres array literal
+  for `= ANY(...)`. Used to collapse `recentCompletedRunStats`'s one-query-
+  per-agent `Promise.all` fan-out (`modules/reviews/repository/run.repo.ts`)
+  into a single `row_number() OVER (PARTITION BY agent_id ORDER BY ran_at
+  DESC)` windowed query — the same "no per-partition LIMIT combinator in this
+  drizzle-orm version" gap the 2026-08-27 entry below already documents, now
+  worked around with the window function instead of accepted as a fan-out.
+  When pre-seeding the returned `Map` with an entry per input id (so a
+  zero-result id still gets `[]` rather than being absent), do that BEFORE
+  running the query and only `.push()` into the existing array from each
+  result row — mirrors `latestCompletedSummaryForPull`'s pre-seed pattern
+  just below it in the same file.
+
 ## Session Notes
 
 Dated one-line records of sessions that changed something material.
@@ -557,3 +635,21 @@ Unresolved, worth investigating.
     remains the one still-open instance of this pattern (tracked separately
     on the onion-architecture skill's `db-confined-to-repositories` drift
     list).
+
+- 2026-08-27 — When a NEW module (T10's `modules/multi-agent/service.ts`)
+  needs the exact row shape another module's repository facade method
+  resolves to (e.g. `{review: ReviewRow, findings: FindingRow[]}` from
+  `ReviewRepository.reviewsWithFindingsForRunIds`), derive that local type
+  with `Awaited<ReturnType<Container['reviewRepo']['reviewsWithFindingsForRunIds']>>[number]`
+  rather than importing `ReviewRow`/`FindingRow`-shaped types from
+  `modules/reviews/repository.js` directly. Both compile identically, but the
+  `Container`-derived form keeps the new module's only real coupling to
+  `container.reviewRepo`/`container.reviews` (the facades it's already meant
+  to go through per the plan's "owns no table itself" note) instead of adding
+  a second, type-only edge straight into another module's internals — the
+  kind of edge `onion-architecture`'s dependency-cruiser gate would otherwise
+  flag as a new module→module drift item once `npm run depcruise` exists
+  (`server/insights/gotchas.md` 2026-08-07: the script doesn't exist yet, but
+  the rule the skill documents already does). Reusable for any future module
+  that needs to type a value it only ever gets back from a sibling module's
+  `container.*` facade call.

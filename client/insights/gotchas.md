@@ -229,6 +229,52 @@ Quirks of dependencies, tooling, and the local environment.
   ".tsx", ".js"] }` in `next.config.mjs`'s `webpack` hook — do not rewrite the shared
   package's import specifiers, the server runs the same files under tsx.
 
+- 2026-08-27 — **NEVER import an eval-case hook from the `@/lib/hooks` barrel** —
+  `src/lib/hooks/index.ts` re-exports `core`, `agents`, `reviews`, `trace`,
+  `repo-intel`, `skills`, `conventions`, `blast`, `brief`, `project-context`,
+  `onboarding`, `multi-agent`, but is MISSING `export * from "./evals"`
+  entirely. Every hook `evals.ts` defines (`useEvalCaseSeed`,
+  `useCreateEvalCaseFromFinding`, `useCreateEvalCase`, `useUpdateEvalCase`,
+  `useRunEvalCase`, `useDeleteEvalCase`, …) is `undefined` when imported via
+  `import { useCreateEvalCaseFromFinding } from "@/lib/hooks"` — confirmed
+  with a standalone `vitest` case asserting
+  `typeof barrel.useCreateEvalCaseFromFinding === "function"`, which fails
+  even with NO mocking involved (so this is not a mock-ordering artifact).
+  The failure only surfaces at runtime (`TypeError: X is not a function`
+  inside the component that calls the hook) — `tsc` does not catch it either,
+  since `evals.ts`'s own named exports are never re-exported so there is
+  nothing to type-check against. No existing app code hits this because every
+  current consumer already imports eval hooks from `@/lib/hooks/evals`
+  directly (grep `from "@/lib/hooks"` finds zero matches app-wide) — this is
+  a pre-existing latent bug in the barrel, not something introduced by a
+  particular task. Import eval hooks (and, to be safe, any hook) from its
+  OWN file under `lib/hooks/*`, never from the barrel, until `index.ts` gets
+  the missing line added.
+
+- 2026-08-27 — The `Severity` zod enum (`contracts/findings.ts`) is only
+  `['CRITICAL', 'WARNING', 'SUGGESTION']` — there is no `'INFO'` member,
+  despite `@devdigest/ui`'s `SEV`/`SEV_COLOR` token maps (and
+  `FindingCard/constants.ts`'s own `SEV_COLOR`) BOTH defining an `INFO` entry
+  with a colour and icon. Those UI-side maps exist for other severity-shaped
+  data in the app (e.g. generic status/log-level displays), not because
+  `Severity` itself has a fourth member. A hand-written `FindingRecord`/
+  `AgentColumnFinding` fixture using `severity: "INFO"` fails `tsc --noEmit`
+  with `Type '"INFO"' is not assignable to type '"CRITICAL" | "WARNING" |
+  "SUGGESTION"'` — use `"SUGGESTION"` (or `"WARNING"`) instead when a test
+  needs a low-severity finding.
+
+- 2026-08-27 — `@devdigest/ui`'s `Button` (`vendor/ui/primitives/Button.tsx`) spreads
+  unmatched props onto its native `<button>` via `{...rest}`, so under React 19's
+  ref-as-a-normal-prop behavior a `ref={someRef}` passed to `<Button>` actually DOES
+  attach to the underlying DOM button at runtime — but `ButtonProps` (`tokens.ts`)
+  extends `React.ButtonHTMLAttributes` without also declaring `ref`, so `tsc --noEmit`
+  rejects it: `Property 'ref' does not exist on type 'IntrinsicAttributes & ButtonProps'`.
+  Since `vendor/ui/**` is out of scope for a UI-feature task, don't try to widen
+  `ButtonProps` — put the ref on a native wrapping element instead (e.g. the `<span>`
+  already wrapping the trigger `Button` for a tooltip) and recover the actual button via
+  `wrapRef.current?.querySelector("button")?.focus()`. See
+  `RunReviewDropdown.tsx`'s `triggerWrapRef` (Escape-closes-popover focus return).
+
 ## Recurring Errors & Fixes
 
 Error message → cause → fix. Keep the literal error text so it is greppable.
