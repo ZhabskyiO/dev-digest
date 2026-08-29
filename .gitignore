@@ -26,3 +26,4 @@ test-results/
 
 # pr-self-review local state (per-dev, regenerated on every run)
 .pr-self-review.json
+.claude/settings.local.json

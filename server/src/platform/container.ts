@@ -7,6 +7,7 @@ import type {
   Embedder,
   LLMProvider,
   TicketProvider,
+  CiRunnerBundle,
 } from '@devdigest/shared';
 import type { AppConfig } from './config.js';
 import type { Db } from '../db/client.js';
@@ -37,6 +38,7 @@ import { ProjectContextService } from '../modules/project-context/service.js';
 import { ProjectContextRepository } from '../modules/project-context/repository.js';
 import { OnboardingService } from '../modules/onboarding/service.js';
 import { BlastService } from '../modules/blast/service.js';
+import { FsCiRunnerBundle } from '../adapters/ci-runner/fs.js';
 
 /**
  * DI container. One per app instance. Holds config, db, the JobRunner,
@@ -90,6 +92,9 @@ export interface ContainerOverrides {
    *  read-path test stays hermetic (no repo-intel index, no DB read for the
    *  blast map), mirroring `ContainerOverrides.onboarding`. */
   blast?: BlastService;
+  /** Export-to-CI (T8) — the agent-runner ncc bundle read from disk. Tests
+   *  inject `MockCiRunnerBundle` here instead of a real file. */
+  ciRunnerBundle?: CiRunnerBundle;
 }
 
 export class Container {
@@ -121,6 +126,7 @@ export class Container {
   private _projectContextRepo?: ProjectContextRepository;
   private _onboarding?: OnboardingService;
   private _blast?: BlastService;
+  private _ciRunnerBundle?: CiRunnerBundle;
 
   constructor(config: AppConfig, db: Db, private overrides: ContainerOverrides = {}) {
     this.config = config;
@@ -232,6 +238,18 @@ export class Container {
     if (this.overrides.tokenizer) return this.overrides.tokenizer;
     this._tokenizer ??= new TiktokenTokenizer();
     return this._tokenizer;
+  }
+
+  /**
+   * The agent-runner ncc bundle exported into a target repo's
+   * `.devdigest/runner/index.js` (Export-to-CI). Reads and caches the file at
+   * `config.runnerBundlePath` on first use — see `FsCiRunnerBundle`. Tests
+   * inject `MockCiRunnerBundle` via `ContainerOverrides.ciRunnerBundle`.
+   */
+  get ciRunnerBundle(): CiRunnerBundle {
+    if (this.overrides.ciRunnerBundle) return this.overrides.ciRunnerBundle;
+    this._ciRunnerBundle ??= new FsCiRunnerBundle(this.config.runnerBundlePath);
+    return this._ciRunnerBundle;
   }
 
   /**

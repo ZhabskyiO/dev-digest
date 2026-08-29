@@ -56,14 +56,24 @@ wanted() {
   return 1
 }
 
-# check <package-dir> <label> <command>
+# check <package-dir> <label> <command> [extra-node_modules-dir]
+#
+# The optional 4th arg names another package whose node_modules is also
+# required (e.g. agent-runner resolves reviewer-core as raw TS via tsconfig
+# path aliases — this repo is not a workspace, so TS needs it installed too).
 check() {
-  local pkg="$1" label="$2" cmd="$3"
+  local pkg="$1" label="$2" cmd="$3" extra="${4:-}"
   local name="$pkg · $label"
   local log="$LOGDIR/${pkg//\//_}-${label// /_}.log"
 
   if [ ! -d "$ROOT/$pkg/node_modules" ]; then
     SKIPPED+=("$name — no node_modules (run 'cd $pkg && pnpm install')")
+    printf '  ○ %-34s skipped (not installed)\n' "$name"
+    return
+  fi
+
+  if [ -n "$extra" ] && [ ! -d "$ROOT/$extra/node_modules" ]; then
+    SKIPPED+=("$name — no node_modules in $extra (run 'cd $extra && pnpm install'; $pkg resolves it as raw TS via tsconfig paths)")
     printf '  ○ %-34s skipped (not installed)\n' "$name"
     return
   fi
@@ -110,6 +120,17 @@ if wanted reviewer-core; then
   check reviewer-core "typecheck" "pnpm typecheck"
   check reviewer-core "unit" "pnpm exec vitest run --reporter=dot"
 fi
+
+# agent-runner is not a workspace member — its typecheck resolves reviewer-core
+# and @devdigest/shared as raw TS via tsconfig path aliases, so it also needs
+# reviewer-core/node_modules installed (not just its own).
+if wanted agent-runner; then
+  check agent-runner "typecheck" "pnpm typecheck" reviewer-core
+  check agent-runner "unit" "pnpm exec vitest run --reporter=dot"
+fi
+
+# ncc bundling (pnpm build) is slow — keep it out of the default gate, run with --it.
+[ $RUN_IT -eq 1 ] && wanted agent-runner && check agent-runner "bundle" "pnpm build"
 
 # No test suite of its own — the type-check is the gate.
 if wanted mcp-server; then

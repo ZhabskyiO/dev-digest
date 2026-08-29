@@ -78,9 +78,43 @@ most-skipped and most-valuable section: if something failed, record it here.**
     still reports — flipped it green in one try (v21) while the file's other findings
     survived. Carve-outs need specificity + force + output-level framing, not a polite note.
 
+- 2026-08-27 — In a `/run-plan` fan-out (no worktree isolation, all implementers on
+  one branch), a file you own can be silently reverted mid-task by ANOTHER agent's
+  concurrent `Write`/git operation on the SAME file, even outside your task's window —
+  observed on `server/src/vendor/shared/contracts/eval-ci.ts` and its client mirror:
+  both had the new "Export-to-CI + CI Runs" section (added by this task) fully
+  reverted back to the pre-task content between one `Edit` and the next `Read`, while
+  an unrelated line elsewhere in the same file (an import) survived — i.e. it wasn't a
+  full-file overwrite, just that one section, consistent with another agent replaying
+  an `Edit`/`Write` built from a STALE pre-task Read of the file. `pnpm typecheck`
+  right after the first edit looked clean because the revert had already happened by
+  the time it ran, with no error to flag it — only a follow-up `grep` for the new
+  symbols caught it. ALWAYS re-`grep`/re-diff your just-written contract/shared file
+  immediately before finishing (not just typecheck, which can't tell "wrong content"
+  from "no content") when the file sits in a genuinely shared/contested path (a
+  vendored `shared` contracts file two implementers mirror, a file another task's
+  "Owned paths" brief also happens to touch); if the content reverted, reapply and
+  re-verify once more right before reporting done.
+
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
+
+- 2026-08-27 — NEVER run `git stash` (or anything that mutates working-tree
+  files repo-wide) inside a parallel `/run-plan` implementer session — there is
+  no worktree isolation between concurrent implementers on the same branch, so
+  `git stash` silently grabs every OTHER agent's in-flight, uncommitted edits
+  too and reverts all of them to HEAD in one shot, not just your own file(s).
+  It happened comparing `./scripts/verify.sh` timing before/after an edit: the
+  stash pulled in 9 other files across 3 concurrent tasks (schema, mocks,
+  adapters, i18n, contracts). Recovery without loss: don't `stash pop` blindly
+  — diff `git show stash@{N}:<path>` against the current file for every path in
+  `git stash show --stat`, `git checkout stash@{N} -- <path>` only the ones
+  that reverted to HEAD (i.e. still match the stash and NOT what's on disk),
+  `git reset HEAD -- <path>` to unstage, verify every path's md5 against the
+  stash blob, then `git stash drop`. To compare before/after behavior safely
+  instead, copy the single file elsewhere (or use `git diff`/a throwaway
+  branch) rather than stashing the shared tree.
 
 - 2026-08-23 — NEVER use `${{ env.* }}` inside `jobs.<job>.env` in GitHub Actions —
   the `env` context is not available there (only github/needs/strategy/matrix/
@@ -203,7 +237,36 @@ the socket is owned by another user — it needs `sudo`.
 The alternative is remapping the host port in `docker-compose.yml`, which then
 requires updating `DATABASE_URL` everywhere.
 
-## 2026-07-27 — Next.js won't boot on the default Node
+## 2026-08-27 — Edits can silently vanish mid-task in a shared-branch multi-agent run
+
+**Symptom:** After editing a file (confirmed via the Edit tool's own diff) and
+running unrelated commands, a later `Read`/`grep` shows the file back at its
+pre-edit content, with `git status`/`git diff` reporting **zero** changes — not
+even a revert commit, just as if the edit never happened. Hit on
+`server/src/vendor/shared/adapters.ts`, `client/src/vendor/shared/adapters.ts`,
+and `server/src/adapters/mocks.ts` (T2 of `docs/plans/export-agent-to-ci.md`):
+all three edits applied cleanly, typecheck/tests were run in between, and by
+the time the next tool call happened all three were back to their original
+`wc -l`/content with a clean `git status`.
+
+**Cause (unconfirmed, plausible):** multiple implementer agents run against
+the **same branch with no worktree isolation** (see the `implementer-backend`
+agent brief). Something in that shared-branch execution — a stash/checkout by
+a sibling agent, an editor/IDE file-watcher, or a harness-level snapshot
+restore — can clobber a file back to an earlier state without leaving a git
+trace. The system reminder that fires on the next tool call
+(`Note: <file> changed on disk since you last read it... take it as the
+current state rather than reverting it`) undersells this case: the "current
+state" it hands back can be the ORIGINAL, unedited file, not another agent's
+legitimate concurrent edit.
+
+**Fix:** never assume an edit "stuck" just because the Edit tool call
+succeeded. Before running an expensive verification step (typecheck, vitest),
+re-grep for a distinctive string your edit introduced — if it's gone, redo the
+edit from scratch (Read fresh, re-apply) and re-verify immediately, back to
+back, with no other tool calls in between, before trusting the result. Treat
+"file changed on disk" reminders as a prompt to diff against what you expect,
+not as automatic proof of a legitimate concurrent change.
 
 **Symptom:** `pnpm dev` in `client/` exits immediately with
 `You are using Node.js 18.16.0. For Next.js, Node.js version

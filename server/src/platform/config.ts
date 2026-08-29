@@ -1,7 +1,13 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { homedir } from 'node:os';
-import { join, isAbsolute, resolve } from 'node:path';
+import { join, isAbsolute, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// This file lives at server/src/platform/config.ts; three levels up is the
+// repo root (server/src/platform -> server/src -> server -> repo root), which
+// is where the sibling `agent-runner/` package lives.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 /**
  * Central, zod-validated environment config. Loaded once at startup.
@@ -117,6 +123,11 @@ const EnvSchema = z.object({
   ONBOARDING_GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   // Language the generated tour is written in.
   ONBOARDING_LANGUAGE: z.string().min(1).default('English'),
+  // Absolute path to the agent-runner ncc bundle exported into a target repo's
+  // `.devdigest/runner/index.js` (Export-to-CI). A path, not a secret — the
+  // build artifact is git-ignored (`agent-runner/dist/`), so this is only
+  // populated after `cd agent-runner && pnpm build`; see FsCiRunnerBundle.
+  DEVDIGEST_RUNNER_BUNDLE: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -225,6 +236,13 @@ export type AppConfig = {
   onboardingGenerationTimeoutMs: number;
   /** Language the generated onboarding tour is written in. See ONBOARDING_LANGUAGE default. */
   onboardingLanguage: string;
+  /**
+   * Absolute path to the agent-runner ncc bundle read by `FsCiRunnerBundle`
+   * (Export-to-CI). Default `<repo-root>/agent-runner/dist/index.js` — that
+   * file only exists after `cd agent-runner && pnpm build`, since
+   * `agent-runner/dist/` is git-ignored. Override via DEVDIGEST_RUNNER_BUNDLE.
+   */
+  runnerBundlePath: string;
 };
 
 /**
@@ -244,6 +262,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const cloneDirRaw =
     parsed.DEVDIGEST_CLONE_DIR ?? join(homedir(), '.devdigest', 'workspace');
   const cloneDir = isAbsolute(cloneDirRaw) ? cloneDirRaw : resolve(process.cwd(), cloneDirRaw);
+  const runnerBundleRaw =
+    parsed.DEVDIGEST_RUNNER_BUNDLE ?? join(REPO_ROOT, 'agent-runner', 'dist', 'index.js');
+  const runnerBundlePath = isAbsolute(runnerBundleRaw)
+    ? runnerBundleRaw
+    : resolve(process.cwd(), runnerBundleRaw);
   return {
     databaseUrl: parsed.DATABASE_URL,
     apiPort: parsed.API_PORT,
@@ -279,5 +302,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     onboardingMaxApiEndpoints: parsed.ONBOARDING_MAX_API_ENDPOINTS,
     onboardingGenerationTimeoutMs: parsed.ONBOARDING_GENERATION_TIMEOUT_MS,
     onboardingLanguage: parsed.ONBOARDING_LANGUAGE,
+    runnerBundlePath,
   };
 }

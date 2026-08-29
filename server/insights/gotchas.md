@@ -211,9 +211,52 @@ most-skipped and most-valuable section: if something failed, record it here.**
   any future feature composing these two primitives needs the same `(N+1) ×
   timeoutMs < jobTimeoutMs` sizing, not `timeoutMs < jobTimeoutMs`.
 
+- 2026-08-27 — `ci_runs` (`db/schema/ci.ts`) carries NO `workspace_id` of its
+  own — the only route to a workspace is `ci_runs.ci_installation_id ->
+  ci_installations.agent_id -> agents.workspace_id`, and
+  `ci_installation_id` is `ON DELETE SET NULL` (deliberately, so a run whose
+  installation was deleted stays listed rather than vanishing — see the
+  `ci_runs_installation_ran_at_idx` gotcha in T9's task brief). The
+  consequence: once an installation is deleted, its runs' `ci_runs` rows
+  have **no** surviving attribution to any workspace at all. `CiRepository
+  .listRuns` (T9, `modules/ci/repository.ts`) scopes with `WHERE
+  agents.workspace_id = :workspaceId OR ci_installation_id IS NULL` to
+  satisfy "stays listed" — but that `OR … IS NULL` half means an orphaned
+  run becomes visible from **every** workspace's `/ci-runs` list, not just
+  the one that installed it. This is a genuine multi-tenant leak in a
+  real multi-workspace deployment; fixing it needs a `workspace_id` column
+  added directly to `ci_runs` (captured at `upsertRun` time, independent of
+  the FK), which is a schema change outside T9's owned paths. Flag before
+  building anything that assumes `/ci-runs` is workspace-isolated.
+
 ## Tool & Library Notes
 
 Quirks of dependencies, tooling, and the local environment.
+
+- 2026-08-27 — NEVER call `fflate.unzipSync(bytes)` with no `opts.filter` on an
+  attacker-adjacent zip and check the size of the RESULT — `unzipSync` fully
+  inflates every entry into memory before your code ever sees the returned
+  `Unzipped` map, so a `entries[name].byteLength > CAP` check after the call
+  (`adapters/github/octokit.ts::downloadRunArtifactFile`, pre-PR-gate finding)
+  is not a zip-bomb guard at all; a small crafted zip with one entry whose
+  declared size is huge can still OOM the process during the call itself. The
+  actual guard is `unzipSync(bytes, { filter: (f) => f.name === wanted &&
+  f.originalSize <= CAP })` — `filter` runs against each entry's *declared*
+  `originalSize`/`name` from the zip's central directory BEFORE `fflate`
+  inflates it, so a rejected entry is never decompressed. That still leaves
+  the COMPRESSED payload itself uncapped (a filter can't stop you handing a
+  20 MiB blob to `unzipSync` in the first place) — check `bytes.byteLength`
+  against a compressed-size ceiling before calling `unzipSync` at all, as a
+  second, independent guard.
+- 2026-08-27 — `noUncheckedIndexedAccess` (server's tsconfig) types the result
+  of `someValidatedString.split('/')` as `(string | undefined)[]`, so
+  `const [a, b] = repo.split('/')` gives `a`/`b` type `string | undefined`
+  even when a regex already guaranteed exactly one `/` in the string
+  (`REPO_SHAPE.test(repo)` in `modules/ci/service.ts`) — `tsc` cannot see that
+  guarantee through the regex test. Reuse the file's existing `parseRepo()`
+  helper (which does the same split via `indexOf`/`slice` and returns a typed
+  `RepoRef`) instead of destructuring `.split('/')` again inline; introducing
+  a second inline split is the reflex that trips this.
 
 - 2026-08-23 — NEVER assume a pgvector query returning zero rows after an
   embedding model change is a data/query bug. When the model changes, its
@@ -388,6 +431,26 @@ Quirks of dependencies, tooling, and the local environment.
   by the lowercase tiers typechecks fine and silently ranks everything equal
   (`?? 9`). ALWAYS type such tables `Record<Finding['severity'], number>` so a
   wrong key is a compile error (`brief/evidence.ts::SEVERITY_RANK`).
+
+- 2026-08-27 — A Fastify route body meant to be OPTIONAL (e.g. `POST
+  /ci-runs/refresh`'s `{ agent_id? }`, T13 `modules/ci/routes.ts`) must wrap
+  the WHOLE Zod object in `.optional()` (`z.object({...}).optional()`), not
+  just its one field — `apiFetch` (client) only sets a JSON content-type
+  header when a body is actually sent, so a body-less POST arrives with
+  `req.body === undefined` and no content-type at all. A schema that's an
+  object with only its inner field optional still requires an object at the
+  top level, and validating `undefined` against it fails with Fastify's own
+  "Body cannot be empty" error before the handler ever runs. `CiIngestService
+  .refresh`/`.list` (T11, `modules/ci/ingest.ts`) also construct their own
+  `CiRepository` from `container.db` unconditionally (no injectable/override
+  seam, per the 2026-08-27 `CiRepositoryLike` entry above) — so `GET
+  /ci-runs`/`POST /ci-runs/refresh` cannot be exercised by a hermetic,
+  no-DB `app.inject()` route test; only `POST /agents/:id/export-ci`'s
+  target-validation 4xx (thrown synchronously by `CiService` before any DB
+  call) could be proven that way for T13's acceptance test
+  (`modules/ci/routes.test.ts`). A future test of the `/ci-runs*` routes
+  needs the `.it.test.ts` suffix (testcontainers Postgres), not a plain
+  `MockAuthProvider`-only override.
 
 ## Recurring Errors & Fixes
 

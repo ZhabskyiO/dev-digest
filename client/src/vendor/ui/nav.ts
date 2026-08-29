@@ -36,6 +36,16 @@ export const NAV: NavGroup[] = [
       { key: "eval", label: "Eval Dashboard", icon: "Gauge", href: "/evals", gKey: "e" },
     ],
   },
+  {
+    // Matches the app-shell design's GLOBAL section (Memory / Multi-Agent
+    // Review / Agent Performance / CI Runs) — those three sibling items
+    // aren't built yet (no route/page exists for them), so only CI Runs is
+    // added here. `activeKeyFor` and `shell.json`'s `nav["ci-runs"]` already
+    // anticipate this route; see this task's report for why this group,
+    // not "SKILLS LAB", was used.
+    section: "GLOBAL",
+    items: [{ key: "ci-runs", label: "CI Runs", icon: "Workflow", href: "/ci-runs", gKey: "i" }],
+  },
 ];
 
 export const SETTINGS_ITEM: NavItemDef = {
@@ -68,6 +78,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { keys: "g s", label: "Go to Skills", group: "Navigation" },
   { keys: "g c", label: "Go to Conventions", group: "Navigation" },
   { keys: "g e", label: "Go to Eval Dashboard", group: "Navigation" },
+  { keys: "g i", label: "Go to CI Runs", group: "Navigation" },
   { keys: "j / k", label: "Next / previous finding", group: "Findings" },
   { keys: "a", label: "Accept finding", group: "Findings" },
   { keys: "d", label: "Dismiss finding", group: "Findings" },

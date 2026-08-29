@@ -33,6 +33,15 @@ fi
 ROOT="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 [ -z "$ROOT" ] && exit 0  # fail-open: cannot locate the repo
 
+# The repo needs Node >=22 (.nvmrc; fastify 5 needs >=19.9 or every app-building
+# suite fails at import with "diagnostics.tracingChannel is not a function").
+# Hooks inherit the terminal's default Node, so align with .nvmrc the way
+# scripts/verify.sh does — fail-open if nvm or the version is unavailable.
+if [ -s "$HOME/.nvm/nvm.sh" ] && [ -f "$ROOT/.nvmrc" ]; then
+  . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
+  nvm use "$(cat "$ROOT/.nvmrc")" >/dev/null 2>&1 || true
+fi
+
 # Staged files decide which package suites must be green.
 staged="$(cd "$ROOT" && git diff --cached --name-only 2>/dev/null)"
 [ -z "$staged" ] && staged="$(cd "$ROOT" && git diff --name-only HEAD 2>/dev/null)"  # commit -a

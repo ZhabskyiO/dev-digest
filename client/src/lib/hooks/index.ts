@@ -12,3 +12,5 @@ export * from "./blast";
 export * from "./brief";
 export * from "./project-context";
 export * from "./onboarding";
+export * from "./ci";
+export * from "./useDocumentVisible";
