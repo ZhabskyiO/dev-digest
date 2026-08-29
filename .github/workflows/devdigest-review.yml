@@ -27,7 +27,17 @@ jobs:
       - uses: actions/setup-node@v4.1.0
         with:
           node-version: "22"
+      - name: Check DevDigest is on the base branch
+        id: bootstrap
+        run: >-
+          if [ -f .devdigest/runner/index.js ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "DevDigest review skipped: .devdigest/ is not on the base branch yet. It activates once the install PR merges."
+          fi
       - name: Run DevDigest review
+        if: steps.bootstrap.outputs.present == 'true'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

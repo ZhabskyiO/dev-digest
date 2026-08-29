@@ -21096,7 +21096,7 @@ const CiPreview = objectType({
     repo: stringType(),
     files: arrayType(CiFile),
 });
-const CiRunStatus = enumType(['succeeded', 'failed', 'no_findings', 'running']);
+const CiRunStatus = enumType(['succeeded', 'failed', 'no_findings', 'running', 'skipped']);
 /** A CI run row (mirrors `ci_runs`) — ingested from GitHub Actions artifacts. */
 const CiRun = objectType({
     id: stringType(),
