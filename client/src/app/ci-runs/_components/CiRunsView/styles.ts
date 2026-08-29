@@ -10,14 +10,23 @@ export const s = {
   filtersRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 } satisfies CSSProperties,
   banner: {
     display: "flex",
-    alignItems: "center",
-    gap: 8,
+    flexDirection: "column",
+    gap: 4,
     padding: "10px 14px",
     borderRadius: 8,
     border: "1px solid var(--warn)",
     background: "var(--warn-bg)",
     color: "var(--warn)",
     fontSize: 13,
+  } satisfies CSSProperties,
+  bannerHeadline: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } satisfies CSSProperties,
+  bannerReason: {
+    fontSize: 12,
+    color: "var(--text-muted)",
   } satisfies CSSProperties,
   tableCard: {
     border: "1px solid var(--border)",

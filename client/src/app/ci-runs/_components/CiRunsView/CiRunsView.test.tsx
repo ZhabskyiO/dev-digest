@@ -29,6 +29,11 @@ vi.mock("@/lib/hooks/useDocumentVisible", () => ({
 }));
 
 const refreshMutate = vi.fn();
+let refreshResult: {
+  data: CiRunList | undefined;
+  isPending: boolean;
+  isError: boolean;
+} = { data: undefined, isPending: false, isError: false };
 let ciRunsResult: {
   data: CiRunList | undefined;
   isLoading: boolean;
@@ -38,7 +43,7 @@ let ciRunsResult: {
 };
 vi.mock("@/lib/hooks/ci", () => ({
   useCiRuns: () => ciRunsResult,
-  useRefreshCiRuns: () => ({ mutate: refreshMutate, isPending: false, isError: false }),
+  useRefreshCiRuns: () => ({ mutate: refreshMutate, ...refreshResult }),
 }));
 
 import { CiRunsView } from "./CiRunsView";
@@ -94,6 +99,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   searchParamsValue = "";
+  refreshResult = { data: undefined, isPending: false, isError: false };
 });
 
 describe("CiRunsView", () => {
@@ -133,7 +139,7 @@ describe("CiRunsView", () => {
     expect(screen.queryByText("Timestamp")).not.toBeInTheDocument();
   });
 
-  it("keeps previously fetched rows rendered and shows a refresh-failed indication when the response carries refresh_error (AC-45)", () => {
+  it("keeps previously fetched rows rendered and shows a refresh-failed indication plus the specific reason when the response carries refresh_error (AC-45)", () => {
     ciRunsResult = {
       data: { items: [SUCCEEDED_RUN], total: 1, refresh_error: "GitHub rate-limited the request" },
       isLoading: false,
@@ -145,6 +151,28 @@ describe("CiRunsView", () => {
 
     expect(screen.getByText("#42")).toBeInTheDocument();
     expect(screen.getByText(ciMessages.runs.refreshFailed)).toBeInTheDocument();
+    expect(screen.getByText(/GitHub rate-limited the request/)).toBeInTheDocument();
+  });
+
+  it("sources the reason from the refresh mutation's own response when GET /ci-runs carries no refresh_error (AC-45)", () => {
+    // Mirrors production: the plain GET /ci-runs list always returns
+    // `refresh_error: null` — only POST /ci-runs/refresh's response does.
+    ciRunsResult = {
+      data: { items: [SUCCEEDED_RUN], total: 1, refresh_error: null },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    refreshResult = {
+      data: { items: [SUCCEEDED_RUN], total: 1, refresh_error: "401 Bad credentials" },
+      isPending: false,
+      isError: false,
+    };
+    renderView();
+
+    expect(screen.getByText(ciMessages.runs.refreshFailed)).toBeInTheDocument();
+    expect(screen.getByText(/401 Bad credentials/)).toBeInTheDocument();
   });
 
   it("renders a running row with visible status text, not colour alone (AC-41)", () => {

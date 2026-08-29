@@ -8,6 +8,7 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshFailed": "Couldn't refresh from GitHub — showing the last known runs.",
+    "refreshFailedReasonLabel": "Reason:",
     "filters": {
       "last7Days": "Last 7 days",
       "allAgents": "All agents",

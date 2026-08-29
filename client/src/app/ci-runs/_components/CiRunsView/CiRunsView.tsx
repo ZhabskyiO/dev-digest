@@ -49,7 +49,12 @@ export function CiRunsView() {
   const repoOptions: FilterOption[] = (repos ?? []).map((r) => ({ value: r.full_name, label: r.full_name }));
 
   const items = data?.items ?? [];
-  const refreshFailed = data?.refresh_error != null || refresh.isError;
+  // `GET /ci-runs` (the `data` above) always returns `refresh_error: null` —
+  // only `POST /ci-runs/refresh`'s own response (`refresh.data`, sourced from
+  // the mutation, not clobbered by the subsequent cache-invalidated refetch)
+  // ever carries the real, server-sanitized reason (server/src/modules/ci/ingest.ts).
+  const refreshReason = data?.refresh_error ?? refresh.data?.refresh_error ?? null;
+  const refreshFailed = refreshReason != null || refresh.isError;
 
   return (
     <AppShell crumb={[{ label: t("page.crumb") }]}>
@@ -80,8 +85,15 @@ export function CiRunsView() {
 
         {refreshFailed && (
           <div role="alert" style={s.banner}>
-            <Icon.AlertTriangle size={15} />
-            <span>{t("runs.refreshFailed")}</span>
+            <div style={s.bannerHeadline}>
+              <Icon.AlertTriangle size={15} />
+              <span>{t("runs.refreshFailed")}</span>
+            </div>
+            {refreshReason && (
+              <span style={s.bannerReason}>
+                {t("runs.refreshFailedReasonLabel")} {refreshReason}
+              </span>
+            )}
           </div>
         )}
 
