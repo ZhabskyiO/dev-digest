@@ -11,6 +11,7 @@ import {
 import type { RunEvent } from '@devdigest/shared';
 import { getContext } from '../_shared/context.js';
 import { IdParams } from '../_shared/schemas.js';
+import { RUN_TRIGGER_RATE_LIMIT } from '../_shared/rate-limits.js';
 import { z } from 'zod';
 import { NotFoundError } from '../../platform/errors.js';
 import { ReviewService } from './service.js';
@@ -50,7 +51,7 @@ export default async function reviewsRoutes(appBase: FastifyInstance) {
   // Body stays a tolerant manual parse (both fields optional; empty body is OK).
   app.post(
     '/pulls/:id/review',
-    { schema: { params: IdParams }, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    { schema: { params: IdParams }, config: { rateLimit: RUN_TRIGGER_RATE_LIMIT } },
     async (req) => {
     const { workspaceId } = await getContext(container, req);
     const body = RunRequest.parse(req.body ?? {});

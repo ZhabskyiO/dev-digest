@@ -49,6 +49,31 @@ Approaches and solutions that worked here and are worth reusing.
   `qc.invalidateQueries({ queryKey: [...] })` directly against the exact
   instance the tree is wired to, simulating a refetch without a real mutation.
 
+- 2026-08-27 — To test a container that owns ONE real hook (e.g. the single
+  `useRunEvents` an SSE-composing page holds) while several SIBLING hooks on
+  the same data source must stay mocked, import each hook from its OWN file
+  (`@/lib/hooks/multi-agent`, `@/lib/hooks/reviews`) instead of the `@/lib/
+  hooks` barrel, then `vi.mock` only the specific files that need faking —
+  `vi.mock("@/lib/hooks/multi-agent", () => ({ useMultiAgentRun: () => ({...
+  }) }))` — and leave the real hook's own file completely unmocked. A single
+  `vi.mock("@/lib/hooks", ...)` (even with an `importOriginal` passthrough)
+  can't achieve this selectively for the barrel's own re-exports of the SAME
+  hook without special-casing it anyway, so per-file imports in the
+  component are what make the split test-mockable at all, not a test-only
+  trick. Combined with a minimal `class MockEventSource { onmessage = null;
+  addEventListener = vi.fn(); close = vi.fn(); }` assigned to
+  `global.EventSource` (client/insights/gotchas.md 2026-08-20's
+  `IntersectionObserver` pattern), this lets a single component test drive a
+  REAL `useRunEvents` subscription end-to-end — construct with `new
+  EventSource(url)`, grab the constructed instance, call
+  `instance.onmessage({data: JSON.stringify(runEvent)})` inside `act()` — and
+  see the event flow through an already-tested REAL child component (no
+  stubbing of `AgentColumns`/`AgentColumnCard` needed) to prove a parent-level
+  AC like "mid-run mount shows the live feed" without re-testing the child's
+  own internals. See
+  `multi-agent/_components/MultiAgentResults/MultiAgentResults.test.tsx`'s
+  AC-36 case.
+
 ## Codebase Patterns
 
 Conventions and architectural decisions specific to this repo.
@@ -218,6 +243,28 @@ Conventions and architectural decisions specific to this repo.
   `server/src/modules/project-context/service.ts`, not just the feature as a
   whole — the caps are per-endpoint, not per-resource.
 
+- 2026-08-27 — A value read out of a prop typed with a vendored zod-inferred
+  array type (e.g. `columns: AgentColumn[]`, so `column.findings: 
+  AgentColumnFinding[]`) does NOT carry the per-literal narrowing that makes
+  `AgentColumnFinding` "assignable to `FindingRecord`" (the claim in
+  `contracts/observability.ts`'s own comment, made for a hand-typed literal
+  using `satisfies AgentColumnFinding`). `category` is declared `z.string()`
+  on `AgentColumnFinding` specifically so a literal typed via `satisfies`
+  keeps its narrow value (e.g. `"security"`) instead of widening to `string`
+  — but once that literal is stored in (or simply typed as) an
+  `AgentColumnFinding[]`, TypeScript uses the DECLARED element type, which
+  has `category: string`, not the literal. Passing such an element straight
+  to `FindingCard`'s `f: FindingRecord` prop then fails `tsc` with "Types of
+  property 'category' are incompatible" even though the runtime value is
+  always a real `FindingCategory` member. Fix: an explicit `f={f as
+  FindingRecord}` cast at the `FindingCard` call site — confirmed this
+  specific cast direction compiles under this repo's `tsconfig.json`
+  (`f as FindingRecord` where `f: AgentColumnFinding`, no `as unknown as`
+  needed) via a scratch file checked with `pnpm exec tsc --noEmit -p
+  tsconfig.json`. See `multi-agent/_components/AgentTabs/AgentTabs.tsx`'s
+  `FindingCard` usage. Any other task rendering `AgentColumnFinding[]`
+  through `FindingCard` (or another `FindingRecord`-typed consumer) will hit
+  the identical error and needs the same cast.
 - 2026-08-21 — `BriefCard.tsx` has exactly ONE token-spending control (AC-43),
   held in a single `generateButton` node and rendered at ONE of three sites:
   the empty state (`Generate brief`, `mutate({ force: false })`), the stale
@@ -227,6 +274,79 @@ Conventions and architectural decisions specific to this repo.
   test asserts `getAllByRole('button', { name: /regenerate brief/i })` has
   length 1. `force` is what makes regeneration actually refresh: without
   `?force=true` the server returns the existing brief for the current head.
+
+- 2026-08-27 — `messages/en/shell.json`'s `nav.*` catalogue (`memory`,
+  `agent-performance`, `ci-runs`) and `app-shell/helpers.ts`'s `activeKeyFor`
+  (`/memory`, `/agent-performance`, `/ci-runs` prefixes) have carried entries
+  for a "GLOBAL" sidebar section since the initial commit, but
+  `client/src/vendor/ui/nav.ts`'s `NAV` array has never had a `GLOBAL` group or
+  those three items — confirmed via `git log -p` on `shell.json` (unchanged
+  since `6c415f1`) and `grep -rn "GLOBAL\|agent-performance\|ci-runs"
+  client/src` (only `helpers.ts`/`helpers.test.ts` hits, no `nav.ts`/page
+  hits, no `src/app/{memory,agent-performance,ci-runs}` route). Treat these as
+  reserved-but-unbuilt roadmap slots, not a wiring bug to "fix" incidentally —
+  T11 (multi-agent-review plan) added ONLY `nav.ts`'s new `GLOBAL` group with
+  the single `multi-agent` item (matching `docs/plans/multi-agent-review.md`'s
+  Rec-5 design screenshot, which shows Memory/Multi-Agent
+  Review/Agent-Performance/CI-Runs together under one `GLOBAL` header). A
+  future task building Memory, Agent Performance, or CI Runs should add its
+  own `NavGroup` item to that SAME `GLOBAL` section (between Memory's and
+  Agent Performance's eventual slots) rather than creating a second `GLOBAL`
+  group or assuming one doesn't exist yet.
+
+- 2026-08-27 — `docs/plans/multi-agent-review.md`'s two design screenshots for
+  T15's `AgentPicker` disagree with the ALREADY-COMMITTED catalogue text from
+  T3 in one place: the compact (dropdown) mockup shows a primary button
+  reading "Run multi-agent review (2)", but `messages/en/prReview.json`'s
+  `runReview.picker.run` is `"Run ({count})"`. The catalogue is the actual
+  acceptance source (AC-47 grades against it, not the mockup), so
+  `AgentPicker.tsx` renders the shorter catalogue string for `variant:
+  "compact"` and the mockup's fuller wording only for `variant: "full"`
+  (`page.configure.submit`, which DOES read "Run multi-agent review
+  ({count})" — that one matches). Separately, `runReview.picker.*` has no
+  cost key at all (only `estimate`/`estimateNone`, both duration-only) while
+  `page.configure.*` has both `estimateDuration` AND `estimateCost` — so the
+  compact variant's per-row estimate is duration-only and the aggregate
+  line (`aggregate`/`aggregateAtLeast`) is rendered ONLY for `variant:
+  "full"`, matching what the compact screenshot actually shows (no aggregate
+  text, just the button). A future T16/T17 implementer comparing the
+  rendered dropdown against the screenshot pixel-for-pixel will see a
+  shorter button label and no aggregate line — that is the catalogue
+  winning over the mockup, not a bug in `AgentPicker`.
+
+- 2026-08-27 — `@devdigest/ui`'s `Dropdown` (`vendor/ui/kit/Dropdown.tsx`) only
+  accepts a flat `items: DropdownItemDef[]` — it has no children/body slot, so
+  a trigger that must open an arbitrary React subtree (e.g. `AgentPicker`,
+  which isn't expressible as a list of `{label, icon, onClick}` rows) cannot
+  reuse it. T17's `RunReviewDropdown` (embeds `AgentPicker variant="compact"`)
+  inlines its own minimal popover instead: a `position: relative` root +
+  `position: absolute` panel, open state in `useState`, and a `mousedown`
+  document listener checking `containerRef.current.contains(e.target)` to
+  close on outside click — the exact mechanics `Dropdown` itself uses
+  internally, just without the `items` constraint. Reuse this pattern (not
+  `Dropdown`) for any future trigger that needs to render a real component as
+  its popover body, e.g. T18's PR-detail multi-agent surface if it needs a
+  similar quick-open picker.
+
+- 2026-08-27 — When a UI task's Owned paths do NOT include the `messages/en/*.json`
+  file that would naturally hold a needed label (e.g. it belongs to another task,
+  like T3's `runs.json` for T16's `_components/ConfigureRunView`), reuse an
+  existing string from a DIFFERENT already-loaded namespace via a second
+  `useTranslations(...)` call, rather than hardcoding text or editing the
+  out-of-scope catalogue file. `ConfigureRunView.tsx`'s step-2 heading calls
+  `useTranslations("settings")` for `autoReviews.agentsToRun` ("Agents to run")
+  because `runs.json`'s `page.configure.*` has no such key and `runs.json` is
+  T3's owned path, not T16's. Also reuse EXISTING keys already in an owned
+  namespace over newly-designed-but-unlisted ones from a mockup — `page.selectPr`
+  ("Select PR", pre-existing in `runs.json`) was used for the step-1 heading and
+  `page.configure.pickPr` ("Pick a pull request") for the `SearchableSelect`'s
+  placeholder, keeping both distinct from `page.configure.pickPrPlaceholder`
+  ("Pick a pull request first", the AC-1 empty-state title) — reusing the SAME
+  key for two of these would make them render identical text, which not only
+  looks wrong but breaks any RTL `getByText` assertion targeting one specific
+  occurrence (see `@devdigest/ui`'s `SearchableSelect.tsx:57`, whose closed-state
+  label falls back to its own `placeholder` prop — the same string then appears
+  a second place on the page if that prop reuses a heading's text).
 
 ## Session Notes
 
@@ -288,6 +408,16 @@ Unresolved, worth investigating.
   a "related links" affordance per section, `groundLinks()`'s existence check
   is not itself a scheme guard — that new render site will need its own
   http(s)-only check before treating `link.path` as an `href`.
+
+- 2026-08-26 — `messages/en/runs.json`'s top-level `conflicts.*` (`title`/`onlyConflicts`/`empty`/
+  `didNotFlag`) was already present, unused (`grep -rn 't("conflicts' src` finds zero consumers),
+  and near-duplicate of the multi-agent-review feature's new `page.disagree.*` added for T14's
+  `DisagreementBlock` (same English strings: "Where agents disagree", "Show only conflicts", "did
+  not flag"). Left both in place — T3's task scope was additive only, not cleanup — but a future
+  `DisagreementBlock` implementer scanning `runs.json` for an existing "disagree/conflicts" key
+  could easily wire up the wrong (dead) namespace by pattern-matching on name alone. Use
+  `page.disagree.*`, not the top-level `conflicts.*`, for any new consumer; the latter is dead
+  weight worth flagging for removal once nothing risks depending on it.
 
 - 2026-08-20 — `AttachmentList`'s "Attached documents" list (agent Context
   tab) is NOT scoped to the active repo — `attachedItems` is built from

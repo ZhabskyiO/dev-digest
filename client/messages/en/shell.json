@@ -25,7 +25,8 @@
     "memory": "Memory",
     "multi-agent": "Multi-Agent Review",
     "agent-performance": "Agent Performance",
-    "ci-runs": "CI Runs"
+    "ci-runs": "CI Runs",
+    "settings": "Settings"
   },
   "featurePlaceholder": {
     "defaultBody": "This screen is owned by {owner}. The app shell, routing, theming and data layer are wired — {owner} fills in the screen here."

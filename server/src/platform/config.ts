@@ -117,6 +117,12 @@ const EnvSchema = z.object({
   ONBOARDING_GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(45000),
   // Language the generated tour is written in.
   ONBOARDING_LANGUAGE: z.string().min(1).default('English'),
+
+  // D-2 — the run-executor fans queued agent runs out over a p-queue instead
+  // of executing them sequentially (AC-49). This is the concurrency cap, NOT
+  // an unbounded Promise.all — see run-executor.ts's PQueue usage. Default 4
+  // mirrors JobRunner's own default concurrency (platform/jobs.ts).
+  REVIEW_RUN_CONCURRENCY: z.coerce.number().int().positive().default(4),
 });
 
 export type AppConfig = {
@@ -225,6 +231,12 @@ export type AppConfig = {
   onboardingGenerationTimeoutMs: number;
   /** Language the generated onboarding tour is written in. See ONBOARDING_LANGUAGE default. */
   onboardingLanguage: string;
+  /**
+   * Bounded concurrency for the run-executor's per-agent fan-out (AC-49,
+   * D-2) — a `p-queue` concurrency cap, never `Infinity`. See
+   * REVIEW_RUN_CONCURRENCY default.
+   */
+  reviewRunConcurrency: number;
 };
 
 /**
@@ -279,5 +291,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     onboardingMaxApiEndpoints: parsed.ONBOARDING_MAX_API_ENDPOINTS,
     onboardingGenerationTimeoutMs: parsed.ONBOARDING_GENERATION_TIMEOUT_MS,
     onboardingLanguage: parsed.ONBOARDING_LANGUAGE,
+    reviewRunConcurrency: parsed.REVIEW_RUN_CONCURRENCY,
   };
 }

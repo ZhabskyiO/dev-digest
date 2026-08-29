@@ -9,13 +9,17 @@ export function NavItem({
   active,
   repoId,
   Link = DefaultLink,
+  navLabel,
 }: {
   item: NavItemDef;
   active?: boolean;
   repoId?: string | null;
   Link?: LinkLike;
+  /** Translate the item's label by key, falling back to `item.label`. */
+  navLabel?: (key: string, fallback: string) => string;
 }) {
   const I = Icon[item.icon];
+  const label = navLabel?.(item.key, item.label) ?? item.label;
   const [h, setH] = React.useState(false);
   return (
     <Link href={resolveHref(item.href, repoId)}>
@@ -51,7 +55,7 @@ export function NavItem({
           />
         )}
         <I size={16} style={{ color: active ? "var(--accent)" : "inherit" }} />
-        <span style={{ flex: 1 }}>{item.label}</span>
+        <span style={{ flex: 1 }}>{label}</span>
         {item.badge && (
           <span
             className="tnum"

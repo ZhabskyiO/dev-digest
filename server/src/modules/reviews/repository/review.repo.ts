@@ -73,6 +73,25 @@ export async function reviewsForPull(
   }));
 }
 
+/** Reviews for a set of `agent_runs` ids, each with its findings — the
+ *  multi-agent view's per-column data source (one review per run, joined
+ *  via `reviews.run_id`, which carries no FK to `agent_runs` on purpose —
+ *  see `run.repo.ts::deleteAgentRun`'s doc comment). */
+export async function reviewsWithFindingsForRunIds(
+  db: Db,
+  runIds: string[],
+): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
+  if (runIds.length === 0) return [];
+  const reviews = await db.select().from(t.reviews).where(inArray(t.reviews.runId, runIds));
+  if (reviews.length === 0) return [];
+  const ids = reviews.map((r) => r.id);
+  const findings = await db.select().from(t.findings).where(inArray(t.findings.reviewId, ids));
+  return reviews.map((review) => ({
+    review,
+    findings: findings.filter((f) => f.reviewId === review.id),
+  }));
+}
+
 export async function getReview(db: Db, reviewId: string): Promise<ReviewRow | undefined> {
   const [row] = await db.select().from(t.reviews).where(eq(t.reviews.id, reviewId));
   return row;

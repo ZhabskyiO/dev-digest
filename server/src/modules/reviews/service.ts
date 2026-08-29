@@ -114,12 +114,18 @@ export class ReviewService {
    * (= agent_runs.id) created up-front so the SSE route can be subscribed
    * before/while the run progresses. A partial failure in one agent does not
    * abort the others.
+   *
+   * `opts.multiRunId`, when given, links every spawned `agent_runs` row to
+   * the multi-agent run record AT CREATION (AC-17) — the multi-agent module
+   * (T10) passes this when it fans a single multi-run out across several
+   * agents, so no post-hoc UPDATE is needed to establish the link.
    */
   async runReview(
     workspaceId: string,
     prId: string,
     targets: AgentRow[],
     logger?: Logger,
+    opts?: { multiRunId?: string },
   ): Promise<{ runs: { run_id: string; agent_id: string; agent_name: string }[]; reviews: ReviewDto[] }> {
     const pull = await this.repo.getPull(workspaceId, prId);
     if (!pull) throw new NotFoundError('Pull request not found');
@@ -138,6 +144,7 @@ export class ReviewService {
         prId,
         provider: agent.provider,
         model: agent.model,
+        multiRunId: opts?.multiRunId,
       });
       runs.push({ run_id: runId, agent_id: agent.id, agent_name: agent.name });
       jobs.push({ agent, runId });

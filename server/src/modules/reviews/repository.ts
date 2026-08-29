@@ -24,6 +24,9 @@ import * as runRepo from './repository/run.repo.js';
 import * as pullRepo from './repository/pull.repo.js';
 import type { IntentRow, UpsertIntentInput } from './repository/pull.repo.js';
 export type { IntentRow, UpsertIntentInput };
+import type { AgentRunRow } from '../../db/rows.js';
+import type { GroundingRejection, MultiAgentRunRow } from './repository/run.repo.js';
+export type { GroundingRejection, MultiAgentRunRow };
 
 export class ReviewRepository {
   constructor(private db: Db) {}
@@ -77,6 +80,14 @@ export class ReviewRepository {
   /** Reviews for a PR (newest first), each with its findings. */
   reviewsForPull(prId: string): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
     return reviewRepo.reviewsForPull(this.db, prId);
+  }
+
+  /** Reviews for a set of `agent_runs` ids, each with its findings — the
+   *  multi-agent view's per-column data source. */
+  reviewsWithFindingsForRunIds(
+    runIds: string[],
+  ): Promise<{ review: ReviewRow; findings: FindingRow[] }[]> {
+    return reviewRepo.reviewsWithFindingsForRunIds(this.db, runIds);
   }
 
   getReview(reviewId: string): Promise<ReviewRow | undefined> {
@@ -173,6 +184,8 @@ export class ReviewRepository {
     prId: string;
     provider: string | null;
     model: string | null;
+    /** Links this run to the multi-agent run that spawned it, if any. */
+    multiRunId?: string | null;
   }): Promise<string> {
     return runRepo.createAgentRun(this.db, values);
   }
@@ -197,9 +210,59 @@ export class ReviewRepository {
        * not complete — the UI renders `—`, never `$0.00`.
        */
       costUsd?: number | null;
+      /** Findings that failed grounding — "did not flag" notes (AC-50). */
+      groundingRejected?: GroundingRejection[] | null;
     },
   ): Promise<void> {
     return runRepo.completeAgentRun(this.db, runId, values);
+  }
+
+  // ---- observability: multi_agent_runs -----------------------------------
+
+  /** Create a `multi_agent_runs` row; returns its id. */
+  createMultiAgentRun(values: { workspaceId: string; prId: string }): Promise<string> {
+    return runRepo.createMultiAgentRun(this.db, values);
+  }
+
+  /** Delete a `multi_agent_runs` row (compensating rollback if the fan-out
+   *  that should follow creating it throws before returning). Workspace-scoped. */
+  deleteMultiAgentRun(workspaceId: string, multiRunId: string): Promise<boolean> {
+    return runRepo.deleteMultiAgentRun(this.db, workspaceId, multiRunId);
+  }
+
+  /** Most recent multi-agent run for a PR, workspace-scoped (undefined for a
+   *  foreign workspace). */
+  latestMultiRunForPull(
+    workspaceId: string,
+    prId: string,
+  ): Promise<MultiAgentRunRow | undefined> {
+    return runRepo.latestMultiRunForPull(this.db, workspaceId, prId);
+  }
+
+  /** Every `agent_runs` row spawned by one multi-agent run, joined to its
+   *  agent's current name. */
+  runsForMultiRun(
+    multiRunId: string,
+  ): Promise<{ run: AgentRunRow; agentName: string | null }[]> {
+    return runRepo.runsForMultiRun(this.db, multiRunId);
+  }
+
+  /** Per-agent last `limit` completed runs' duration/cost, workspace-wide. */
+  recentCompletedRunStats(
+    workspaceId: string,
+    agentIds: string[],
+    limit: number,
+  ): Promise<Map<string, { durationMs: number | null; costUsd: number | null }[]>> {
+    return runRepo.recentCompletedRunStats(this.db, workspaceId, agentIds, limit);
+  }
+
+  /** Per-agent most recent completed run's review summary on this PR. */
+  latestCompletedSummaryForPull(
+    workspaceId: string,
+    prId: string,
+    agentIds: string[],
+  ): Promise<Map<string, string | null>> {
+    return runRepo.latestCompletedSummaryForPull(this.db, workspaceId, prId, agentIds);
   }
 
   /** Record the head SHA a review ran against (PR-list freshness derivation). */
