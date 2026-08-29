@@ -70,13 +70,15 @@ const CiRunsQuerystring = CiRunsQuery.extend({
   offset: z.coerce.number().int().min(0).optional(),
 });
 
-/** Body for `POST /ci-runs/refresh` — deliberately optional at the TOP level
+/** Body for `POST /ci-runs/refresh` — deliberately nullish at the TOP level
  *  (not just its one field): `apiFetch` only sets a JSON content-type when a
  *  body is actually sent, so a caller that POSTs with no payload arrives with
- *  `req.body === undefined` and no content-type at all. A required `body`
- *  schema would reject that as "Body cannot be empty"; `.optional()` here
- *  accepts both the no-body and the `{ agent_id }`-narrowed refresh call. */
-const RefreshBody = z.object({ agent_id: z.string().optional() }).optional();
+ *  `req.body === undefined` and no content-type at all, while a client that
+ *  sends `content-type: application/json` with a literal `null` body (curl
+ *  `-d null`, or a stringified absent payload) arrives as `req.body === null`.
+ *  `.nullish()` accepts no-body, null-body, and the `{ agent_id }`-narrowed
+ *  refresh call; a required `body` schema would reject the first two. */
+const RefreshBody = z.object({ agent_id: z.string().optional() }).nullish();
 
 export default async function ciRoutes(appBase: FastifyInstance) {
   const app = appBase.withTypeProvider<ZodTypeProvider>();

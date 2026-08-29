@@ -71,4 +71,21 @@ describe('ci routes (no DB)', () => {
 
     await app.close();
   });
+
+  it('POST /ci-runs/refresh accepts a literal null JSON body (curl -d null) as well as no body', async () => {
+    const app = await buildApp({ config, overrides: { auth: AUTH } });
+
+    const nullBody = await app.inject({
+      method: 'POST',
+      url: '/ci-runs/refresh',
+      headers: { 'content-type': 'application/json' },
+      payload: 'null',
+    });
+    expect(nullBody.statusCode).not.toBe(422);
+
+    const noBody = await app.inject({ method: 'POST', url: '/ci-runs/refresh' });
+    expect(noBody.statusCode).not.toBe(422);
+
+    await app.close();
+  });
 });
